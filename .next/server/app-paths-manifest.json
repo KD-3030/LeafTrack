@@ -1,6 +1,12 @@
 {
-  "/api/seed/route": "app/api/seed/route.js",
-  "/login/page": "app/login/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/auth/login/route": "app/api/auth/login/route.js",
   "/page": "app/page.js",
-  "/api/auth/login/route": "app/api/auth/login/route.js"
+  "/signup/page": "app/signup/page.js",
+  "/login/page": "app/login/page.js",
+  "/api/products/route": "app/api/products/route.js",
+  "/api/users/route": "app/api/users/route.js",
+  "/api/assignments/route": "app/api/assignments/route.js",
+  "/admin/dashboard/page": "app/admin/dashboard/page.js",
+  "/admin/products/page": "app/admin/products/page.js"
 }

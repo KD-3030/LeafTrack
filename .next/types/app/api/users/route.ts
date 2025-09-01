@@ -1,8 +1,8 @@
-// File: C:\Users\Allgamer999\Desktop\LeafTrack\app\api\seed\route.ts
-import * as entry from '../../../../../app/api/seed/route.js'
+// File: C:\Users\Allgamer999\Desktop\LeafTrack\app\api\users\route.ts
+import * as entry from '../../../../../app/api/users/route.js'
 import type { NextRequest } from 'next/server.js'
 
-type TEntry = typeof import('../../../../../app/api/seed/route.js')
+type TEntry = typeof import('../../../../../app/api/users/route.js')
 
 // Check that the entry is a valid entry
 checkFields<Diff<{
