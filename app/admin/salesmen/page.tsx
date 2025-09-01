@@ -8,94 +8,19 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Users, Package } from 'lucide-react';
+import { Users, Package, Edit, Trash2, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
-import { stockManager } from '@/lib/stockManager';
-
-// Mock data
-const mockSalesmen: User[] = [
-  {
-    id: '1',
-    email: 'jane@leaftrack.com',
-    name: 'Jane Smith',
-    role: 'Salesman',
-    created_at: '2024-01-15T10:00:00Z'
-  },
-  {
-    id: '2',
-    email: 'bob@leaftrack.com',
-    name: 'Bob Johnson',
-    role: 'Salesman',
-    created_at: '2024-01-20T14:30:00Z'
-  },
-  {
-    id: '3',
-    email: 'alice@leaftrack.com',
-    name: 'Alice Brown',
-    role: 'Salesman',
-    created_at: '2024-02-01T09:15:00Z'
-  }
-];
-
-const mockProducts: Product[] = [
-  {
-    id: '1',
-    name: 'Earl Grey Premium',
-    price: 2099,
-    stock_quantity: 150,
-    created_at: '2024-01-10T08:00:00Z'
-  },
-  {
-    id: '2',
-    name: 'Dragon Well Green',
-    price: 2750,
-    stock_quantity: 200,
-    created_at: '2024-01-12T10:30:00Z'
-  },
-  {
-    id: '3',
-    name: 'Chamomile Dreams',
-    price: 1575,
-    stock_quantity: 100,
-    created_at: '2024-01-15T14:20:00Z'
-  }
-];
-
-const mockAssignments: Assignment[] = [
-  {
-    id: '1',
-    salesman_id: '1',
-    product_id: '1',
-    quantity: 50,
-    created_at: '2024-01-16T09:00:00Z',
-    salesman: mockSalesmen[0],
-    product: mockProducts[0]
-  },
-  {
-    id: '2',
-    salesman_id: '1',
-    product_id: '2',
-    quantity: 30,
-    created_at: '2024-01-17T11:30:00Z',
-    salesman: mockSalesmen[0],
-    product: mockProducts[1]
-  },
-  {
-    id: '3',
-    salesman_id: '2',
-    product_id: '3',
-    quantity: 25,
-    created_at: '2024-01-18T15:45:00Z',
-    salesman: mockSalesmen[1],
-    product: mockProducts[2]
-  }
-];
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function SalesmenPage() {
+  const { user } = useAuth();
   const [salesmen, setSalesmen] = useState<User[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [selectedSalesman, setSelectedSalesman] = useState<User | null>(null);
+  const [editingSalesman, setEditingSalesman] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [newAssignment, setNewAssignment] = useState({
     product_id: '',
     quantity: '',
@@ -107,31 +32,39 @@ export default function SalesmenPage() {
     loadAssignments();
   }, []);
 
-  useEffect(() => {
-    // Subscribe to stock updates to refresh assignments
-    const unsubscribe = stockManager.subscribe(() => {
-      loadAssignments();
-    });
-
-    return unsubscribe;
-  }, []);
+  const getAuthToken = () => {
+    return localStorage.getItem('leaftrack_token');
+  };
 
   const loadSalesmen = async () => {
     try {
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 500));
-      setSalesmen(mockSalesmen);
+      setIsLoading(true);
+      const response = await fetch('/api/users');
+      const data = await response.json();
+      
+      if (data.success) {
+        // Filter only salesmen
+        const salesmenOnly = data.users.filter((user: User) => user.role === 'Salesman');
+        setSalesmen(salesmenOnly);
+      } else {
+        toast.error('Failed to load salesmen');
+      }
     } catch (error) {
       console.error('Error loading salesmen:', error);
       toast.error('Failed to load salesmen');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const loadProducts = async () => {
     try {
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 300));
-      setProducts(mockProducts);
+      const response = await fetch('/api/products');
+      const data = await response.json();
+      
+      if (data.success) {
+        setProducts(data.products);
+      }
     } catch (error) {
       console.error('Error loading products:', error);
     }
@@ -139,11 +72,78 @@ export default function SalesmenPage() {
 
   const loadAssignments = async () => {
     try {
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 400));
-      setAssignments(mockAssignments);
+      const response = await fetch('/api/assignments');
+      const data = await response.json();
+      
+      if (data.success) {
+        setAssignments(data.assignments);
+      }
     } catch (error) {
       console.error('Error loading assignments:', error);
+    }
+  };
+
+  const handleEditSalesman = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!editingSalesman) return;
+
+    try {
+      const token = getAuthToken();
+      const response = await fetch(`/api/users/${editingSalesman._id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: editingSalesman.name,
+          email: editingSalesman.email,
+          role: editingSalesman.role,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setSalesmen(prev => prev.map(s => 
+          s._id === editingSalesman._id ? data.user : s
+        ));
+        setEditingSalesman(null);
+        setIsEditDialogOpen(false);
+        toast.success('Salesman updated successfully');
+      } else {
+        toast.error(data.error || 'Failed to update salesman');
+      }
+    } catch (error) {
+      console.error('Error updating salesman:', error);
+      toast.error('Failed to update salesman');
+    }
+  };
+
+  const handleDeleteSalesman = async (salesmanId: string) => {
+    if (!confirm('Are you sure you want to delete this salesman? This action cannot be undone.')) return;
+
+    try {
+      const token = getAuthToken();
+      const response = await fetch(`/api/users/${salesmanId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setSalesmen(prev => prev.filter(s => s._id !== salesmanId));
+        toast.success('Salesman deleted successfully');
+      } else {
+        toast.error(data.error || 'Failed to delete salesman');
+      }
+    } catch (error) {
+      console.error('Error deleting salesman:', error);
+      toast.error('Failed to delete salesman');
     }
   };
 
@@ -156,27 +156,32 @@ export default function SalesmenPage() {
     }
 
     try {
-      // Find the selected product
-      const selectedProduct = products.find(p => p.id === newAssignment.product_id);
-      
-      // Create new assignment
-      const newAssignmentData: Assignment = {
-        id: (assignments.length + 1).toString(),
-        salesman_id: selectedSalesman.id,
-        product_id: newAssignment.product_id,
-        quantity: parseInt(newAssignment.quantity),
-        created_at: new Date().toISOString(),
-        salesman: selectedSalesman,
-        product: selectedProduct!
-      };
+      const token = getAuthToken();
+      const response = await fetch('/api/assignments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          salesman_id: selectedSalesman._id,
+          product_id: newAssignment.product_id,
+          quantity: parseInt(newAssignment.quantity),
+        }),
+      });
 
-      // Add to assignments
-      setAssignments([...assignments, newAssignmentData]);
-      
-      toast.success('Stock assigned successfully');
-      setNewAssignment({ product_id: '', quantity: '' });
-      setSelectedSalesman(null);
+      const data = await response.json();
+
+      if (data.success) {
+        setAssignments([data.assignment, ...assignments]);
+        toast.success('Stock assigned successfully');
+        setNewAssignment({ product_id: '', quantity: '' });
+        setSelectedSalesman(null);
+      } else {
+        toast.error(data.error || 'Failed to assign stock');
+      }
     } catch (error) {
+      console.error('Error assigning stock:', error);
       toast.error('Failed to assign stock');
     }
   };
@@ -186,11 +191,17 @@ export default function SalesmenPage() {
   };
 
   const getSalesmanSales = (salesmanId: string) => {
-    const stockUpdates = stockManager.getStockUpdates();
-    return stockUpdates
-      .filter(update => update.salesmanId === salesmanId)
-      .reduce((total, update) => total + update.quantitySold, 0);
+    // This would come from sales data when implemented
+    return 0;
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -219,10 +230,10 @@ export default function SalesmenPage() {
             ) : (
               <div className="space-y-3">
                 {salesmen.map((salesman) => {
-                  const salesmanAssignments = getSalesmanAssignments(salesman.id);
-                  const salesmanSales = getSalesmanSales(salesman.id);
+                  const salesmanAssignments = getSalesmanAssignments(salesman._id || salesman.id);
+                  const salesmanSales = getSalesmanSales(salesman._id || salesman.id);
                   return (
-                    <div key={salesman.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
+                    <div key={salesman._id || salesman.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
                       <div>
                         <h4 className="font-medium text-gray-900">{salesman.name}</h4>
                         <p className="text-sm text-gray-600">{salesman.email}</p>
@@ -236,63 +247,89 @@ export default function SalesmenPage() {
                         </div>
                       </div>
                       
-                      <Dialog>
-                        <DialogTrigger asChild>
-                          <Button
-                            size="sm"
-                            onClick={() => setSelectedSalesman(salesman)}
-                            className="bg-green-600 hover:bg-green-700"
-                          >
-                            <Package className="h-4 w-4 mr-1" />
-                            Assign Stock
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                          <DialogHeader>
-                            <DialogTitle>Assign Stock to {salesman.name}</DialogTitle>
-                            <DialogDescription>
-                              Select a product and quantity to assign to this salesman.
-                            </DialogDescription>
-                          </DialogHeader>
-                          <form onSubmit={handleAssignStock} className="space-y-4">
-                            <div className="space-y-2">
-                              <Label htmlFor="product">Product</Label>
-                              <Select
-                                value={newAssignment.product_id}
-                                onValueChange={(value) => setNewAssignment({ ...newAssignment, product_id: value })}
-                                required
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select a product" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {products.map((product) => (
-                                    <SelectItem key={product.id} value={product.id}>
-                                      {product.name} (Stock: {product.total_stock})
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            
-                            <div className="space-y-2">
-                              <Label htmlFor="quantity">Quantity</Label>
-                              <Input
-                                id="quantity"
-                                type="number"
-                                value={newAssignment.quantity}
-                                onChange={(e) => setNewAssignment({ ...newAssignment, quantity: e.target.value })}
-                                placeholder="Enter quantity"
-                                required
-                              />
-                            </div>
-                            
-                            <Button type="submit" className="w-full bg-green-600 hover:bg-green-700">
-                              Assign Stock
+                      <div className="flex space-x-2">
+                        {/* Edit Button */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setEditingSalesman(salesman);
+                            setIsEditDialogOpen(true);
+                          }}
+                          className="text-blue-600 hover:text-blue-700"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+
+                        {/* Assign Stock Button */}
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button
+                              size="sm"
+                              onClick={() => setSelectedSalesman(salesman)}
+                              className="bg-green-600 hover:bg-green-700"
+                            >
+                              <Package className="h-4 w-4 mr-1" />
+                              Assign
                             </Button>
-                          </form>
-                        </DialogContent>
-                      </Dialog>
+                          </DialogTrigger>
+                          <DialogContent>
+                            <DialogHeader>
+                              <DialogTitle>Assign Stock to {salesman.name}</DialogTitle>
+                              <DialogDescription>
+                                Select a product and quantity to assign to this salesman.
+                              </DialogDescription>
+                            </DialogHeader>
+                            <form onSubmit={handleAssignStock} className="space-y-4">
+                              <div className="space-y-2">
+                                <Label htmlFor="product">Product</Label>
+                                <Select
+                                  value={newAssignment.product_id}
+                                  onValueChange={(value) => setNewAssignment({ ...newAssignment, product_id: value })}
+                                  required
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Select a product" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {products.map((product) => (
+                                      <SelectItem key={product._id || product.id} value={product._id || product.id}>
+                                        {product.name} (Stock: {product.stock_quantity})
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              
+                              <div className="space-y-2">
+                                <Label htmlFor="quantity">Quantity</Label>
+                                <Input
+                                  id="quantity"
+                                  type="number"
+                                  value={newAssignment.quantity}
+                                  onChange={(e) => setNewAssignment({ ...newAssignment, quantity: e.target.value })}
+                                  placeholder="Enter quantity"
+                                  required
+                                />
+                              </div>
+                              
+                              <Button type="submit" className="w-full bg-green-600 hover:bg-green-700">
+                                Assign Stock
+                              </Button>
+                            </form>
+                          </DialogContent>
+                        </Dialog>
+
+                        {/* Delete Button */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDeleteSalesman(salesman._id || salesman.id)}
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   );
                 })}
@@ -320,7 +357,7 @@ export default function SalesmenPage() {
             ) : (
               <div className="space-y-3">
                 {assignments.slice(0, 10).map((assignment) => (
-                  <div key={assignment.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
+                  <div key={assignment._id || assignment.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
                     <div>
                       <h4 className="font-medium text-gray-900">{assignment.salesman?.name}</h4>
                       <p className="text-sm text-gray-600">{assignment.product?.name}</p>
@@ -338,6 +375,75 @@ export default function SalesmenPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Edit Salesman Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center space-x-2">
+              <Edit className="h-5 w-5 text-blue-600" />
+              <span>Edit Salesman</span>
+            </DialogTitle>
+            <DialogDescription>
+              Update the salesman information.
+            </DialogDescription>
+          </DialogHeader>
+          {editingSalesman && (
+            <form onSubmit={handleEditSalesman} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="editName">Name</Label>
+                <Input
+                  id="editName"
+                  value={editingSalesman.name}
+                  onChange={(e) => setEditingSalesman({ ...editingSalesman, name: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="editEmail">Email</Label>
+                <Input
+                  id="editEmail"
+                  type="email"
+                  value={editingSalesman.email}
+                  onChange={(e) => setEditingSalesman({ ...editingSalesman, email: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="editRole">Role</Label>
+                <Select
+                  value={editingSalesman.role}
+                  onValueChange={(value: 'Admin' | 'Salesman') => setEditingSalesman({ ...editingSalesman, role: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Salesman">Salesman</SelectItem>
+                    <SelectItem value="Admin">Admin</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex space-x-2">
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={() => setIsEditDialogOpen(false)}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700">
+                  Update Salesman
+                </Button>
+              </div>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

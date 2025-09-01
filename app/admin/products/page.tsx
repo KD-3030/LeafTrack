@@ -72,7 +72,11 @@ export default function ProductsPage() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify(newProduct),
+        body: JSON.stringify({
+          name: newProduct.name,
+          price: parseFloat(newProduct.price),
+          stock_quantity: parseInt(newProduct.stock_quantity),
+        }),
       });
 
       const data = await response.json();
@@ -114,7 +118,7 @@ export default function ProductsPage() {
       const data = await response.json();
 
       if (data.success) {
-        setProducts(products.map(p => 
+        setProducts(prev => prev.map(p => 
           p._id === editingProduct._id ? data.product : p
         ));
         setEditingProduct(null);
@@ -126,6 +130,45 @@ export default function ProductsPage() {
     } catch (error) {
       console.error('Error updating product:', error);
       toast.error('Failed to update product');
+    }
+  };
+
+  const handleAddStock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!addStockProduct || !additionalStock) return;
+
+    try {
+      const token = getAuthToken();
+      const response = await fetch(`/api/products/${addStockProduct._id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: addStockProduct.name,
+          price: addStockProduct.price,
+          stock_quantity: addStockProduct.stock_quantity + parseInt(additionalStock),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setProducts(prev => prev.map(p => 
+          p._id === addStockProduct._id ? data.product : p
+        ));
+        setAdditionalStock('');
+        setAddStockProduct(null);
+        setIsAddStockDialogOpen(false);
+        toast.success('Stock added successfully');
+      } else {
+        toast.error(data.error || 'Failed to add stock');
+      }
+    } catch (error) {
+      console.error('Error adding stock:', error);
+      toast.error('Failed to add stock');
     }
   };
 
@@ -144,423 +187,13 @@ export default function ProductsPage() {
       const data = await response.json();
 
       if (data.success) {
-        setProducts(products.filter(p => p._id !== productId));
+        setProducts(prev => prev.filter(p => p._id !== productId));
         toast.success('Product deleted successfully');
       } else {
         toast.error(data.error || 'Failed to delete product');
       }
     } catch (error) {
       console.error('Error deleting product:', error);
-      toast.error('Failed to delete product');
-    }
-  };
-
-  const handleAddStock = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!addStockProduct || !additionalStock) return;
-
-    try {
-      const token = getAuthToken();
-      const newStockQuantity = addStockProduct.stock_quantity + parseInt(additionalStock);
-      
-      const response = await fetch(`/api/products/${addStockProduct._id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          name: addStockProduct.name,
-          price: addStockProduct.price,
-          stock_quantity: newStockQuantity,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setProducts(products.map(p => 
-          p._id === addStockProduct._id ? data.product : p
-        ));
-        setAddStockProduct(null);
-        setAdditionalStock('');
-        setIsAddStockDialogOpen(false);
-        toast.success(`Added ${additionalStock} units to stock`);
-      } else {
-        toast.error(data.error || 'Failed to add stock');
-      }
-    } catch (error) {
-      console.error('Error adding stock:', error);
-      toast.error('Failed to add stock');
-    }
-  };
-
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-    }).format(price);
-  };
-
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Products</h1>
-          <p className="text-gray-600 mt-2">Loading products...</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Products</h1>
-          <p className="text-gray-600 mt-2">Manage your tea leaf inventory</p>
-        </div>
-        
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="bg-green-600 hover:bg-green-700">
-              <Plus className="h-4 w-4 mr-2" />
-              Add Product
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add New Product</DialogTitle>
-              <DialogDescription>
-                Add a new tea product to your inventory.
-              </DialogDescription>
-            </DialogHeader>
-            <form onSubmit={handleAddProduct} className="space-y-4">
-              <div>
-                <Label htmlFor="name">Product Name</Label>
-                <Input
-                  id="name"
-                  value={newProduct.name}
-                  onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
-                  placeholder="e.g., Earl Grey Premium"
-                />
-              </div>
-              <div>
-                <Label htmlFor="price">Price (₹)</Label>
-                <Input
-                  id="price"
-                  type="number"
-                  step="0.01"
-                  value={newProduct.price}
-                  onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })}
-                  placeholder="e.g., 25.99"
-                />
-              </div>
-              <div>
-                <Label htmlFor="stock">Initial Stock</Label>
-                <Input
-                  id="stock"
-                  type="number"
-                  value={newProduct.stock_quantity}
-                  onChange={(e) => setNewProduct({ ...newProduct, stock_quantity: e.target.value })}
-                  placeholder="e.g., 100"
-                />
-              </div>
-              <div className="flex justify-end space-x-2">
-                <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" className="bg-green-600 hover:bg-green-700">
-                  Add Product
-                </Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center">
-            <Package className="h-5 w-5 mr-2" />
-            Products Inventory
-          </CardTitle>
-          <CardDescription>
-            Current tea products in your inventory system
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {products.length === 0 ? (
-            <div className="text-center py-8">
-              <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No products found</h3>
-              <p className="text-gray-600 mb-4">Get started by adding your first tea product.</p>
-              <Button onClick={() => setIsDialogOpen(true)} className="bg-green-600 hover:bg-green-700">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Product
-              </Button>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Product Name</TableHead>
-                  <TableHead>Price</TableHead>
-                  <TableHead>Stock</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {products.map((product) => (
-                  <TableRow key={product._id}>
-                    <TableCell className="font-medium">{product.name}</TableCell>
-                    <TableCell>{formatPrice(product.price)}</TableCell>
-                    <TableCell>
-                      <span className={`font-medium ${
-                        product.stock_quantity < 50 ? 'text-red-600' : 
-                        product.stock_quantity < 100 ? 'text-yellow-600' : 'text-green-600'
-                      }`}>
-                        {product.stock_quantity} units
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        product.stock_quantity === 0 ? 'bg-red-100 text-red-800' :
-                        product.stock_quantity < 50 ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-green-100 text-green-800'
-                      }`}>
-                        {product.stock_quantity === 0 ? 'Out of Stock' :
-                         product.stock_quantity < 50 ? 'Low Stock' : 'In Stock'}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex space-x-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setEditingProduct(product);
-                            setIsEditDialogOpen(true);
-                          }}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setAddStockProduct(product);
-                            setIsAddStockDialogOpen(true);
-                          }}
-                        >
-                          <Plus className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDeleteProduct(product._id)}
-                          className="text-red-600 hover:text-red-700"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Edit Product Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Product</DialogTitle>
-            <DialogDescription>
-              Update the product details.
-            </DialogDescription>
-          </DialogHeader>
-          {editingProduct && (
-            <form onSubmit={handleEditProduct} className="space-y-4">
-              <div>
-                <Label htmlFor="edit-name">Product Name</Label>
-                <Input
-                  id="edit-name"
-                  value={editingProduct.name}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="edit-price">Price (₹)</Label>
-                <Input
-                  id="edit-price"
-                  type="number"
-                  step="0.01"
-                  value={editingProduct.price}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, price: parseFloat(e.target.value) })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="edit-stock">Stock Quantity</Label>
-                <Input
-                  id="edit-stock"
-                  type="number"
-                  value={editingProduct.stock_quantity}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, stock_quantity: parseInt(e.target.value) })}
-                />
-              </div>
-              <div className="flex justify-end space-x-2">
-                <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" className="bg-green-600 hover:bg-green-700">
-                  Update Product
-                </Button>
-              </div>
-            </form>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Stock Dialog */}
-      <Dialog open={isAddStockDialogOpen} onOpenChange={setIsAddStockDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add Stock</DialogTitle>
-            <DialogDescription>
-              Add additional stock to {addStockProduct?.name}.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleAddStock} className="space-y-4">
-            <div>
-              <Label htmlFor="additional-stock">Additional Stock</Label>
-              <Input
-                id="additional-stock"
-                type="number"
-                value={additionalStock}
-                onChange={(e) => setAdditionalStock(e.target.value)}
-                placeholder="e.g., 50"
-              />
-            </div>
-            <div className="text-sm text-gray-600">
-              Current stock: {addStockProduct?.stock_quantity} units
-            </div>
-            <div className="flex justify-end space-x-2">
-              <Button type="button" variant="outline" onClick={() => setIsAddStockDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" className="bg-green-600 hover:bg-green-700">
-                Add Stock
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
-  const handleAddProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!newProduct.name || !newProduct.price || !newProduct.stock_quantity) {
-      toast.error('Please fill in all fields');
-      return;
-    }
-
-    try {
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      const newProductData: Product = {
-        id: Date.now().toString(),
-        name: newProduct.name,
-        price: parseFloat(newProduct.price),
-        stock_quantity: parseInt(newProduct.stock_quantity),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-
-      setProducts(prev => [...prev, newProductData]);
-      toast.success('Product added successfully');
-      setNewProduct({ name: '', price: '', stock_quantity: '' });
-      setIsDialogOpen(false);
-    } catch (error) {
-      toast.error('Failed to add product');
-    }
-  };
-
-  const handleEditProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!editingProduct) return;
-
-    try {
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      const updatedProduct = {
-        ...editingProduct,
-        updated_at: new Date().toISOString()
-      };
-
-      setProducts(prev => prev.map(p => p.id === editingProduct.id ? updatedProduct : p));
-      toast.success('Product updated successfully');
-      setEditingProduct(null);
-      setIsEditDialogOpen(false);
-    } catch (error) {
-      toast.error('Failed to update product');
-    }
-  };
-
-  const handleAddStock = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!addStockProduct || !additionalStock) {
-      toast.error('Please enter stock quantity');
-      return;
-    }
-
-    const stockToAdd = parseInt(additionalStock);
-    if (stockToAdd <= 0) {
-      toast.error('Stock quantity must be greater than 0');
-      return;
-    }
-
-    try {
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      const updatedProduct = {
-        ...addStockProduct,
-        stock_quantity: addStockProduct.stock_quantity + stockToAdd,
-        updated_at: new Date().toISOString()
-      };
-
-      setProducts(prev => prev.map(p => p.id === addStockProduct.id ? updatedProduct : p));
-      toast.success(`Added ${stockToAdd} units to ${addStockProduct.name}`);
-      setAdditionalStock('');
-      setAddStockProduct(null);
-      setIsAddStockDialogOpen(false);
-    } catch (error) {
-      toast.error('Failed to add stock');
-    }
-  };
-
-  const handleDeleteProduct = async (productId: string) => {
-    if (!confirm('Are you sure you want to delete this product?')) return;
-
-    try {
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      setProducts(prev => prev.filter(p => p.id !== productId));
-      toast.success('Product deleted successfully');
-    } catch (error) {
       toast.error('Failed to delete product');
     }
   };
@@ -609,7 +242,7 @@ export default function ProductsPage() {
                   required
                 />
               </div>
-              
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="price" className="flex items-center space-x-1">
@@ -626,7 +259,7 @@ export default function ProductsPage() {
                     required
                   />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="stock">Initial Stock</Label>
                   <Input
@@ -639,7 +272,7 @@ export default function ProductsPage() {
                   />
                 </div>
               </div>
-              
+
               <Button type="submit" className="w-full bg-green-600 hover:bg-green-700">
                 Add Product
               </Button>
@@ -658,7 +291,7 @@ export default function ProductsPage() {
             <div className="text-2xl font-bold text-gray-900">{products.length}</div>
           </CardContent>
         </Card>
-        
+
         <Card className="border-l-4 border-l-blue-500">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-gray-600">Total Stock</CardTitle>
@@ -669,7 +302,7 @@ export default function ProductsPage() {
             </div>
           </CardContent>
         </Card>
-        
+
         <Card className="border-l-4 border-l-purple-500">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-gray-600">Avg. Price</CardTitle>
@@ -718,7 +351,7 @@ export default function ProductsPage() {
                 </TableHeader>
                 <TableBody>
                   {products.map((product) => (
-                    <TableRow key={product.id} className="hover:bg-gray-50">
+                    <TableRow key={product._id} className="hover:bg-gray-50">
                       <TableCell className="font-medium">{product.name}</TableCell>
                       <TableCell className="flex items-center">
                         <IndianRupee className="h-4 w-4 mr-1" />
@@ -763,7 +396,7 @@ export default function ProductsPage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => handleDeleteProduct(product.id)}
+                            onClick={() => handleDeleteProduct(product._id)}
                             className="text-red-600 hover:text-red-700"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -802,7 +435,7 @@ export default function ProductsPage() {
                   required
                 />
               </div>
-              
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="editPrice" className="flex items-center space-x-1">
@@ -818,7 +451,7 @@ export default function ProductsPage() {
                     required
                   />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="editStock">Stock Quantity</Label>
                   <Input
@@ -830,7 +463,7 @@ export default function ProductsPage() {
                   />
                 </div>
               </div>
-              
+
               <Button type="submit" className="w-full bg-green-600 hover:bg-green-700">
                 Update Product
               </Button>
@@ -855,7 +488,7 @@ export default function ProductsPage() {
             <div className="bg-gray-50 p-4 rounded-lg">
               <p className="text-sm text-gray-600">Current Stock: <span className="font-medium">{addStockProduct?.stock_quantity}</span></p>
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="additionalStock">Additional Stock Quantity</Label>
               <Input
@@ -868,7 +501,7 @@ export default function ProductsPage() {
                 required
               />
             </div>
-            
+
             <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">
               Add Stock
             </Button>

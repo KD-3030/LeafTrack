@@ -1,9 +1,11 @@
 export interface User {
   id: string;
+  _id?: string;
   name: string;
   email: string;
   role: 'Admin' | 'Salesman';
   created_at: string;
+  updated_at?: string;
 }
 
 export interface Category {
