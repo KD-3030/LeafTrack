@@ -1,0 +1,85 @@
+import { NextRequest, NextResponse } from 'next/server';
+import connectDB from '@/lib/mongodb';
+import Assignment from '@/models/Assignment';
+import { verifyToken } from '@/lib/auth';
+
+export async function GET(request: NextRequest) {
+  try {
+    await connectDB();
+    
+    const assignments = await Assignment.find({})
+      .populate('salesman_id', 'name email')
+      .populate('product_id', 'name price')
+      .sort({ createdAt: -1 });
+    
+    return NextResponse.json({
+      success: true,
+      assignments,
+    });
+
+  } catch (error) {
+    console.error('Get assignments error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    await connectDB();
+    
+    // Verify admin token
+    const authHeader = request.headers.get('authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
+    const token = authHeader.substring(7);
+    const decoded = verifyToken(token);
+    
+    if (!decoded || decoded.role !== 'Admin') {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
+    const { salesman_id, product_id, quantity } = await request.json();
+
+    // Validate input
+    if (!salesman_id || !product_id || !quantity) {
+      return NextResponse.json(
+        { error: 'All fields are required' },
+        { status: 400 }
+      );
+    }
+
+    // Create assignment
+    const assignment = await Assignment.create({
+      salesman_id,
+      product_id,
+      quantity: parseInt(quantity),
+    });
+
+    const populatedAssignment = await Assignment.findById(assignment._id)
+      .populate('salesman_id', 'name email')
+      .populate('product_id', 'name price');
+
+    return NextResponse.json({
+      success: true,
+      assignment: populatedAssignment,
+    });
+
+  } catch (error) {
+    console.error('Create assignment error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
