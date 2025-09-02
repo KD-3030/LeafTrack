@@ -8,8 +8,28 @@ export async function GET(request: NextRequest) {
   try {
     await connectDB();
     
+    // Get auth token to identify the user
+    const authHeader = request.headers.get('authorization');
+    let userFilter = {};
+    
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.substring(7);
+        const decoded = verifyToken(token);
+        
+        // If user is a salesman, filter assignments for that salesman only
+        if (decoded && decoded.role === 'Salesman') {
+          userFilter = { salesman_id: decoded.userId };
+        }
+        // Admin can see all assignments (no filter)
+      } catch (error) {
+        // If token is invalid, continue without filtering (for backwards compatibility)
+        console.warn('Invalid token in assignments request:', error);
+      }
+    }
+    
     const AssignmentModel = Assignment as Model<IAssignment>;
-    const assignments = await AssignmentModel.find({})
+    const assignments = await AssignmentModel.find(userFilter)
       .populate('salesman_id', 'name email')
       .populate('product_id', 'name price')
       .sort({ createdAt: -1 });

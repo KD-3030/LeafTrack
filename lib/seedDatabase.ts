@@ -4,13 +4,13 @@ import connectDB from './mongodb';
 import User from '../models/User';
 import Product from '../models/Product';
 import Assignment from '../models/Assignment';
-import { IUser } from '../types';
-import { IProduct } from '../types';
-import { IAssignment } from '../types';
+import { User as UserType } from '../types';
+import { Product as ProductType } from '../types';
+import { Assignment as AssignmentType } from '../types';
 
-const UserModel = User as Model<IUser>;
-const ProductModel = Product as Model<IProduct>;
-const AssignmentModel = Assignment as Model<IAssignment>;
+const UserModel = User as Model<UserType>;
+const ProductModel = Product as Model<ProductType>;
+const AssignmentModel = Assignment as Model<AssignmentType>;
 
 export async function seedDatabase() {
   try {

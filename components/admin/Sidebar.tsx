@@ -8,6 +8,7 @@ import {
   Package, 
   FolderOpen, 
   Users,
+  MapPin,
 } from 'lucide-react';
 
 const navigation = [
@@ -25,6 +26,11 @@ const navigation = [
     name: 'Salesmen',
     href: '/admin/salesmen',
     icon: Users,
+  },
+  {
+    name: 'Location Tracking',
+    href: '/admin/locations',
+    icon: MapPin,
   },
 ];
 

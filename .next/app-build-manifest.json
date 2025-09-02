@@ -26,15 +26,15 @@
       "static/chunks/main-app.js",
       "static/chunks/app/admin/layout.js"
     ],
-    "/admin/products/page": [
+    "/salesman/dashboard/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/admin/products/page.js"
+      "static/chunks/app/salesman/dashboard/page.js"
     ],
-    "/admin/salesmen/page": [
+    "/salesman/layout": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/admin/salesmen/page.js"
+      "static/chunks/app/salesman/layout.js"
     ]
   }
 }

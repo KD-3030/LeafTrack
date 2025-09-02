@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Package, FolderOpen, Users, TrendingUp, ShoppingCart } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import SalesmanLocationMap from '@/components/admin/SalesmanLocationMap';
 
 export default function AdminDashboard() {
   const { user } = useAuth();
@@ -158,6 +159,9 @@ export default function AdminDashboard() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Location Tracking Map */}
+      <SalesmanLocationMap />
     </div>
   );
 }

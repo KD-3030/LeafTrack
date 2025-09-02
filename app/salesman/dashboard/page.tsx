@@ -10,54 +10,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Package, TrendingUp, ShoppingCart } from 'lucide-react';
+import { Package, TrendingUp, ShoppingCart, AlertCircle, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
-
-// Mock data for assignments
-const mockAssignments: Assignment[] = [
-  {
-    id: '1',
-    salesman_id: '2',
-    product_id: '1',
-    quantity: 50,
-    created_at: '2024-01-15T10:00:00Z',
-    product: {
-      id: '1',
-      name: 'Earl Grey Premium',
-      price: 2099,
-      stock_quantity: 100,
-      created_at: '2024-01-01T00:00:00Z',
-    }
-  },
-  {
-    id: '2',
-    salesman_id: '2',
-    product_id: '2',
-    quantity: 30,
-    created_at: '2024-01-16T14:30:00Z',
-    product: {
-      id: '2',
-      name: 'Dragon Well Green',
-      price: 2750,
-      stock_quantity: 75,
-      created_at: '2024-01-01T00:00:00Z',
-    }
-  },
-  {
-    id: '3',
-    salesman_id: '2',
-    product_id: '3',
-    quantity: 25,
-    created_at: '2024-01-17T09:15:00Z',
-    product: {
-      id: '3',
-      name: 'Chamomile Dreams',
-      price: 1575,
-      stock_quantity: 60,
-      created_at: '2024-01-01T00:00:00Z',
-    }
-  }
-];
+import LocationTrackingWidget from '@/components/LocationTrackingWidget';
 
 export default function SalesmanDashboard() {
   const { user } = useAuth();
@@ -66,6 +21,7 @@ export default function SalesmanDashboard() {
   const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
   const [saleQuantity, setSaleQuantity] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -91,19 +47,62 @@ export default function SalesmanDashboard() {
     try {
       setIsLoading(true);
       
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Get JWT token from localStorage
+      const token = localStorage.getItem('leaftrack_token');
+      if (!token) {
+        setError('No authentication token found. Please log in again.');
+        toast.error('Authentication required');
+        return;
+      }
+
+      // Fetch assignments from API
+      const response = await fetch('/api/assignments', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to fetch assignments');
+      }
+
+      if (!data.assignments || data.assignments.length === 0) {
+        setAssignments([]);
+        setError('No assignments found. Contact your admin for stock allocation.');
+        return;
+      }
       
-      // Filter assignments for current salesman
-      const userAssignments = mockAssignments.filter(
-        assignment => assignment.salesman_id === user.id
-      );
+      // API should now filter assignments for current salesman automatically
+      const userAssignments = data.assignments || [];
       
-      setAssignments(userAssignments);
+      // Transform the data to match our interface
+      const transformedAssignments = userAssignments.map((assignment: any) => ({
+        id: assignment._id,
+        _id: assignment._id,
+        salesman_id: assignment.salesman_id._id,
+        product_id: assignment.product_id._id,
+        quantity: assignment.quantity,
+        created_at: assignment.createdAt,
+        product: {
+          id: assignment.product_id._id,
+          _id: assignment.product_id._id,
+          name: assignment.product_id.name,
+          price: assignment.product_id.price,
+          stock_quantity: assignment.quantity, // Use assignment quantity as stock
+          created_at: assignment.createdAt,
+        }
+      }));
+      
+      setAssignments(transformedAssignments);
+      setError(null);
       toast.success('Assignments loaded successfully');
     } catch (error) {
       console.error('Error loading assignments:', error);
-      toast.error('Failed to load your assigned stock');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load your assigned stock';
+      setError(errorMessage);
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -170,7 +169,28 @@ export default function SalesmanDashboard() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-[#F5F5DC] flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading your assignments...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error && assignments.length === 0) {
+    return (
+      <div className="min-h-screen bg-[#F5F5DC] flex items-center justify-center">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <CardTitle className="text-red-600">Error Loading Data</CardTitle>
+          </CardHeader>
+          <CardContent className="text-center">
+            <p className="text-gray-600 mb-4">{error}</p>
+            <Button onClick={loadAssignments} className="bg-green-600 hover:bg-green-700">
+              Try Again
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -183,6 +203,25 @@ export default function SalesmanDashboard() {
         </h1>
         <p className="text-gray-600 mt-2">Your assigned tea leaf inventory</p>
       </div>
+
+      {/* Error Alert */}
+      {error && (
+        <div className="flex items-center space-x-2 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm text-red-800">{error}</p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={loadAssignments}
+            className="flex items-center space-x-1"
+          >
+            <RefreshCw className="h-4 w-4" />
+            <span>Retry</span>
+          </Button>
+        </div>
+      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -219,6 +258,106 @@ export default function SalesmanDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Location Tracking Widget */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          <LocationTrackingWidget />
+        </div>
+        
+        {/* Quick Stats Summary */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Today's Summary</CardTitle>
+            <CardDescription>Your performance overview</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex justify-between">
+              <span className="text-sm text-gray-600">Products Assigned</span>
+              <span className="font-medium">{uniqueProducts}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-sm text-gray-600">Total Units</span>
+              <span className="font-medium">{totalAssignedItems}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-sm text-gray-600">Units Sold</span>
+              <span className="font-medium text-green-600">{totalSoldItems}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-sm text-gray-600">Sales Rate</span>
+              <span className="font-medium">
+                {totalAssignedItems > 0 ? Math.round((totalSoldItems / totalAssignedItems) * 100) : 0}%
+              </span>
+            </div>
+            <div className="pt-2 border-t">
+              <div className="flex justify-between">
+                <span className="text-sm font-medium">Remaining</span>
+                <span className="font-bold text-blue-600">{totalRemainingItems}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Recent Assignments Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <ShoppingCart className="h-5 w-5 text-blue-600" />
+            <span>Recent Assignments</span>
+          </CardTitle>
+          <CardDescription>
+            Your latest stock assignments from the admin
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {assignments.length === 0 ? (
+            <div className="text-center py-8">
+              <ShoppingCart className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+              <h3 className="text-md font-medium text-gray-900 mb-1">No Recent Assignments</h3>
+              <p className="text-sm text-gray-600">
+                No new assignments found. Check back later or contact your admin.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {assignments.slice(0, 3).map((assignment) => (
+                <div key={assignment.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                  <div className="flex items-center space-x-3">
+                    <div className="flex-shrink-0">
+                      <Package className="h-8 w-8 text-green-600" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-900">
+                        {assignment.product?.name}
+                      </h4>
+                      <p className="text-sm text-gray-600">
+                        Assigned: {assignment.quantity} units
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-medium text-gray-900">
+                      ₹{assignment.product?.price.toFixed(2)}/unit
+                    </p>
+                    <p className="text-xs text-gray-600">
+                      {new Date(assignment.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                </div>
+              ))}
+              {assignments.length > 3 && (
+                <div className="text-center pt-2">
+                  <p className="text-sm text-gray-600">
+                    +{assignments.length - 3} more assignments
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Assigned Stock Table */}
       <Card>
