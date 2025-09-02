@@ -9,7 +9,41 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { MapPin, RefreshCw, Users, Clock, AlertCircle, Map } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { OSM_CONFIG, OSM_GEOCODING, MAP_UTILS, MapStyle } from '@/lib/osmConfig';
-import { createColoredIcon } from '@/lib/leafletIcons';
+import { createColoredIcon, createPersonalizedIcon } from '@/lib/leafletIcons';
+
+// Predefined color palette for salesmen (moved from leafletIcons to avoid SSR issues)
+const SALESMAN_COLORS = [
+  '#e74c3c', // Red
+  '#3498db', // Blue  
+  '#2ecc71', // Green
+  '#f39c12', // Orange
+  '#9b59b6', // Purple
+  '#1abc9c', // Turquoise
+  '#e67e22', // Carrot
+  '#34495e', // Wet Asphalt
+  '#f1c40f', // Yellow
+  '#95a5a6', // Concrete
+  '#d35400', // Pumpkin
+  '#8e44ad', // Wisteria
+  '#16a085', // Green Sea
+  '#27ae60', // Nephritis
+  '#2980b9', // Belize Hole
+];
+
+// Generate unique color for salesman based on their ID
+const getSalesmanColor = (salesmanId: string): string => {
+  // Create a simple hash from the salesman ID
+  let hash = 0;
+  for (let i = 0; i < salesmanId.length; i++) {
+    const char = salesmanId.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32-bit integer
+  }
+  
+  // Use absolute value and modulo to get consistent color index
+  const colorIndex = Math.abs(hash) % SALESMAN_COLORS.length;
+  return SALESMAN_COLORS[colorIndex];
+};
 
 // Dynamic import to avoid SSR issues with Leaflet
 const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
@@ -56,17 +90,19 @@ interface LocationData {
 
 interface MapComponentProps {
   locations: LocationData[];
+  adminLocation: LocationData | null;
   onRefresh: () => void;
   isLoading: boolean;
   mapStyle: MapStyle;
   onMapStyleChange: (style: MapStyle) => void;
 }
 
-function MapComponent({ locations, onRefresh, isLoading, mapStyle, onMapStyleChange }: MapComponentProps) {
+function MapComponent({ locations, adminLocation, onRefresh, isLoading, mapStyle, onMapStyleChange }: MapComponentProps) {
   // Default center - Kolkata, West Bengal, India
   const defaultCenter: [number, number] = [22.5726, 88.3639]; // Kolkata coordinates
   const [locationAddresses, setLocationAddresses] = useState<{[key: string]: string}>({});
   const [isLoadingAddresses, setIsLoadingAddresses] = useState(false);
+  const [markerIcons, setMarkerIcons] = useState<{[key: string]: any}>({});
   
   const currentMapConfig = OSM_CONFIG[mapStyle];
   
@@ -97,6 +133,53 @@ function MapComponent({ locations, onRefresh, isLoading, mapStyle, onMapStyleCha
       return `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
     }
   };
+
+  // Load marker icons asynchronously
+  useEffect(() => {
+    const loadMarkerIcons = async () => {
+      try {
+        const iconPromises: Promise<{key: string, icon: any}>[] = [];
+        
+        // Load icons for salesman locations
+        locations.forEach(location => {
+          const key = `salesman-${location._id}`;
+          if (!markerIcons[key]) {
+            iconPromises.push(
+              createPersonalizedIcon(location.salesman_id._id, 'Salesman', location.timestamp)
+                .then(icon => ({ key, icon }))
+            );
+          }
+        });
+        
+        // Load admin icon if admin location exists
+        if (adminLocation && !markerIcons['admin-location']) {
+          iconPromises.push(
+            createPersonalizedIcon(adminLocation.salesman_id._id, 'Admin', adminLocation.timestamp)
+              .then(icon => ({ key: 'admin-location', icon }))
+          );
+        }
+        
+        if (iconPromises.length > 0) {
+          const iconResults = await Promise.all(iconPromises);
+          const newIcons: {[key: string]: any} = {};
+          
+          iconResults.forEach(result => {
+            if (result.icon) {
+              newIcons[result.key] = result.icon;
+            }
+          });
+          
+          if (Object.keys(newIcons).length > 0) {
+            setMarkerIcons(prev => ({ ...prev, ...newIcons }));
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load marker icons:', error);
+      }
+    };
+
+    loadMarkerIcons();
+  }, [locations, adminLocation]);
 
   // Load addresses for all locations
   useEffect(() => {
@@ -167,6 +250,21 @@ function MapComponent({ locations, onRefresh, isLoading, mapStyle, onMapStyleCha
     navigator.clipboard.writeText(text);
   };
 
+  // Get unique salesmen for legend
+  const uniqueSalesmen = Array.from(
+    new Set(locations.map(loc => loc.salesman_id._id))
+  ).map(id => {
+    const location = locations.find(loc => loc.salesman_id._id === id);
+    return location ? {
+      id,
+      name: location.salesman_id.name,
+      color: getSalesmanColor(id)
+    } : null;
+  }).filter(Boolean);
+
+  // Combine locations for bounds calculation
+  const allLocations = adminLocation ? [...locations, adminLocation] : locations;
+
   return (
     <div className="space-y-4">
         {/* Map Style Selector */}
@@ -205,15 +303,20 @@ function MapComponent({ locations, onRefresh, isLoading, mapStyle, onMapStyleCha
           />
           
           <MapResizer />
-          <MapBoundsController locations={locations} />
+          <MapBoundsController locations={allLocations} />
           
+          {/* Salesman locations */}
           {locations.map((location) => {
-            const markerColor = getMarkerColor(location.timestamp);
+            const iconKey = `salesman-${location._id}`;
+            const icon = markerIcons[iconKey];
+            
+            if (!icon) return null; // Don't render marker until icon is loaded
+            
             return (
               <Marker
                 key={location._id}
                 position={[location.latitude, location.longitude]}
-                icon={createColoredIcon(markerColor)}
+                icon={icon}
               >
               <Popup>
                 <div className="space-y-2 min-w-[200px]">
@@ -249,15 +352,50 @@ function MapComponent({ locations, onRefresh, isLoading, mapStyle, onMapStyleCha
                     {location.accuracy && <div>🎯 Accuracy: ±{Math.round(location.accuracy)}m</div>}
                     <div>🕐 {formatTimestamp(location.timestamp)}</div>
                   </div>
-                  <Badge variant={getMarkerColor(location.timestamp) === 'green' ? 'default' : 'secondary'}>
-                    {getMarkerColor(location.timestamp) === 'green' ? 'Live' : 
-                     getMarkerColor(location.timestamp) === 'orange' ? 'Recent' : 'Stale'}
+                  <Badge variant="secondary" style={{ backgroundColor: getSalesmanColor(location.salesman_id._id), color: 'white' }}>
+                    Salesman
                   </Badge>
                 </div>
               </Popup>
             </Marker>
             );
           })}
+
+          {/* Admin location */}
+          {adminLocation && markerIcons['admin-location'] && (
+            <Marker
+              key="admin-location"
+              position={[adminLocation.latitude, adminLocation.longitude]}
+              icon={markerIcons['admin-location']}
+            >
+              <Popup>
+                <div className="space-y-2 min-w-[200px]">
+                  <div>
+                    <strong>👑 {adminLocation.salesman_id.name}</strong>
+                    <br />
+                    <span className="text-sm text-gray-600">{adminLocation.salesman_id.email}</span>
+                  </div>
+                  <div className="text-sm space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span>📍 Coordinates:</span>
+                      <button 
+                        onClick={() => copyToClipboard(`${adminLocation.latitude.toFixed(6)}, ${adminLocation.longitude.toFixed(6)}`)}
+                        className="text-blue-600 hover:text-blue-800 text-xs"
+                        title="Copy coordinates"
+                      >
+                        {adminLocation.latitude.toFixed(6)}, {adminLocation.longitude.toFixed(6)}
+                      </button>
+                    </div>
+                    {adminLocation.accuracy && <div>🎯 Accuracy: ±{Math.round(adminLocation.accuracy)}m</div>}
+                    <div>🕐 {formatTimestamp(adminLocation.timestamp)}</div>
+                  </div>
+                  <Badge variant="destructive">
+                    Administrator
+                  </Badge>
+                </div>
+              </Popup>
+            </Marker>
+          )}
         </MapContainer>
         
         {/* Refresh Button Overlay */}
@@ -271,6 +409,34 @@ function MapComponent({ locations, onRefresh, isLoading, mapStyle, onMapStyleCha
           <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
         </Button>
       </div>
+
+      {/* Map Legend */}
+      {(uniqueSalesmen.length > 0 || adminLocation) && (
+        <div className="mt-4 p-4 bg-gray-50 rounded-lg border">
+          <h4 className="text-sm font-semibold mb-3 flex items-center">
+            <Users className="h-4 w-4 mr-2" />
+            Team Locations Legend
+          </h4>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+            {adminLocation && (
+              <div className="flex items-center space-x-2">
+                <div className="w-4 h-4 rounded-full border-2 border-white shadow-sm" 
+                     style={{ background: 'linear-gradient(45deg, #ff1744, #ff4569)' }}>
+                </div>
+                <span className="text-xs font-medium">👑 Admin</span>
+              </div>
+            )}
+            {uniqueSalesmen.map((salesman) => (
+              <div key={salesman!.id} className="flex items-center space-x-2">
+                <div className="w-4 h-4 rounded-full border-2 border-white shadow-sm" 
+                     style={{ backgroundColor: salesman!.color }}>
+                </div>
+                <span className="text-xs">{salesman!.name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -278,6 +444,7 @@ function MapComponent({ locations, onRefresh, isLoading, mapStyle, onMapStyleCha
 export default function SalesmanLocationMap() {
   const { user } = useAuth();
   const [locations, setLocations] = useState<LocationData[]>([]);
+  const [adminLocation, setAdminLocation] = useState<LocationData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [timeFilter, setTimeFilter] = useState<string>('1');
@@ -285,6 +452,7 @@ export default function SalesmanLocationMap() {
   const [mapStyle, setMapStyle] = useState<MapStyle>('STANDARD');
   const [isGeneratingTestData, setIsGeneratingTestData] = useState(false);
   const [isClearingData, setIsClearingData] = useState(false);
+  const [isTrackingAdmin, setIsTrackingAdmin] = useState(false);
   const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const getAuthToken = () => {
@@ -292,6 +460,50 @@ export default function SalesmanLocationMap() {
       return localStorage.getItem('leaftrack_token');
     }
     return null;
+  };
+
+  const trackAdminLocation = async () => {
+    if (!user || user.role !== 'Admin') return;
+
+    try {
+      setIsTrackingAdmin(true);
+      
+      if (!navigator.geolocation) {
+        throw new Error('Geolocation is not supported by this browser');
+      }
+
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 60000
+        });
+      });
+
+      const { latitude, longitude, accuracy } = position.coords;
+      
+      // Create admin location object
+      const adminLoc: LocationData = {
+        _id: 'admin-location',
+        salesman_id: {
+          _id: user.id || user._id || '',
+          name: user.name + ' (Admin)',
+          email: user.email || ''
+        },
+        latitude,
+        longitude,
+        accuracy,
+        timestamp: new Date().toISOString(),
+        address: 'Admin Location'
+      };
+
+      setAdminLocation(adminLoc);
+    } catch (error) {
+      console.error('Error tracking admin location:', error);
+      setError(`Failed to get admin location: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsTrackingAdmin(false);
+    }
   };
 
   const clearOldData = async () => {
@@ -520,6 +732,15 @@ export default function SalesmanLocationMap() {
                 <MapPin className={`h-4 w-4 mr-2 ${isGeneratingTestData ? 'animate-spin' : ''}`} />
                 Generate Kolkata Data
               </Button>
+              <Button 
+                onClick={trackAdminLocation} 
+                variant="outline" 
+                size="sm" 
+                disabled={isTrackingAdmin || isLoading}
+              >
+                <MapPin className={`h-4 w-4 mr-2 ${isTrackingAdmin ? 'animate-spin' : ''}`} />
+                Track My Location
+              </Button>
             </div>
           </div>
         )}
@@ -527,6 +748,7 @@ export default function SalesmanLocationMap() {
         {locations.length > 0 && (
           <MapComponent
             locations={locations}
+            adminLocation={adminLocation}
             onRefresh={fetchLocations}
             isLoading={isLoading}
             mapStyle={mapStyle}

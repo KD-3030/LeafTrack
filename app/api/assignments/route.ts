@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Assignment, { IAssignment } from '@/models/Assignment';
+import Product from '@/models/Product'; // Import Product model for population
+import User from '@/models/User'; // Import User model for population
 import { verifyToken } from '@/lib/auth';
 import { Model } from 'mongoose';
 
 export async function GET(request: NextRequest) {
   try {
     await connectDB();
+    
+    // Ensure models are registered by importing and accessing the default exports
+    // This forces the model registration code to run
+    const ProductModel = Product;
+    const UserModel = User;
     
     // Get auth token to identify the user
     const authHeader = request.headers.get('authorization');
@@ -51,6 +58,11 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     await connectDB();
+    
+    // Ensure models are registered by importing and accessing the default exports
+    // This forces the model registration code to run
+    const ProductModel = Product;
+    const UserModel = User;
     
     // Verify admin token
     const authHeader = request.headers.get('authorization');

@@ -27,12 +27,13 @@ export interface Product {
 export interface Assignment {
   id: string;
   _id?: string;
-  salesman_id: string;
-  product_id: string;
+  salesman_id: string | User;
+  product_id: string | Product;
   quantity: number;
   salesman?: User;
   product?: Product;
   created_at: string;
+  createdAt?: string;
 }
 
 export interface AuthContextType {

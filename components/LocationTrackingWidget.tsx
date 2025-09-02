@@ -7,9 +7,11 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { MapPin, Navigation, Activity, Clock, AlertCircle } from 'lucide-react';
 import { useLocationTracking } from '@/hooks/useLocationTracking';
+import { useAuth } from '@/contexts/AuthContext';
 import { useState } from 'react';
 
 export default function LocationTrackingWidget() {
+  const { user } = useAuth();
   const [trackingEnabled, setTrackingEnabled] = useState(true);
 
   // The hook now declaratively controls tracking based on the `enabled` prop.
@@ -90,7 +92,23 @@ export default function LocationTrackingWidget() {
         {error && (
           <div className="flex items-center space-x-2 p-3 bg-red-50 border border-red-200 rounded-lg">
             <AlertCircle className="h-4 w-4 text-red-600" />
-            <span className="text-sm text-red-600">{error}</span>
+            <div className="flex-1">
+              <span className="text-sm text-red-600">{error}</span>
+              
+              {/* Debug info for development */}
+              {process.env.NODE_ENV === 'development' && (
+                <details className="mt-2">
+                  <summary className="text-xs text-red-500 cursor-pointer">Debug Info</summary>
+                  <div className="mt-1 text-xs text-red-500 space-y-1">
+                    <div>User Role: {user?.role || 'Unknown'}</div>
+                    <div>Tracking Enabled: {trackingEnabled ? 'Yes' : 'No'}</div>
+                    <div>Is Tracking: {isTracking ? 'Yes' : 'No'}</div>
+                    <div>Geolocation Support: {typeof window !== 'undefined' && navigator.geolocation ? 'Yes' : 'No'}</div>
+                    <div>Auth Token: {typeof window !== 'undefined' && localStorage.getItem('leaftrack_token') ? 'Present' : 'Missing'}</div>
+                  </div>
+                </details>
+              )}
+            </div>
           </div>
         )}
 

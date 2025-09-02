@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Package, TrendingUp, ShoppingCart, AlertCircle, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import LocationTrackingWidget from '@/components/LocationTrackingWidget';
+import SalesmanLocationMap from '@/components/SalesmanLocationMap';
 
 export default function SalesmanDashboard() {
   const { user } = useAuth();
@@ -116,8 +117,14 @@ export default function SalesmanDashboard() {
       return;
     }
 
+    const assignmentId = selectedAssignment.id || selectedAssignment._id;
+    if (!assignmentId) {
+      toast.error('Invalid assignment data');
+      return;
+    }
+
     const quantityToSell = parseInt(saleQuantity);
-    const totalSold = stockManager.getTotalSoldForAssignment(selectedAssignment.id);
+    const totalSold = stockManager.getTotalSoldForAssignment(assignmentId);
     const remainingStock = selectedAssignment.quantity - totalSold;
 
     if (quantityToSell <= 0) {
@@ -132,12 +139,16 @@ export default function SalesmanDashboard() {
 
     try {
       // Record the sale
+      const productId = typeof selectedAssignment.product_id === 'string' 
+        ? selectedAssignment.product_id 
+        : selectedAssignment.product_id._id || selectedAssignment.product_id.id;
+        
       stockManager.addStockUpdate({
-        assignmentId: selectedAssignment.id,
+        assignmentId: assignmentId,
         quantitySold: quantityToSell,
         timestamp: new Date().toISOString(),
-        salesmanId: user.id,
-        productId: selectedAssignment.product_id
+        salesmanId: user.id || user._id || '',
+        productId: productId
       });
 
       toast.success(`Successfully sold ${quantityToSell} units of ${selectedAssignment.product?.name}`);
@@ -153,12 +164,16 @@ export default function SalesmanDashboard() {
   };
 
   const getRemainingStock = (assignment: Assignment) => {
-    const totalSold = stockManager.getTotalSoldForAssignment(assignment.id);
+    const assignmentId = assignment.id || assignment._id;
+    if (!assignmentId) return assignment.quantity;
+    const totalSold = stockManager.getTotalSoldForAssignment(assignmentId);
     return assignment.quantity - totalSold;
   };
 
   const getTotalSold = (assignment: Assignment) => {
-    return stockManager.getTotalSoldForAssignment(assignment.id);
+    const assignmentId = assignment.id || assignment._id;
+    if (!assignmentId) return 0;
+    return stockManager.getTotalSoldForAssignment(assignmentId);
   };
 
   const totalAssignedItems = assignments.reduce((sum, assignment) => sum + assignment.quantity, 0);
@@ -259,46 +274,55 @@ export default function SalesmanDashboard() {
         </Card>
       </div>
 
-      {/* Location Tracking Widget */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <LocationTrackingWidget />
-        </div>
-        
-        {/* Quick Stats Summary */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Today's Summary</CardTitle>
-            <CardDescription>Your performance overview</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex justify-between">
-              <span className="text-sm text-gray-600">Products Assigned</span>
-              <span className="font-medium">{uniqueProducts}</span>
+      {/* Location Tracking Widget and Map */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <LocationTrackingWidget />
+        <SalesmanLocationMap />
+      </div>
+
+      {/* Performance Summary */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Today's Summary</CardTitle>
+          <CardDescription>Your performance overview</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-blue-600">{uniqueProducts}</div>
+              <div className="text-sm text-gray-600">Products Assigned</div>
             </div>
-            <div className="flex justify-between">
-              <span className="text-sm text-gray-600">Total Units</span>
-              <span className="font-medium">{totalAssignedItems}</span>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-gray-900">{totalAssignedItems}</div>
+              <div className="text-sm text-gray-600">Total Units</div>
             </div>
-            <div className="flex justify-between">
-              <span className="text-sm text-gray-600">Units Sold</span>
-              <span className="font-medium text-green-600">{totalSoldItems}</span>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-green-600">{totalSoldItems}</div>
+              <div className="text-sm text-gray-600">Units Sold</div>
             </div>
-            <div className="flex justify-between">
-              <span className="text-sm text-gray-600">Sales Rate</span>
-              <span className="font-medium">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-blue-600">{totalRemainingItems}</div>
+              <div className="text-sm text-gray-600">Remaining</div>
+            </div>
+          </div>
+          <div className="pt-4 border-t">
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-medium">Sales Progress</span>
+              <span className="text-sm font-bold">
                 {totalAssignedItems > 0 ? Math.round((totalSoldItems / totalAssignedItems) * 100) : 0}%
               </span>
             </div>
-            <div className="pt-2 border-t">
-              <div className="flex justify-between">
-                <span className="text-sm font-medium">Remaining</span>
-                <span className="font-bold text-blue-600">{totalRemainingItems}</span>
-              </div>
+            <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+              <div 
+                className="bg-green-600 h-2 rounded-full transition-all duration-300" 
+                style={{ 
+                  width: `${totalAssignedItems > 0 ? (totalSoldItems / totalAssignedItems) * 100 : 0}%` 
+                }}
+              ></div>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Recent Assignments Section */}
       <Card>
@@ -425,7 +449,7 @@ export default function SalesmanDashboard() {
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Dialog open={isDialogOpen && selectedAssignment?.id === assignment.id} onOpenChange={(open) => {
+                      <Dialog open={isDialogOpen && (selectedAssignment?.id === assignment.id || selectedAssignment?._id === assignment._id)} onOpenChange={(open) => {
                         setIsDialogOpen(open);
                         if (!open) {
                           setSelectedAssignment(null);

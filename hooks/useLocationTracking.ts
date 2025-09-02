@@ -113,7 +113,35 @@ export function useLocationTracking(options: UseLocationTrackingOptions = {}) {
       await sendLocationToServer(position);
     } catch (error) {
       console.error('Location tracking error:', error);
-      setError(error instanceof Error ? error.message : 'Location tracking failed');
+      
+      // Provide more specific error messages
+      let errorMessage = 'Location tracking failed';
+      
+      if (error instanceof GeolocationPositionError) {
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            errorMessage = 'Location access denied. Please enable location permissions in your browser.';
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMessage = 'Location information unavailable. Please check your GPS/location services.';
+            break;
+          case error.TIMEOUT:
+            errorMessage = 'Location request timed out. Please try again.';
+            break;
+          default:
+            errorMessage = 'Failed to get location: ' + error.message;
+        }
+      } else if (error instanceof Error) {
+        if (error.message.includes('not supported')) {
+          errorMessage = 'Geolocation is not supported by your browser.';
+        } else if (error.message.includes('authentication')) {
+          errorMessage = 'Authentication failed. Please log in again.';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      setError(errorMessage);
     }
   };
 

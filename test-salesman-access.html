@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Salesman Access</title>
+</head>
+<body>
+    <h1>Testing Salesman Login and Dashboard Access</h1>
+    <button onclick="loginAndAccess()">Login as John Smith and Access Dashboard</button>
+    
+    <script>
+        async function loginAndAccess() {
+            try {
+                // Login as salesman
+                const loginResponse = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: 'john.smith@leaftrack.com',
+                        password: 'sales123',
+                        role: 'Salesman'
+                    })
+                });
+                
+                const loginData = await loginResponse.json();
+                
+                if (loginData.success) {
+                    // Store the token
+                    localStorage.setItem('leaftrack_token', loginData.token);
+                    localStorage.setItem('leaftrack_user', JSON.stringify(loginData.user));
+                    
+                    // Redirect to salesman dashboard
+                    window.location.href = '/salesman/dashboard';
+                } else {
+                    alert('Login failed: ' + loginData.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>

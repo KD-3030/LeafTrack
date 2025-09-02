@@ -10,5 +10,11 @@
     "files": [
       "static/chunks/_app-pages-browser_node_modules_react-leaflet_lib_index_js.js"
     ]
+  },
+  "lib\\leafletIcons.ts -> leaflet": {
+    "id": "lib\\leafletIcons.ts -> leaflet",
+    "files": [
+      "static/chunks/_app-pages-browser_node_modules_leaflet_dist_leaflet-src_js.js"
+    ]
   }
 }

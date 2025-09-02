@@ -72,7 +72,12 @@ export default function SalesmenPage() {
 
   const loadAssignments = async () => {
     try {
-      const response = await fetch('/api/assignments');
+      const token = getAuthToken();
+      const response = await fetch('/api/assignments', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
       const data = await response.json();
       
       if (data.success) {
@@ -187,7 +192,13 @@ export default function SalesmenPage() {
   };
 
   const getSalesmanAssignments = (salesmanId: string) => {
-    return assignments.filter(assignment => assignment.salesman_id === salesmanId);
+    return assignments.filter(assignment => {
+      // Handle both populated object and string ID cases
+      const assignmentSalesmanId = typeof assignment.salesman_id === 'object' 
+        ? assignment.salesman_id?._id || assignment.salesman_id?.id
+        : assignment.salesman_id;
+      return assignmentSalesmanId === salesmanId;
+    });
   };
 
   const getSalesmanSales = (salesmanId: string) => {
@@ -359,13 +370,21 @@ export default function SalesmenPage() {
                 {assignments.slice(0, 10).map((assignment) => (
                   <div key={assignment._id || assignment.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
                     <div>
-                      <h4 className="font-medium text-gray-900">{assignment.salesman?.name}</h4>
-                      <p className="text-sm text-gray-600">{assignment.product?.name}</p>
+                      <h4 className="font-medium text-gray-900">
+                        {typeof assignment.salesman_id === 'object' && assignment.salesman_id?.name 
+                          ? assignment.salesman_id.name 
+                          : 'Unknown Salesman'}
+                      </h4>
+                      <p className="text-sm text-gray-600">
+                        {typeof assignment.product_id === 'object' && assignment.product_id?.name 
+                          ? assignment.product_id.name 
+                          : 'Unknown Product'}
+                      </p>
                     </div>
                     <div className="text-right">
                       <p className="font-medium text-gray-900">Qty: {assignment.quantity}</p>
                       <p className="text-xs text-gray-500">
-                        {new Date(assignment.created_at).toLocaleDateString()}
+                        {assignment.createdAt ? new Date(assignment.createdAt).toLocaleDateString() : 'Unknown Date'}
                       </p>
                     </div>
                   </div>
