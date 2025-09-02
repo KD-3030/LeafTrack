@@ -50,12 +50,24 @@ export async function POST(request: NextRequest) {
       const locationCount = Math.floor(Math.random() * 3) + 3;
       
       for (let i = 0; i < locationCount; i++) {
-        // Generate random coordinates around New York City area
-        const baseLatitude = 40.7128;
-        const baseLongitude = -74.0060;
+        // Generate random coordinates around Kolkata, West Bengal area
+        // Including major areas: Park Street, Salt Lake, Howrah, New Town, etc.
+        const kolkataAreas = [
+          { lat: 22.5726, lng: 88.3639, name: "Central Kolkata (Park Street)" },
+          { lat: 22.5675, lng: 88.4326, name: "Salt Lake City" },
+          { lat: 22.5958, lng: 88.2636, name: "Howrah" },
+          { lat: 22.6203, lng: 88.4370, name: "New Town" },
+          { lat: 22.5204, lng: 88.3856, name: "South Kolkata (Ballygunge)" },
+          { lat: 22.6757, lng: 88.3711, name: "Dum Dum" },
+          { lat: 22.4707, lng: 88.3378, name: "Jadavpur" },
+          { lat: 22.5049, lng: 88.3200, name: "Tollygunge" }
+        ];
         
-        const latitude = baseLatitude + (Math.random() - 0.5) * 0.1; // ±0.05 degrees
-        const longitude = baseLongitude + (Math.random() - 0.5) * 0.1;
+        const baseArea = kolkataAreas[Math.floor(Math.random() * kolkataAreas.length)];
+        
+        // Add some randomness around the selected area (±0.02 degrees ~ 2km)
+        const latitude = baseArea.lat + (Math.random() - 0.5) * 0.04;
+        const longitude = baseArea.lng + (Math.random() - 0.5) * 0.04;
         
         const timestamp = new Date();
         timestamp.setMinutes(timestamp.getMinutes() - Math.floor(Math.random() * 60)); // Random time in last hour
@@ -74,7 +86,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Created ${sampleLocations.length} sample location records`,
+      message: `Created ${sampleLocations.length} sample location records around Kolkata area`,
       locations: sampleLocations.length,
     });
 

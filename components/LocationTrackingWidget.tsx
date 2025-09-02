@@ -11,18 +11,18 @@ import { useState } from 'react';
 
 export default function LocationTrackingWidget() {
   const [trackingEnabled, setTrackingEnabled] = useState(true);
-  const { isTracking, lastLocation, error, startTracking, stopTracking, trackLocation } = useLocationTracking({
+
+  // The hook now declaratively controls tracking based on the `enabled` prop.
+  // We assume the hook uses a `useEffect` internally to manage this.
+  const { isTracking, lastLocation, error, trackLocation } = useLocationTracking({
     enabled: trackingEnabled,
     interval: 5 * 60 * 1000, // 5 minutes
   });
 
+  // ✅ CORRECTED: The handler now only sets the desired state.
+  // The hook will react to this change, removing the need for imperative calls.
   const handleToggleTracking = (enabled: boolean) => {
     setTrackingEnabled(enabled);
-    if (enabled) {
-      startTracking();
-    } else {
-      stopTracking();
-    }
   };
 
   const formatCoordinates = (lat: number, lng: number) => {
@@ -64,7 +64,9 @@ export default function LocationTrackingWidget() {
           </div>
           <Switch
             id="location-tracking"
-            checked={trackingEnabled}
+            // ✅ CORRECTED: The switch is now bound to `isTracking`.
+            // This ensures the UI always shows the *actual* status, preventing confusion.
+            checked={isTracking}
             onCheckedChange={handleToggleTracking}
           />
         </div>
@@ -129,6 +131,7 @@ export default function LocationTrackingWidget() {
             variant="outline"
             size="sm"
             onClick={trackLocation}
+            // The button is disabled if the user has toggled tracking off.
             disabled={!trackingEnabled}
             className="flex items-center space-x-2"
           >
