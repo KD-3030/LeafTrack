@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
-import Product from '@/models/Product';
+import Product, { IProduct } from '@/models/Product';
 import { verifyToken } from '@/lib/auth';
+import { Model } from 'mongoose';
 
 export async function PUT(
   request: NextRequest,
@@ -32,7 +33,8 @@ export async function PUT(
     const { name, price, stock_quantity } = await request.json();
 
     // Update product
-    const product = await Product.findByIdAndUpdate(
+    const ProductModel = Product as Model<IProduct>;
+    const product = await ProductModel.findByIdAndUpdate(
       params.id,
       {
         name,
@@ -89,7 +91,8 @@ export async function DELETE(
       );
     }
 
-    const product = await Product.findByIdAndDelete(params.id);
+    const ProductModel = Product as Model<IProduct>;
+    const product = await ProductModel.findByIdAndDelete(params.id);
 
     if (!product) {
       return NextResponse.json(

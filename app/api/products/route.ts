@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
-import Product from '@/models/Product';
+import Product, { IProduct } from '@/models/Product';
 import { verifyToken } from '@/lib/auth';
+import { Model } from 'mongoose';
 
 export async function GET(request: NextRequest) {
   try {
     await connectDB();
     
-    const products = await Product.find({}).sort({ createdAt: -1 });
+    const ProductModel = Product as Model<IProduct>;
+    const products = await ProductModel.find({}).sort({ createdAt: -1 });
     
     return NextResponse.json({
       success: true,
@@ -57,7 +59,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Create product
-    const product = await Product.create({
+    const ProductModel = Product as Model<IProduct>;
+    const product = await ProductModel.create({
       name,
       price: parseFloat(price),
       stock_quantity: parseInt(stock_quantity),

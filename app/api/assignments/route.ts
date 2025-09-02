@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
-import Assignment from '@/models/Assignment';
+import Assignment, { IAssignment } from '@/models/Assignment';
 import { verifyToken } from '@/lib/auth';
+import { Model } from 'mongoose';
 
 export async function GET(request: NextRequest) {
   try {
     await connectDB();
     
-    const assignments = await Assignment.find({})
+    const AssignmentModel = Assignment as Model<IAssignment>;
+    const assignments = await AssignmentModel.find({})
       .populate('salesman_id', 'name email')
       .populate('product_id', 'name price')
       .sort({ createdAt: -1 });
@@ -60,13 +62,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Create assignment
-    const assignment = await Assignment.create({
+    const AssignmentModel = Assignment as Model<IAssignment>;
+    const assignment = await AssignmentModel.create({
       salesman_id,
       product_id,
       quantity: parseInt(quantity),
     });
 
-    const populatedAssignment = await Assignment.findById(assignment._id)
+    const populatedAssignment = await AssignmentModel.findById(assignment._id)
       .populate('salesman_id', 'name email')
       .populate('product_id', 'name price');
 

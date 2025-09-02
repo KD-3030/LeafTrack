@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
-import User from '@/models/User';
+import User, { IUser } from '@/models/User';
 import { verifyToken } from '@/lib/auth';
+import { Model } from 'mongoose';
 
 export async function GET(request: NextRequest) {
   try {
     await connectDB();
     
-    const users = await User.find({}).select('-password').sort({ createdAt: -1 });
+    const UserModel = User as Model<IUser>;
+    const users = await UserModel.find({}).select('-password').sort({ createdAt: -1 });
     
     return NextResponse.json({
       success: true,

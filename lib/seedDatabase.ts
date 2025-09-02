@@ -1,23 +1,31 @@
 import bcrypt from 'bcryptjs';
+import { Model } from 'mongoose';
 import connectDB from './mongodb';
 import User from '../models/User';
 import Product from '../models/Product';
 import Assignment from '../models/Assignment';
+import { IUser } from '../types';
+import { IProduct } from '../types';
+import { IAssignment } from '../types';
+
+const UserModel = User as Model<IUser>;
+const ProductModel = Product as Model<IProduct>;
+const AssignmentModel = Assignment as Model<IAssignment>;
 
 export async function seedDatabase() {
   try {
     await connectDB();
     
     // Clear existing data - using .exec() to ensure proper execution
-    await User.deleteMany({}).exec();
-    await Product.deleteMany({}).exec();
-    await Assignment.deleteMany({}).exec();
+    await UserModel.deleteMany({}).exec();
+    await ProductModel.deleteMany({}).exec();
+    await AssignmentModel.deleteMany({}).exec();
     
     console.log('Cleared existing data...');
     
     // Create Admin User
     const adminPassword = await bcrypt.hash('admin123', 12);
-    const admin = await User.create({
+    const admin = await UserModel.create({
       name: 'Admin User',
       email: 'admin@leaftrack.com',
       password: adminPassword,
@@ -27,21 +35,21 @@ export async function seedDatabase() {
     // Create Salesman Users
     const salesmanPassword = await bcrypt.hash('sales123', 12);
     
-    const salesman1 = await User.create({
+    const salesman1 = await UserModel.create({
       name: 'John Smith',
       email: 'john.smith@leaftrack.com',
       password: salesmanPassword,
       role: 'Salesman'
     });
     
-    const salesman2 = await User.create({
+    const salesman2 = await UserModel.create({
       name: 'Sarah Johnson',
       email: 'sarah.johnson@leaftrack.com',
       password: salesmanPassword,
       role: 'Salesman'
     });
     
-    const salesman3 = await User.create({
+    const salesman3 = await UserModel.create({
       name: 'Mike Wilson',
       email: 'mike.wilson@leaftrack.com',
       password: salesmanPassword,
@@ -108,7 +116,7 @@ export async function seedDatabase() {
     
     // Create products one by one to avoid TypeScript issues
     for (const productData of productsData) {
-      const product = new Product(productData);
+      const product = new ProductModel(productData);
       await product.save();
       products.push(product);
     }
@@ -136,7 +144,7 @@ export async function seedDatabase() {
     
     // Create assignments one by one to avoid TypeScript issues
     for (const assignmentData of assignmentsData) {
-      const assignment = new Assignment(assignmentData);
+      const assignment = new AssignmentModel(assignmentData);
       await assignment.save();
     }
     

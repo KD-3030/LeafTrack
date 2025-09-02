@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
-import User from '@/models/User';
+import User, { IUser } from '@/models/User';
 import { hashPassword, generateToken } from '@/lib/auth';
+import { Model } from 'mongoose';
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,7 +19,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user already exists
-    const existingUser = await User.findOne({ email });
+    const UserModel = User as Model<IUser>;
+    const existingUser = await UserModel.findOne({ email });
     if (existingUser) {
       return NextResponse.json(
         { error: 'User already exists with this email' },
@@ -30,7 +32,7 @@ export async function POST(request: NextRequest) {
     const hashedPassword = await hashPassword(password);
 
     // Create user
-    const user = await User.create({
+    const user = await UserModel.create({
       name,
       email,
       password: hashedPassword,

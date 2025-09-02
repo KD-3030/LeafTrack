@@ -16,6 +16,7 @@ export interface Category {
 
 export interface Product {
   id: string;
+  _id?: string;
   name: string;
   price: number;
   stock_quantity: number;
@@ -25,6 +26,7 @@ export interface Product {
 
 export interface Assignment {
   id: string;
+  _id?: string;
   salesman_id: string;
   product_id: string;
   quantity: number;

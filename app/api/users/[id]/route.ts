@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
-import User from '@/models/User';
+import User, { IUser } from '@/models/User';
 import { verifyToken } from '@/lib/auth';
 import bcrypt from 'bcryptjs';
+import { Model } from 'mongoose';
 
 export async function PUT(
   request: NextRequest,
@@ -31,7 +32,8 @@ export async function PUT(
     }
 
     // Check if user is admin
-    const adminUser = await User.findById(decoded.userId);
+    const UserModel = User as Model<IUser>;
+    const adminUser = await UserModel.findById(decoded.userId);
     if (!adminUser || adminUser.role !== 'Admin') {
       return NextResponse.json(
         { error: 'Admin access required' },
@@ -44,7 +46,7 @@ export async function PUT(
     const { name, email, role, password } = body;
 
     // Find the user to update
-    const existingUser = await User.findById(id);
+    const existingUser = await UserModel.findById(id);
     if (!existingUser) {
       return NextResponse.json(
         { error: 'User not found' },
@@ -54,7 +56,7 @@ export async function PUT(
 
     // Check if email is already taken by another user
     if (email && email !== existingUser.email) {
-      const emailExists = await User.findOne({ 
+      const emailExists = await UserModel.findOne({ 
         email, 
         _id: { $ne: id } 
       });
@@ -81,7 +83,7 @@ export async function PUT(
     updateData.updatedAt = new Date();
 
     // Update user
-    const updatedUser = await User.findByIdAndUpdate(
+    const updatedUser = await UserModel.findByIdAndUpdate(
       id,
       updateData,
       { new: true, select: '-password' }
@@ -129,7 +131,8 @@ export async function DELETE(
     }
 
     // Check if user is admin
-    const adminUser = await User.findById(decoded.userId);
+    const UserModel = User as Model<IUser>;
+    const adminUser = await UserModel.findById(decoded.userId);
     if (!adminUser || adminUser.role !== 'Admin') {
       return NextResponse.json(
         { error: 'Admin access required' },
@@ -140,7 +143,7 @@ export async function DELETE(
     const { id } = params;
 
     // Find and delete the user
-    const deletedUser = await User.findByIdAndDelete(id);
+    const deletedUser = await UserModel.findByIdAndDelete(id);
     if (!deletedUser) {
       return NextResponse.json(
         { error: 'User not found' },

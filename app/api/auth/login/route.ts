@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
-import User from '@/models/User';
+import User, { IUser } from '@/models/User';
 import { comparePassword, generateToken } from '@/lib/auth';
+import { Model } from 'mongoose';
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,7 +19,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Find user
-    const user = await User.findOne({ email, role });
+    const UserModel = User as Model<IUser>;
+    const user = await UserModel.findOne({ email, role });
     if (!user) {
       return NextResponse.json(
         { error: 'Invalid credentials or role mismatch' },
