@@ -10,6 +10,30 @@ import { MapPin, RefreshCw, Users, Clock, AlertCircle, Map } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext';
 import { OSM_CONFIG, OSM_GEOCODING, MAP_UTILS, MapStyle } from '@/lib/osmConfig';
 import { createColoredIcon, createPersonalizedIcon } from '@/lib/leafletIcons';
+import SafeLeafletMap from './SafeLeafletMap';
+
+// Error boundary component for Leaflet components
+function MapErrorBoundary({ children, fallback }: { children: React.ReactNode; fallback: React.ReactNode }) {
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    const handleError = (error: ErrorEvent) => {
+      if (error.message.includes('_leaflet_events') || error.message.includes('leaflet')) {
+        console.error('Leaflet error caught:', error);
+        setHasError(true);
+      }
+    };
+
+    window.addEventListener('error', handleError);
+    return () => window.removeEventListener('error', handleError);
+  }, []);
+
+  if (hasError) {
+    return <>{fallback}</>;
+  }
+
+  return <>{children}</>;
+}
 
 // Predefined color palette for salesmen (moved from leafletIcons to avoid SSR issues)
 const SALESMAN_COLORS = [
@@ -45,12 +69,30 @@ const getSalesmanColor = (salesmanId: string): string => {
   return SALESMAN_COLORS[colorIndex];
 };
 
-// Dynamic import to avoid SSR issues with Leaflet
-const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import('react-leaflet').then((mod) => mod.TileLayer), { ssr: false });
-const Marker = dynamic(() => import('react-leaflet').then((mod) => mod.Marker), { ssr: false });
-const Popup = dynamic(() => import('react-leaflet').then((mod) => mod.Popup), { ssr: false });
-const MapBoundsController = dynamic(() => import('@/components/MapBoundsController').then((mod) => mod.MapBoundsController), { ssr: false });
+// Dynamic import to avoid SSR issues with Leaflet - with extra safety
+const MapContainer = dynamic(
+  () => import('react-leaflet').then((mod) => mod.MapContainer),
+  { 
+    ssr: false,
+    loading: () => <div>Loading map container...</div>
+  }
+);
+const TileLayer = dynamic(
+  () => import('react-leaflet').then((mod) => mod.TileLayer),
+  { ssr: false }
+);
+const Marker = dynamic(
+  () => import('react-leaflet').then((mod) => mod.Marker),
+  { ssr: false }
+);
+const Popup = dynamic(
+  () => import('react-leaflet').then((mod) => mod.Popup),
+  { ssr: false }
+);
+const MapBoundsController = dynamic(
+  () => import('@/components/MapBoundsController').then((mod) => mod.MapBoundsController),
+  { ssr: false }
+);
 
 // Component to handle map resizing after load
 const MapResizer = dynamic(() => 
@@ -60,10 +102,18 @@ const MapResizer = dynamic(() =>
       const map = useMap();
       
       useEffect(() => {
+        if (!map || typeof window === 'undefined') return;
+        
         // Fix for map not displaying properly - invalidate size after mount
         const timer = setTimeout(() => {
-          map.invalidateSize();
-        }, 100);
+          try {
+            if (map && typeof map.invalidateSize === 'function' && map.getContainer()) {
+              map.invalidateSize();
+            }
+          } catch (error) {
+            console.warn('Error invalidating map size:', error);
+          }
+        }, 200); // Increased delay to ensure full initialization
         
         return () => clearTimeout(timer);
       }, [map]);
@@ -103,8 +153,18 @@ function MapComponent({ locations, adminLocation, onRefresh, isLoading, mapStyle
   const [locationAddresses, setLocationAddresses] = useState<{[key: string]: string}>({});
   const [isLoadingAddresses, setIsLoadingAddresses] = useState(false);
   const [markerIcons, setMarkerIcons] = useState<{[key: string]: any}>({});
+  const [mapReady, setMapReady] = useState(false);
   
   const currentMapConfig = OSM_CONFIG[mapStyle];
+  
+  // Add additional safety check for map readiness
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setMapReady(true);
+    }, 300); // Wait for Leaflet to be completely ready
+    
+    return () => clearTimeout(timer);
+  }, []);
   
   const formatTimestamp = (timestamp: string) => {
     return new Intl.DateTimeFormat('en-US', {
@@ -140,14 +200,28 @@ function MapComponent({ locations, adminLocation, onRefresh, isLoading, mapStyle
       try {
         const iconPromises: Promise<{key: string, icon: any}>[] = [];
         
+        console.log('=== ICON LOADING DEBUG ===');
+        console.log(`Loading icons for ${locations.length} locations`);
+        
         // Load icons for salesman locations
         locations.forEach(location => {
           const key = `salesman-${location._id}`;
+          console.log(`Checking icon for: ${location.salesman_id.name} (${key})`);
           if (!markerIcons[key]) {
+            console.log(`  -> Creating new icon for ${location.salesman_id.name}`);
             iconPromises.push(
               createPersonalizedIcon(location.salesman_id._id, 'Salesman', location.timestamp)
-                .then(icon => ({ key, icon }))
+                .then(icon => {
+                  console.log(`  -> Icon created successfully for ${location.salesman_id.name}`);
+                  return { key, icon };
+                })
+                .catch(error => {
+                  console.error(`  -> Icon creation failed for ${location.salesman_id.name}:`, error);
+                  return { key, icon: null };
+                })
             );
+          } else {
+            console.log(`  -> Icon already exists for ${location.salesman_id.name}`);
           }
         });
         
@@ -160,19 +234,28 @@ function MapComponent({ locations, adminLocation, onRefresh, isLoading, mapStyle
         }
         
         if (iconPromises.length > 0) {
+          console.log(`Processing ${iconPromises.length} icon promises`);
           const iconResults = await Promise.all(iconPromises);
           const newIcons: {[key: string]: any} = {};
           
           iconResults.forEach(result => {
+            console.log(`Processing result for key: ${result.key}, has icon: ${!!result.icon}`);
             if (result.icon) {
               newIcons[result.key] = result.icon;
             }
           });
           
           if (Object.keys(newIcons).length > 0) {
+            console.log(`Setting ${Object.keys(newIcons).length} new icons`);
             setMarkerIcons(prev => ({ ...prev, ...newIcons }));
+          } else {
+            console.log('No valid icons created');
           }
+        } else {
+          console.log('No new icons needed');
         }
+        
+        console.log('=== END ICON DEBUG ===');
       } catch (error) {
         console.error('Failed to load marker icons:', error);
       }
@@ -289,13 +372,17 @@ function MapComponent({ locations, adminLocation, onRefresh, isLoading, mapStyle
               <SelectItem value="LIGHT">Light Theme</SelectItem>
             </SelectContent>
           </Select>
-        </div>      <div className="map-container">
-        <MapContainer
-          center={defaultCenter}
-          zoom={10}
-          className="h-full w-full"
-          style={{ height: '100%', width: '100%' }}
-        >
+        </div>      
+        
+        {/* Map Container */}
+        {mapReady ? (
+          <div className="map-container relative">
+            <MapContainer
+              center={defaultCenter}
+              zoom={10}
+              className="h-96 w-full rounded-lg border"
+              style={{ height: '400px', width: '100%' }}
+            >
           <TileLayer
             attribution={currentMapConfig.attribution}
             url={currentMapConfig.url}
@@ -310,13 +397,14 @@ function MapComponent({ locations, adminLocation, onRefresh, isLoading, mapStyle
             const iconKey = `salesman-${location._id}`;
             const icon = markerIcons[iconKey];
             
-            if (!icon) return null; // Don't render marker until icon is loaded
+            // Debug: Show all markers regardless of icon loading
+            console.log(`Rendering marker for ${location.salesman_id.name} at [${location.latitude}, ${location.longitude}], has icon: ${!!icon}`);
             
             return (
               <Marker
                 key={location._id}
                 position={[location.latitude, location.longitude]}
-                icon={icon}
+                icon={icon || undefined} // Use default icon if custom icon not loaded
               >
               <Popup>
                 <div className="space-y-2 min-w-[200px]">
@@ -409,6 +497,16 @@ function MapComponent({ locations, adminLocation, onRefresh, isLoading, mapStyle
           <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
         </Button>
       </div>
+        ) : (
+          <div className="map-container flex items-center justify-center h-96 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300">
+            <div className="text-center p-6">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <MapPin className="h-12 w-12 text-gray-400 mx-auto mb-2" />
+              <p className="text-gray-600 font-medium">Preparing map...</p>
+              <p className="text-gray-500 text-sm mt-1">Ensuring safe initialization</p>
+            </div>
+          </div>
+        )}
 
       {/* Map Legend */}
       {(uniqueSalesmen.length > 0 || adminLocation) && (
@@ -443,6 +541,7 @@ function MapComponent({ locations, adminLocation, onRefresh, isLoading, mapStyle
 
 export default function SalesmanLocationMap() {
   const { user } = useAuth();
+  const [isClient, setIsClient] = useState(false);
   const [locations, setLocations] = useState<LocationData[]>([]);
   const [adminLocation, setAdminLocation] = useState<LocationData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -454,6 +553,16 @@ export default function SalesmanLocationMap() {
   const [isClearingData, setIsClearingData] = useState(false);
   const [isTrackingAdmin, setIsTrackingAdmin] = useState(false);
   const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Ensure we're on the client side before rendering Leaflet components
+  useEffect(() => {
+    // Add a small delay to ensure DOM is fully ready
+    const timer = setTimeout(() => {
+      setIsClient(true);
+    }, 100);
+    
+    return () => clearTimeout(timer);
+  }, []);
 
   const getAuthToken = () => {
     if (typeof window !== 'undefined') {
@@ -606,6 +715,27 @@ export default function SalesmanLocationMap() {
         throw new Error(data.error || 'Failed to fetch locations');
       }
 
+      console.log('=== LOCATIONS API RESPONSE ===');
+      console.log(`Total locations received: ${data.locations.length}`);
+      
+      // Debug: Group by salesman to see what we're getting
+      const locationsBySalesman = {};
+      data.locations.forEach((loc: any) => {
+        const salesmanName = loc.salesman_id?.name || 'Unknown';
+        const salesmanId = loc.salesman_id?._id || 'Unknown ID';
+        const key = `${salesmanName} (${salesmanId})`;
+        if (!locationsBySalesman[key]) {
+          locationsBySalesman[key] = 0;
+        }
+        locationsBySalesman[key]++;
+      });
+      
+      console.log('Locations by salesman:');
+      for (const [name, count] of Object.entries(locationsBySalesman)) {
+        console.log(`  ${name}: ${count} locations`);
+      }
+      console.log('=== END DEBUG ===');
+
       setLocations(data.locations);
     } catch (error) {
       console.error('Error fetching locations:', error);
@@ -746,14 +876,26 @@ export default function SalesmanLocationMap() {
         )}
 
         {locations.length > 0 && (
-          <MapComponent
-            locations={locations}
-            adminLocation={adminLocation}
-            onRefresh={fetchLocations}
-            isLoading={isLoading}
-            mapStyle={mapStyle}
-            onMapStyleChange={setMapStyle}
-          />
+          <>
+            {isClient ? (
+              <SafeLeafletMap
+                locations={locations}
+                adminLocation={adminLocation}
+                onRefresh={fetchLocations}
+                isLoading={isLoading}
+                mapStyle={mapStyle}
+              />
+            ) : (
+              <div className="map-container flex items-center justify-center h-96 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300">
+                <div className="text-center p-6">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <MapPin className="h-12 w-12 text-gray-400 mx-auto mb-2" />
+                  <p className="text-gray-600 font-medium">Initializing map components...</p>
+                  <p className="text-gray-500 text-sm mt-1">Please wait while Leaflet loads</p>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {/* Stats Summary */}

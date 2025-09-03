@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Location, { ILocation } from '@/models/Location';
+import User from '@/models/User'; // Import User model to ensure it's registered
 import { verifyToken } from '@/lib/auth';
-import { Model } from 'mongoose';
+import mongoose from 'mongoose';
 
 // GET - Retrieve locations (admin can get all, salesman can get own)
 export async function GET(request: NextRequest) {
   try {
     await connectDB();
+    
+    // Ensure User model is registered for population
+    User; // Force User model registration
     
     // Verify token
     const authHeader = request.headers.get('authorization');
@@ -28,7 +32,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const LocationModel = Location as Model<ILocation>;
     const { searchParams } = new URL(request.url);
     const salesmanId = searchParams.get('salesman_id');
     const hours = searchParams.get('hours') || '24';
@@ -48,7 +51,7 @@ export async function GET(request: NextRequest) {
       query.salesman_id = salesmanId;
     }
 
-    const locations = await LocationModel.find(query)
+    const locations = await (Location as mongoose.Model<ILocation>).find(query)
       .populate('salesman_id', 'name email')
       .sort({ timestamp: -1 })
       .limit(limit);
@@ -116,8 +119,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create location
-    const LocationModel = Location as Model<ILocation>;
-    const location = await LocationModel.create({
+    const location = await (Location as mongoose.Model<ILocation>).create({
       salesman_id: decoded.userId,
       latitude: parseFloat(latitude),
       longitude: parseFloat(longitude),
@@ -126,7 +128,7 @@ export async function POST(request: NextRequest) {
       timestamp: new Date(),
     });
 
-    const populatedLocation = await LocationModel.findById(location._id)
+    const populatedLocation = await (Location as mongoose.Model<ILocation>).findById(location._id)
       .populate('salesman_id', 'name email');
 
     return NextResponse.json({
@@ -171,8 +173,7 @@ export async function DELETE(request: NextRequest) {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    const LocationModel = Location as Model<ILocation>;
-    const result = await LocationModel.deleteMany({
+    const result = await (Location as mongoose.Model<ILocation>).deleteMany({
       timestamp: { $lt: sevenDaysAgo }
     });
 

@@ -1,4 +1,10 @@
 {
+  "components\\admin\\SafeLeafletMap.tsx -> leaflet": {
+    "id": "components\\admin\\SafeLeafletMap.tsx -> leaflet",
+    "files": [
+      "static/chunks/_app-pages-browser_node_modules_leaflet_dist_leaflet-src_js.js"
+    ]
+  },
   "components\\admin\\SalesmanLocationMap.tsx -> @/components/MapBoundsController": {
     "id": "components\\admin\\SalesmanLocationMap.tsx -> @/components/MapBoundsController",
     "files": [

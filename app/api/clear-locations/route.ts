@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Location, { ILocation } from '@/models/Location';
 import { verifyToken } from '@/lib/auth';
-import { Model } from 'mongoose';
+import mongoose from 'mongoose';
 
 // Clear all location data (admin only)
 export async function DELETE(request: NextRequest) {
@@ -28,10 +28,8 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const LocationModel = Location as Model<ILocation>;
-    
     // Delete all location records
-    const result = await LocationModel.deleteMany({});
+    const result = await (Location as mongoose.Model<ILocation>).deleteMany({});
 
     return NextResponse.json({
       success: true,

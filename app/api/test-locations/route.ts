@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Location, { ILocation } from '@/models/Location';
-import User from '@/models/User';
+import User, { IUser } from '@/models/User';
 import { verifyToken } from '@/lib/auth';
-import { Model } from 'mongoose';
+import mongoose from 'mongoose';
 
 // Test endpoint to create sample location data
 export async function POST(request: NextRequest) {
@@ -30,8 +30,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get all salesmen
-    const UserModel = User as Model<any>;
-    const salesmen = await UserModel.find({ role: 'Salesman' });
+    const salesmen = await (User as mongoose.Model<IUser>).find({ role: 'Salesman' });
 
     if (salesmen.length === 0) {
       return NextResponse.json(
@@ -39,8 +38,6 @@ export async function POST(request: NextRequest) {
         { status: 404 }
       );
     }
-
-    const LocationModel = Location as Model<ILocation>;
     
     // Create sample locations for each salesman
     const sampleLocations = [];
@@ -72,7 +69,7 @@ export async function POST(request: NextRequest) {
         const timestamp = new Date();
         timestamp.setMinutes(timestamp.getMinutes() - Math.floor(Math.random() * 60)); // Random time in last hour
         
-        const location = await LocationModel.create({
+        const location = await (Location as mongoose.Model<ILocation>).create({
           salesman_id: salesman._id,
           latitude,
           longitude,

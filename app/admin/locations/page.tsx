@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { MapPin, Users, Clock, Trash2, Download, RefreshCw } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { toast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 import SalesmanLocationMap from '@/components/admin/SalesmanLocationMap';
 
 interface LocationData {
@@ -64,11 +64,7 @@ export default function LocationTrackingPage() {
     } catch (error) {
       console.error('Error fetching locations:', error);
       setError(error instanceof Error ? error.message : 'Failed to fetch locations');
-      toast({
-        title: "Error",
-        description: "Failed to fetch location data",
-        variant: "destructive",
-      });
+      toast.error('Failed to fetch location data');
     } finally {
       setIsLoading(false);
     }
@@ -99,27 +95,16 @@ export default function LocationTrackingPage() {
       }
 
       setLocations([]);
-      toast({
-        title: "Success",
-        description: `Cleared ${data.deletedCount} location records`,
-      });
+      toast.success(`Cleared ${data.deleted} location records`);
     } catch (error) {
       console.error('Error clearing locations:', error);
-      toast({
-        title: "Error",
-        description: "Failed to clear location data",
-        variant: "destructive",
-      });
+      toast.error('Failed to clear location data');
     }
   };
 
   const exportLocations = () => {
     if (locations.length === 0) {
-      toast({
-        title: "No Data",
-        description: "No location data available to export",
-        variant: "destructive",
-      });
+      toast.error('No location data available to export');
       return;
     }
 
@@ -147,10 +132,7 @@ export default function LocationTrackingPage() {
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
 
-    toast({
-      title: "Export Complete",
-      description: `Exported ${locations.length} location records`,
-    });
+    toast.success(`Exported ${locations.length} location records`);
   };
 
   useEffect(() => {

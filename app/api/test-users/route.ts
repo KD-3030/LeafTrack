@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
-import User from '@/models/User';
+import User, { IUser } from '@/models/User';
 import { verifyToken } from '@/lib/auth';
 import bcrypt from 'bcryptjs';
-import { Model } from 'mongoose';
+import mongoose from 'mongoose';
 
 // Test endpoint to create sample salesman users
 export async function POST(request: NextRequest) {
@@ -29,12 +29,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const UserModel = User as Model<any>;
-    
     // Check if test salesmen already exist
-    const existingSalesmen = await UserModel.find({ 
+    const existingSalesmen = await (User as mongoose.Model<IUser>).find({ 
       role: 'Salesman',
-      email: { $in: ['john.doe@leaftrack.com', 'jane.smith@leaftrack.com', 'mike.johnson@leaftrack.com'] }
+      email: { $in: ['john.smith@leaftrack.com', 'sarah.johnson@leaftrack.com', 'mike.wilson@leaftrack.com'] }
     });
 
     if (existingSalesmen.length >= 3) {
@@ -48,21 +46,21 @@ export async function POST(request: NextRequest) {
     // Create test salesmen
     const testSalesmen = [
       {
-        name: 'John Doe',
-        email: 'john.doe@leaftrack.com',
-        password: await bcrypt.hash('password123', 10),
+        name: 'John Smith',
+        email: 'john.smith@leaftrack.com',
+        password: await bcrypt.hash('sales123', 10),
         role: 'Salesman',
       },
       {
-        name: 'Jane Smith',
-        email: 'jane.smith@leaftrack.com',
-        password: await bcrypt.hash('password123', 10),
+        name: 'Sarah Johnson',
+        email: 'sarah.johnson@leaftrack.com',
+        password: await bcrypt.hash('sales123', 10),
         role: 'Salesman',
       },
       {
-        name: 'Mike Johnson',
-        email: 'mike.johnson@leaftrack.com',
-        password: await bcrypt.hash('password123', 10),
+        name: 'Mike Wilson',
+        email: 'mike.wilson@leaftrack.com',
+        password: await bcrypt.hash('sales123', 10),
         role: 'Salesman',
       },
     ];
@@ -70,9 +68,9 @@ export async function POST(request: NextRequest) {
     const createdUsers = [];
     for (const userData of testSalesmen) {
       // Check if user already exists
-      const existingUser = await UserModel.findOne({ email: userData.email });
+      const existingUser = await (User as mongoose.Model<IUser>).findOne({ email: userData.email });
       if (!existingUser) {
-        const user = await UserModel.create(userData);
+        const user = await (User as mongoose.Model<IUser>).create(userData);
         createdUsers.push(user);
       }
     }
