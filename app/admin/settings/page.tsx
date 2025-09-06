@@ -84,7 +84,7 @@ export default function CompanySettingsPage() {
   const loadSettings = async () => {
     try {
       setIsLoading(true);
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('leaftrack_token');
       const response = await fetch('/api/settings/company', {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -112,7 +112,7 @@ export default function CompanySettingsPage() {
   const saveSettings = async () => {
     try {
       setIsSaving(true);
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('leaftrack_token');
       
       const settingsToSave = {
         ...settings,

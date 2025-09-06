@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import Invoice, { IInvoice } from '@/models/Invoice';
-import Sale, { ISale } from '@/models/Sale';
-import Product, { IProduct } from '@/models/Product';
-import Customer, { ICustomer } from '@/models/Customer';
+import { connectDB } from '@/lib/mongodb';
+import Invoice from '@/models/Invoice';
+import Sale from '@/models/Sale';
+import Product from '@/models/Product';
+import Customer from '@/models/Customer';
 import User from '@/models/User';
-import CompanySettings, { ICompanySettings } from '@/models/CompanySettings';
-import { verifyToken } from '@/lib/auth';
-import { Model } from 'mongoose';
+import jwt from 'jsonwebtoken';
 
 // Helper function to calculate GST
 const calculateGST = (amount: number, gstRate: number, isInterState: boolean) => {
@@ -46,9 +44,11 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
     
-    if (!decoded) {
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+    } catch (error) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
@@ -77,21 +77,63 @@ export async function GET(request: NextRequest) {
 
     // If user is a salesman, filter by their ID
     if (decoded.role === 'Salesman') {
-      filter.salesman_id = decoded.userId;
+      filter.salesman_id = decoded.id;
     }
-
-    const InvoiceModel = Invoice as Model<IInvoice>;
     
     // Get total count for pagination
-    const total = await InvoiceModel.countDocuments(filter);
+    const total = await Invoice.countDocuments(filter);
     
-    // Get invoices with pagination
-    const invoices = await InvoiceModel.find(filter)
-      .populate('customer_id', 'name email phone')
-      .populate('salesman_id', 'name email')
-      .sort({ invoice_date: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit);
+    // Get invoices with pagination and calculate payment status
+    const invoices = await Invoice.aggregate([
+      { $match: filter },
+      {
+        $lookup: {
+          from: 'payments',
+          localField: '_id',
+          foreignField: 'invoice_id',
+          as: 'payments'
+        }
+      },
+      {
+        $addFields: {
+          paid_amount: {
+            $sum: {
+              $map: {
+                input: {
+                  $filter: {
+                    input: '$payments',
+                    cond: { $eq: ['$$this.status', 'Confirmed'] }
+                  }
+                },
+                as: 'payment',
+                in: '$$payment.amount_paid'
+              }
+            }
+          }
+        }
+      },
+      {
+        $addFields: {
+          balance_due: { $subtract: ['$grand_total', '$paid_amount'] },
+          payment_status: {
+            $cond: [
+              { $eq: ['$paid_amount', '$grand_total'] },
+              'Paid',
+              {
+                $cond: [
+                  { $gt: ['$paid_amount', 0] },
+                  'Partial',
+                  'Pending'
+                ]
+              }
+            ]
+          }
+        }
+      },
+      { $sort: { invoice_date: -1 } },
+      { $skip: (page - 1) * limit },
+      { $limit: limit }
+    ]);
 
     return NextResponse.json({
       success: true,
@@ -121,9 +163,15 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
     
-    if (!decoded || decoded.role !== 'Admin') {
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+    } catch (error) {
+      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    }
+    
+    if (decoded.role !== 'admin') {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -134,26 +182,27 @@ export async function POST(request: NextRequest) {
     }
 
     // Get sale details
-    const SaleModel = Sale as Model<ISale>;
-    const sale = await SaleModel.findById(sale_id)
+    const sale = await Sale.findById(sale_id)
       .populate('product_id')
-      .populate('salesman_id');
+      .populate('salesman_id')
+      .lean();
 
     if (!sale) {
       return NextResponse.json({ error: 'Sale not found' }, { status: 404 });
     }
 
-    // Get customer details
-    const CustomerModel = Customer as Model<ICustomer>;
+    // Get or create customer
     let customer;
     if (customer_id) {
-      customer = await CustomerModel.findById(customer_id);
+      customer = await Customer.findById(customer_id).lean();
     } else {
       // Create default customer if not provided
-      customer = await CustomerModel.create({
+      customer = await Customer.create({
         name: 'Walk-in Customer',
         email: `walkin_${Date.now()}@leaftrack.com`,
         status: 'Active',
+        business_type: 'Individual',
+        state: 'West Bengal',
       });
     }
 
@@ -161,69 +210,50 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
     }
 
-    // Get company settings
-    const CompanySettingsModel = CompanySettings as Model<ICompanySettings>;
-    let companySettings = await CompanySettingsModel.findOne();
-    if (!companySettings) {
-      // Create default company settings
-      companySettings = await CompanySettingsModel.create({
-        company_name: 'SohagTea Manage',
-        address: '123 Tea Garden Road',
-        city: 'Kolkata',
-        state: 'West Bengal',
-        pincode: '700001',
-        country: 'India',
-        phone: '+91-9876543210',
-        email: 'info@sohagtea.com',
-        gstin: '19AAAAA0000A1Z5',
-        pan: 'AAAAA0000A',
-      });
-    }
+    // Company details (hardcoded for now)
+    const companyDetails = {
+      name: 'SohagTea Manage',
+      address: '123 Tea Garden Road, Kolkata, West Bengal - 700001',
+      gstin: '19AAAAA0000A1Z5',
+      phone: '+91-9876543210',
+      email: 'info@sohagtea.com',
+    };
 
-    // Calculate GST (inter-state vs intra-state)
-    const isInterState = customer.state && 
-      customer.state.toLowerCase() !== companySettings.state.toLowerCase();
-
-    // Calculate invoice items
-    const product = sale.product_id as any; // Populated product
-    const unitPrice = sale.unit_price || product.price;
-    const quantity = sale.quantity_sold;
-    const discount = sale.discount_percentage || 0;
-    const taxableAmount = unitPrice * quantity * (1 - discount / 100);
-    
-    const gstCalculation = calculateGST(
-      taxableAmount, 
-      product.gst_rate, 
-      isInterState
-    );
+    // Calculate GST (simplified)
+    const product = sale.product_id as any;
+    const unitPrice = sale.unit_price || product.price || 0;
+    const quantity = sale.quantity_sold || 1;
+    const discount = 0; // No discount for now
+    const taxableAmount = unitPrice * quantity;
+    const gstRate = product.gst_rate || 18;
+    const gstAmount = (taxableAmount * gstRate) / 100;
+    const totalAmount = taxableAmount + gstAmount;
 
     const invoiceItem = {
       product_id: product._id,
       product_name: product.name,
-      hsn_code: product.hsn_code,
+      hsn_code: product.hsn_code || '0000',
       quantity,
       unit_price: unitPrice,
       discount_percentage: discount,
       taxable_amount: taxableAmount,
-      gst_rate: product.gst_rate,
-      cgst_amount: gstCalculation.cgst,
-      sgst_amount: gstCalculation.sgst,
-      igst_amount: gstCalculation.igst,
-      total_amount: taxableAmount + gstCalculation.cgst + gstCalculation.sgst + gstCalculation.igst,
+      gst_rate: gstRate,
+      cgst_amount: gstAmount / 2,
+      sgst_amount: gstAmount / 2,
+      igst_amount: 0,
+      total_amount: totalAmount,
     };
 
     // Generate invoice number
-    const invoiceNumber = await generateInvoiceNumber(
-      companySettings.invoice_prefix,
-      companySettings.invoice_counter
-    );
+    const invoiceCount = await Invoice.countDocuments();
+    const invoiceNumber = `INV${new Date().getFullYear()}${String(invoiceCount + 1).padStart(4, '0')}`;
 
     // Create invoice
     const invoice = new Invoice({
       invoice_number: invoiceNumber,
       sale_id: sale._id,
       customer_id: customer._id,
-      salesman_id: sale.salesman_id._id,
+      salesman_id: sale.salesman_id,
       due_date: new Date(Date.now() + due_days * 24 * 60 * 60 * 1000),
       
       customer_details: {
@@ -235,38 +265,27 @@ export async function POST(request: NextRequest) {
         gstin: customer.gstin,
       },
       
-      company_details: {
-        name: companySettings.company_name,
-        address: `${companySettings.address}, ${companySettings.city}, ${companySettings.state} - ${companySettings.pincode}`,
-        gstin: companySettings.gstin,
-        phone: companySettings.phone,
-        email: companySettings.email,
-      },
+      company_details: companyDetails,
       
       items: [invoiceItem],
       
-      subtotal: unitPrice * quantity,
-      total_discount: (unitPrice * quantity * discount) / 100,
+      subtotal: taxableAmount,
+      total_discount: 0,
       taxable_amount: taxableAmount,
-      total_cgst: gstCalculation.cgst,
-      total_sgst: gstCalculation.sgst,
-      total_igst: gstCalculation.igst,
-      total_tax: gstCalculation.cgst + gstCalculation.sgst + gstCalculation.igst,
-      grand_total: invoiceItem.total_amount,
-      balance_due: invoiceItem.total_amount,
+      total_cgst: gstAmount / 2,
+      total_sgst: gstAmount / 2,
+      total_igst: 0,
+      total_tax: gstAmount,
+      grand_total: totalAmount,
+      balance_due: totalAmount,
       
-      terms_and_conditions: companySettings.invoice_terms,
+      terms_and_conditions: 'Payment terms: Net 30 days',
     });
 
     await invoice.save();
 
-    // Update company settings counter
-    await CompanySettingsModel.findByIdAndUpdate(companySettings._id, {
-      $inc: { invoice_counter: 1 }
-    });
-
     // Mark sale as invoice generated
-    await SaleModel.findByIdAndUpdate(sale._id, {
+    await Sale.findByIdAndUpdate(sale._id, {
       invoice_generated: true
     });
 
@@ -277,6 +296,8 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Error creating invoice:', error);
-    return NextResponse.json({ error: 'Failed to create invoice' }, { status: 500 });
+    return NextResponse.json({ 
+      error: `Failed to create invoice: ${error instanceof Error ? error.message : 'Unknown error'}` 
+    }, { status: 500 });
   }
 }

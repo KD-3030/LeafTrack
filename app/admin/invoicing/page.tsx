@@ -25,7 +25,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { toast } from 'sonner';
+import { useToast } from '@/hooks/use-toast';
 
 interface Invoice {
   _id: string;
@@ -69,6 +69,7 @@ interface Sale {
 
 export default function InvoicingPage() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -86,7 +87,7 @@ export default function InvoicingPage() {
 
   const loadInvoices = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('leaftrack_token');
       const response = await fetch('/api/invoices', {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -97,18 +98,26 @@ export default function InvoicingPage() {
       if (data.success) {
         setInvoices(data.invoices);
       } else {
-        toast.error('Failed to load invoices');
+        toast({
+          title: "Error",
+          description: "Failed to load invoices",
+          variant: "destructive",
+        });
       }
     } catch (error) {
       console.error('Error loading invoices:', error);
-      toast.error('Failed to load invoices');
+      toast({
+        title: "Error",
+        description: "Failed to load invoices",
+        variant: "destructive",
+      });
     }
   };
 
   const loadSales = async () => {
     try {
       setIsLoading(true);
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('leaftrack_token');
       const response = await fetch('/api/sales?invoice_generated=false', {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -119,11 +128,19 @@ export default function InvoicingPage() {
       if (data.success) {
         setSales(data.sales);
       } else {
-        toast.error('Failed to load sales');
+        toast({
+          title: "Error",
+          description: "Failed to load sales",
+          variant: "destructive",
+        });
       }
     } catch (error) {
       console.error('Error loading sales:', error);
-      toast.error('Failed to load sales');
+      toast({
+        title: "Error",
+        description: "Failed to load sales",
+        variant: "destructive",
+      });
     } finally {
       setIsLoading(false);
     }
@@ -131,7 +148,7 @@ export default function InvoicingPage() {
 
   const createInvoiceFromSale = async (saleId: string) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('leaftrack_token');
       const response = await fetch('/api/invoices', {
         method: 'POST',
         headers: {
@@ -145,22 +162,33 @@ export default function InvoicingPage() {
 
       const data = await response.json();
       if (data.success) {
-        toast.success('Invoice created successfully');
+        toast({
+          title: "Success",
+          description: "Invoice created successfully",
+        });
         setIsCreateDialogOpen(false);
         loadInvoices();
         loadSales();
       } else {
-        toast.error(data.error || 'Failed to create invoice');
+        toast({
+          title: "Error",
+          description: data.error || "Failed to create invoice",
+          variant: "destructive",
+        });
       }
     } catch (error) {
       console.error('Error creating invoice:', error);
-      toast.error('Failed to create invoice');
+      toast({
+        title: "Error",
+        description: "Failed to create invoice",
+        variant: "destructive",
+      });
     }
   };
 
   const updateInvoiceStatus = async (invoiceId: string, updates: any) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('leaftrack_token');
       const response = await fetch(`/api/invoices/${invoiceId}`, {
         method: 'PUT',
         headers: {
@@ -172,14 +200,25 @@ export default function InvoicingPage() {
 
       const data = await response.json();
       if (data.success) {
-        toast.success('Invoice updated successfully');
+        toast({
+          title: "Success",
+          description: "Invoice updated successfully",
+        });
         loadInvoices();
       } else {
-        toast.error(data.error || 'Failed to update invoice');
+        toast({
+          title: "Error",
+          description: data.error || "Failed to update invoice",
+          variant: "destructive",
+        });
       }
     } catch (error) {
       console.error('Error updating invoice:', error);
-      toast.error('Failed to update invoice');
+      toast({
+        title: "Error",
+        description: "Failed to update invoice",
+        variant: "destructive",
+      });
     }
   };
 
@@ -424,7 +463,10 @@ export default function InvoicingPage() {
                           variant="outline"
                           onClick={() => {
                             // TODO: Implement PDF download
-                            toast.info('PDF download will be implemented');
+                            toast({
+                              title: "Info",
+                              description: "PDF download will be implemented",
+                            });
                           }}
                         >
                           <Download className="h-4 w-4" />

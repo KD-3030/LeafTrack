@@ -2,7 +2,7 @@
 const jwt = require('jsonwebtoken');
 
 // Replace with your actual JWT secret from .env
-const JWT_SECRET = 'your-secret-key'; // You should use the actual secret from your .env file
+const JWT_SECRET = '4e53fd7aa89a8706384d130fcc3f6755'; // You should use the actual secret from your .env file
 
 // Create an admin token
 const adminToken = jwt.sign(

@@ -126,7 +126,7 @@ export default function ReportsPage() {
 
   const loadBusinessReport = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('leaftrack_token');
       const response = await fetch(
         `/api/reports/business?type=overview&from_date=${dateRange.from}&to_date=${dateRange.to}`,
         {
@@ -150,7 +150,7 @@ export default function ReportsPage() {
 
   const loadProfitLossReport = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('leaftrack_token');
       const response = await fetch(
         `/api/reports/business?type=profit_loss&from_date=${dateRange.from}&to_date=${dateRange.to}`,
         {
@@ -174,7 +174,7 @@ export default function ReportsPage() {
 
   const loadGSTReport = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('leaftrack_token');
       const response = await fetch(
         `/api/reports/gst?type=summary&from_date=${dateRange.from}&to_date=${dateRange.to}`,
         {
@@ -198,7 +198,7 @@ export default function ReportsPage() {
 
   const exportGSTR1 = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('leaftrack_token');
       const response = await fetch(
         `/api/reports/gst?type=gstr1&from_date=${dateRange.from}&to_date=${dateRange.to}`,
         {

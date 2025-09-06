@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { Document, Schema, Model } from 'mongoose';
 
 export interface ICustomer extends Document {
   name: string;
@@ -108,9 +108,16 @@ const CustomerSchema = new Schema<ICustomer>({
 });
 
 // Indexes
-CustomerSchema.index({ email: 1 });
 CustomerSchema.index({ name: 1 });
 CustomerSchema.index({ state: 1 });
 CustomerSchema.index({ status: 1 });
 
-export default mongoose.models.Customer || mongoose.model<ICustomer>('Customer', CustomerSchema);
+let Customer: Model<ICustomer>;
+
+if (mongoose.models.Customer) {
+  Customer = mongoose.models.Customer as Model<ICustomer>;
+} else {
+  Customer = mongoose.model<ICustomer>('Customer', CustomerSchema);
+}
+
+export default Customer;

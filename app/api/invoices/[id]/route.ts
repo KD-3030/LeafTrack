@@ -1,17 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import Invoice, { IInvoice } from '@/models/Invoice';
-import { verifyToken } from '@/lib/auth';
-import { Model } from 'mongoose';
-
-interface RouteParams {
-  params: {
-    id: string;
-  };
-}
+import { connectDB } from '@/lib/mongodb';
+import Invoice from '@/models/Invoice';
+import Payment from '@/models/Payment';
+import jwt from 'jsonwebtoken';
 
 // GET - Get specific invoice
-export async function GET(request: NextRequest, { params }: RouteParams) {
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     await connectDB();
     
@@ -21,34 +15,47 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
     
-    if (!decoded) {
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+    } catch (error) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
-
-    const InvoiceModel = Invoice as Model<IInvoice>;
     
     // Build filter
     const filter: any = { _id: params.id };
     
     // If user is a salesman, only show their invoices
-    if (decoded.role === 'Salesman') {
-      filter.salesman_id = decoded.userId;
+    if (decoded.role === 'salesman') {
+      filter.salesman_id = decoded.id;
     }
 
-    const invoice = await InvoiceModel.findOne(filter)
-      .populate('customer_id', 'name email phone address state gstin')
-      .populate('salesman_id', 'name email')
-      .populate('sale_id');
+    const invoice = await Invoice.findOne(filter).lean();
 
     if (!invoice) {
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
 
+    // Calculate payment information
+    const payments = await Payment.find({
+      invoice_id: params.id,
+      status: 'Confirmed'
+    }).lean();
+
+    const paidAmount = payments.reduce((sum, payment) => sum + payment.amount_paid, 0);
+    const balanceDue = invoice.grand_total - paidAmount;
+
+    const invoiceWithPayments = {
+      ...invoice,
+      paid_amount: paidAmount,
+      balance_due: balanceDue,
+      payment_status: balanceDue <= 0 ? 'Paid' : (paidAmount > 0 ? 'Partial' : 'Pending')
+    };
+
     return NextResponse.json({
       success: true,
-      invoice,
+      invoice: invoiceWithPayments,
     });
   } catch (error) {
     console.error('Error fetching invoice:', error);
@@ -57,7 +64,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 }
 
 // PUT - Update invoice (status, payment, etc.)
-export async function PUT(request: NextRequest, { params }: RouteParams) {
+export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     await connectDB();
     
@@ -67,72 +74,105 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
     
-    if (!decoded || decoded.role !== 'Admin') {
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+    } catch (error) {
+      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    }
+    
+    if (decoded.role !== 'admin') {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
     const updates = await request.json();
-    const allowedUpdates = [
-      'status',
-      'payment_status',
-      'payment_method',
-      'payment_date',
-      'paid_amount',
-      'notes',
-    ];
 
-    // Filter only allowed updates
-    const filteredUpdates: any = {};
-    Object.keys(updates).forEach(key => {
-      if (allowedUpdates.includes(key)) {
-        filteredUpdates[key] = updates[key];
-      }
-    });
-
-    // Calculate balance due if paid amount is updated
-    if (filteredUpdates.paid_amount !== undefined) {
-      const invoice = await (Invoice as Model<IInvoice>).findById(params.id);
-      if (invoice) {
-        filteredUpdates.balance_due = invoice.grand_total - filteredUpdates.paid_amount;
-        
-        // Auto-update payment status
-        if (filteredUpdates.paid_amount >= invoice.grand_total) {
-          filteredUpdates.payment_status = 'Paid';
-          filteredUpdates.status = 'Paid';
-        } else if (filteredUpdates.paid_amount > 0) {
-          filteredUpdates.payment_status = 'Partial';
-        } else {
-          filteredUpdates.payment_status = 'Pending';
-        }
-      }
-    }
-
-    const InvoiceModel = Invoice as Model<IInvoice>;
-    const invoice = await InvoiceModel.findByIdAndUpdate(
-      params.id,
-      filteredUpdates,
-      { new: true, runValidators: true }
-    );
-
+    // Find the invoice
+    const invoice = await Invoice.findById(params.id);
     if (!invoice) {
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
 
+    // Handle payment updates
+    if (updates.paid_amount !== undefined && updates.payment_method) {
+      const currentPayments = await Payment.find({
+        invoice_id: params.id,
+        status: 'Confirmed'
+      });
+
+      const currentPaidAmount = currentPayments.reduce((sum, payment) => sum + payment.amount_paid, 0);
+      const newPaymentAmount = updates.paid_amount - currentPaidAmount;
+      
+      if (newPaymentAmount > 0) {
+        // Create a payment record for the difference
+        const payment = new Payment({
+          invoice_id: params.id,
+          customer_id: invoice.customer_details,
+          amount_paid: newPaymentAmount,
+          payment_method: updates.payment_method,
+          payment_date: updates.payment_date || new Date(),
+          status: 'Confirmed',
+          reconciled: true,
+          notes: 'Payment recorded via invoice update',
+          created_by: decoded.id
+        });
+        await payment.save();
+      }
+    }
+
+    // Update allowed invoice fields
+    const allowedUpdates = ['status', 'notes', 'due_date'];
+    const filteredUpdates: any = {};
+    
+    allowedUpdates.forEach(field => {
+      if (updates[field] !== undefined) {
+        filteredUpdates[field] = updates[field];
+      }
+    });
+
+    if (Object.keys(filteredUpdates).length > 0) {
+      filteredUpdates.updated_at = new Date();
+      filteredUpdates.updated_by = decoded.id;
+    }
+
+    const updatedInvoice = await Invoice.findByIdAndUpdate(
+      params.id,
+      filteredUpdates,
+      { new: true, runValidators: true }
+    ).lean();
+
+    // Recalculate payment status
+    const allPayments = await Payment.find({
+      invoice_id: params.id,
+      status: 'Confirmed'
+    });
+
+    const totalPaid = allPayments.reduce((sum, payment) => sum + payment.amount_paid, 0);
+    const balanceDue = updatedInvoice.grand_total - totalPaid;
+
+    const invoiceWithPayments = {
+      ...updatedInvoice,
+      paid_amount: totalPaid,
+      balance_due: balanceDue,
+      payment_status: balanceDue <= 0 ? 'Paid' : (totalPaid > 0 ? 'Partial' : 'Pending')
+    };
+
     return NextResponse.json({
       success: true,
       message: 'Invoice updated successfully',
-      invoice,
+      invoice: invoiceWithPayments,
     });
   } catch (error) {
     console.error('Error updating invoice:', error);
-    return NextResponse.json({ error: 'Failed to update invoice' }, { status: 500 });
+    return NextResponse.json({ 
+      error: `Failed to update invoice: ${error instanceof Error ? error.message : 'Unknown error'}` 
+    }, { status: 500 });
   }
 }
 
 // DELETE - Cancel invoice
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
+export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     await connectDB();
     
@@ -142,35 +182,52 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
     
-    if (!decoded || decoded.role !== 'Admin') {
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+    } catch (error) {
+      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    }
+    
+    if (decoded.role !== 'admin') {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
-    const InvoiceModel = Invoice as Model<IInvoice>;
-    const invoice = await InvoiceModel.findById(params.id);
+    const invoice = await Invoice.findById(params.id);
 
     if (!invoice) {
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
 
-    // Can only cancel invoices that are not paid
-    if (invoice.payment_status === 'Paid') {
+    // Check if there are confirmed payments
+    const payments = await Payment.find({
+      invoice_id: params.id,
+      status: 'Confirmed'
+    });
+
+    if (payments.length > 0) {
       return NextResponse.json({ 
-        error: 'Cannot cancel a paid invoice' 
+        error: 'Cannot cancel invoice with confirmed payments' 
       }, { status: 400 });
     }
 
     // Update status to cancelled
-    invoice.status = 'Cancelled';
-    invoice.payment_status = 'Pending';
-    await invoice.save();
+    const updatedInvoice = await Invoice.findByIdAndUpdate(
+      params.id,
+      {
+        status: 'Cancelled',
+        updated_at: new Date(),
+        updated_by: decoded.id,
+        cancellation_reason: 'Cancelled by administrator'
+      },
+      { new: true }
+    );
 
     return NextResponse.json({
       success: true,
       message: 'Invoice cancelled successfully',
-      invoice,
+      invoice: updatedInvoice,
     });
   } catch (error) {
     console.error('Error cancelling invoice:', error);

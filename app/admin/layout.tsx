@@ -1,6 +1,7 @@
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { Navigation } from '@/components/ui/navigation';
 import { AdminSidebar } from '@/components/admin/Sidebar';
+import { Toaster } from '@/components/ui/toaster';
 
 export default function AdminLayout({
   children,
@@ -17,6 +18,7 @@ export default function AdminLayout({
             {children}
           </main>
         </div>
+        <Toaster />
       </div>
     </ProtectedRoute>
   );

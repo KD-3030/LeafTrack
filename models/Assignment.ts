@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { Document, Schema, Model } from 'mongoose';
 
 export interface IAssignment extends Document {
   salesman_id: mongoose.Types.ObjectId;
@@ -28,4 +28,12 @@ const AssignmentSchema = new Schema<IAssignment>({
   timestamps: true,
 });
 
-export default mongoose.models.Assignment || mongoose.model<IAssignment>('Assignment', AssignmentSchema);
+let Assignment: Model<IAssignment>;
+
+if (mongoose.models.Assignment) {
+  Assignment = mongoose.models.Assignment as Model<IAssignment>;
+} else {
+  Assignment = mongoose.model<IAssignment>('Assignment', AssignmentSchema);
+}
+
+export default Assignment;

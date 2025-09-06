@@ -3106,6 +3106,9 @@ video {
 .p-\[1px\] {
   padding: 1px;
 }
+.p-8 {
+  padding: 2rem;
+}
 .px-2 {
   padding-left: 0.5rem;
   padding-right: 0.5rem;
@@ -3238,17 +3241,17 @@ video {
 .align-middle {
   vertical-align: middle;
 }
-.font-mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-}
-.font-sans {
-  font-family: var(--font-inter), system-ui, sans-serif;
-}
 .font-display {
   font-family: var(--font-playfair), serif;
 }
 .font-heading {
   font-family: var(--font-montserrat), sans-serif;
+}
+.font-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+.font-sans {
+  font-family: var(--font-inter), system-ui, sans-serif;
 }
 .text-2xl {
   font-size: 1.5rem;

@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { Document, Schema, Model } from 'mongoose';
 
 export interface ISale extends Document {
   assignment_id: mongoose.Types.ObjectId;
@@ -79,4 +79,12 @@ const SaleSchema = new Schema<ISale>({
   timestamps: true,
 });
 
-export default mongoose.models.Sale || mongoose.model<ISale>('Sale', SaleSchema);
+let Sale: Model<ISale>;
+
+if (mongoose.models.Sale) {
+  Sale = mongoose.models.Sale as Model<ISale>;
+} else {
+  Sale = mongoose.model<ISale>('Sale', SaleSchema);
+}
+
+export default Sale;

@@ -104,7 +104,7 @@ export default function CustomersPage() {
   const loadCustomers = async () => {
     try {
       setIsLoading(true);
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('leaftrack_token');
       const response = await fetch('/api/customers', {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -127,7 +127,7 @@ export default function CustomersPage() {
 
   const createCustomer = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('leaftrack_token');
       const response = await fetch('/api/customers', {
         method: 'POST',
         headers: {
@@ -154,7 +154,7 @@ export default function CustomersPage() {
 
   const updateCustomer = async (customerId: string, updates: Partial<CustomerFormData>) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('leaftrack_token');
       const response = await fetch(`/api/customers/${customerId}`, {
         method: 'PUT',
         headers: {

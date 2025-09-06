@@ -13,6 +13,7 @@ import {
   BarChart3,
   UserCheck,
   Settings,
+  DollarSign,
 } from 'lucide-react';
 
 const navigation = [
@@ -39,6 +40,11 @@ const navigation = [
 ];
 
 const financialNavigation = [
+  {
+    name: 'Financial Dashboard',
+    href: '/admin/financial',
+    icon: DollarSign,
+  },
   {
     name: 'Invoicing',
     href: '/admin/invoicing',

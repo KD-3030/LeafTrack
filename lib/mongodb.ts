@@ -51,3 +51,4 @@ async function connectDB() {
 }
 
 export default connectDB;
+export { connectDB };

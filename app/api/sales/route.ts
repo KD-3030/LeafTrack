@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import Sale, { ISale } from '@/models/Sale';
+import { connectDB } from '@/lib/mongodb';
+import Sale from '@/models/Sale';
 import Assignment from '@/models/Assignment';
 import Product from '@/models/Product';
 import Customer from '@/models/Customer';
 import User from '@/models/User';
-import { verifyToken } from '@/lib/auth';
-import { Model } from 'mongoose';
+import jwt from 'jsonwebtoken';
 
 // GET - List all sales with enhanced filtering
 export async function GET(request: NextRequest) {
@@ -19,9 +18,11 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
     
-    if (!decoded) {
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+    } catch (error) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
@@ -51,17 +52,15 @@ export async function GET(request: NextRequest) {
     }
 
     // If user is a salesman, filter by their ID
-    if (decoded.role === 'Salesman') {
-      filter.salesman_id = decoded.userId;
+    if (decoded.role === 'salesman') {
+      filter.salesman_id = decoded.id;
     }
-
-    const SaleModel = Sale as Model<ISale>;
     
     // Get total count for pagination
-    const total = await SaleModel.countDocuments(filter);
+    const total = await Sale.countDocuments(filter);
     
     // Get sales with pagination and population
-    const sales = await SaleModel.find(filter)
+    const sales = await Sale.find(filter)
       .populate('assignment_id')
       .populate('salesman_id', 'name email')
       .populate('product_id', 'name price hsn_code gst_rate')
@@ -98,9 +97,11 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
     
-    if (!decoded) {
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+    } catch (error) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
@@ -114,8 +115,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify assignment exists and get details
-    const AssignmentModel = Assignment as Model<any>;
-    const assignment = await AssignmentModel.findById(saleData.assignment_id)
+    const assignment = await Assignment.findById(saleData.assignment_id)
       .populate('product_id')
       .populate('salesman_id');
 
@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user has permission to create sale for this assignment
-    if (decoded.role === 'Salesman' && assignment.salesman_id._id.toString() !== decoded.userId) {
+    if (decoded.role === 'salesman' && assignment.salesman_id._id.toString() !== decoded.id) {
       return NextResponse.json({ error: 'Unauthorized to create sale for this assignment' }, { status: 403 });
     }
 
@@ -133,14 +133,15 @@ export async function POST(request: NextRequest) {
     
     if (!customerId && saleData.customer_details) {
       // Create new customer if customer details are provided
-      const CustomerModel = Customer as Model<any>;
-      const customer = await CustomerModel.create({
+      const customer = await Customer.create({
         name: saleData.customer_details.name,
         email: saleData.customer_details.email || `customer_${Date.now()}@leaftrack.com`,
         phone: saleData.customer_details.phone,
         address: saleData.customer_details.address,
         state: saleData.customer_details.state,
         gstin: saleData.customer_details.gstin,
+        business_type: 'Individual',
+        status: 'Active',
       });
       customerId = customer._id;
     }
@@ -152,8 +153,7 @@ export async function POST(request: NextRequest) {
     const totalAmount = unitPrice * quantity * (1 - discountPercentage / 100);
 
     // Create sale
-    const SaleModel = Sale as Model<ISale>;
-    const sale = new SaleModel({
+    const sale = new Sale({
       assignment_id: saleData.assignment_id,
       salesman_id: assignment.salesman_id._id,
       product_id: assignment.product_id._id,

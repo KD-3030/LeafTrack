@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { Document, Schema, Model } from 'mongoose';
 
 export interface IInvoiceItem {
   product_id: mongoose.Types.ObjectId;
@@ -234,11 +234,18 @@ const InvoiceSchema = new Schema<IInvoice>({
 });
 
 // Indexes for efficient queries
-InvoiceSchema.index({ invoice_number: 1 });
 InvoiceSchema.index({ customer_id: 1, invoice_date: -1 });
 InvoiceSchema.index({ salesman_id: 1, invoice_date: -1 });
 InvoiceSchema.index({ status: 1 });
 InvoiceSchema.index({ payment_status: 1 });
 InvoiceSchema.index({ due_date: 1 });
 
-export default mongoose.models.Invoice || mongoose.model<IInvoice>('Invoice', InvoiceSchema);
+let Invoice: Model<IInvoice>;
+
+if (mongoose.models.Invoice) {
+  Invoice = mongoose.models.Invoice as Model<IInvoice>;
+} else {
+  Invoice = mongoose.model<IInvoice>('Invoice', InvoiceSchema);
+}
+
+export default Invoice;
