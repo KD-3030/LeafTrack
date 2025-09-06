@@ -1,19 +1,20 @@
+// lib/mongodb.ts
 import mongoose from 'mongoose';
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/leaftrack';
+const MONGODB_URI = process.env.MONGODB_URI!;
 
 if (!MONGODB_URI) {
-  throw new Error('Please define the MONGODB_URI environment variable');
+  throw new Error('Please define the MONGODB_URI environment variable in .env file');
 }
 
-interface GlobalWithMongoose {
-  mongoose: {
-    conn: typeof mongoose | null;
-    promise: Promise<typeof mongoose> | null;
-  };
+interface GlobalMongoose {
+  conn: typeof mongoose | null;
+  promise: Promise<typeof mongoose> | null;
 }
 
-declare const global: GlobalWithMongoose;
+declare global {
+  var mongoose: GlobalMongoose | undefined;
+}
 
 let cached = global.mongoose;
 
@@ -22,29 +23,31 @@ if (!cached) {
 }
 
 async function connectDB() {
-  if (cached.conn) {
-    return cached.conn;
+  if (cached!.conn) {
+    return cached!.conn;
   }
 
-  if (!cached.promise) {
+  if (!cached!.promise) {
     const opts = {
       bufferCommands: false,
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
     };
 
-    cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
-      console.log('Connected to MongoDB');
-      return mongoose;
-    });
+    cached!.promise = mongoose.connect(MONGODB_URI, opts);
   }
 
   try {
-    cached.conn = await cached.promise;
+    cached!.conn = await cached!.promise;
+    console.log('✅ Connected to MongoDB Atlas');
   } catch (e) {
-    cached.promise = null;
+    cached!.promise = null;
+    console.error('❌ MongoDB Atlas connection failed:', e);
     throw e;
   }
 
-  return cached.conn;
+  return cached!.conn;
 }
 
 export default connectDB;

@@ -46,12 +46,12 @@ export default function LoginPage() {
   // Demo credential buttons
   const fillDemoCredentials = (userType: 'admin' | 'salesman') => {
     if (userType === 'admin') {
-      setEmail('admin@leaftrack.com');
+      setEmail('admin@sohagtea.com');
       setPassword('admin123');
       setRole('Admin');
     } else {
-      setEmail('jane@leaftrack.com');
-      setPassword('password');
+      setEmail('john.smith@sohagtea.com');
+      setPassword('salesman123');
       setRole('Salesman');
     }
   };
@@ -64,7 +64,7 @@ export default function LoginPage() {
           <CardHeader className="text-center">
             <CardTitle className="text-2xl font-bold text-gray-900 flex items-center justify-center space-x-2">
               <LogIn className="h-6 w-6 text-green-600" />
-              <span>Login to LeafTrack</span>
+              <span>Login to SohagTea</span>
             </CardTitle>
             <CardDescription className="text-gray-600">
               Access your dashboard with your credentials

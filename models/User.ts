@@ -4,7 +4,11 @@ export interface IUser extends Document {
   name: string;
   email: string;
   password: string;
-  role: 'Admin' | 'Salesman';
+  role: 'Admin' | 'Salesman' | 'Customer';
+  phone?: string;
+  address?: string;
+  state?: string; // For GST calculation (CGST+SGST vs IGST)
+  gstin?: string; // GST identification number
   createdAt: Date;
   updatedAt: Date;
 }
@@ -29,8 +33,25 @@ const UserSchema = new Schema<IUser>({
   },
   role: {
     type: String,
-    enum: ['Admin', 'Salesman'],
+    enum: ['Admin', 'Salesman', 'Customer'],
     required: [true, 'Role is required'],
+  },
+  phone: {
+    type: String,
+    trim: true,
+  },
+  address: {
+    type: String,
+    trim: true,
+  },
+  state: {
+    type: String,
+    trim: true,
+  },
+  gstin: {
+    type: String,
+    trim: true,
+    uppercase: true,
   },
 }, {
   timestamps: true,
