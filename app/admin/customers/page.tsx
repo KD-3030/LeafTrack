@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { 
@@ -24,7 +24,7 @@ import {
   MapPin,
   CreditCard
 } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
+// import { useAuth } from '@/contexts/AuthContext'; // Removed unused import
 import { toast } from 'sonner';
 
 interface Customer {
@@ -85,7 +85,7 @@ const initialFormData: CustomerFormData = {
 };
 
 export default function CustomersPage() {
-  const { user } = useAuth();
+  // const { user } = useAuth(); // Removed unused variable
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -599,7 +599,7 @@ export default function CustomersPage() {
                     <Label htmlFor="business_type">Business Type</Label>
                     <Select 
                       value={formData.business_type} 
-                      onValueChange={(value: any) => setFormData(prev => ({ ...prev, business_type: value }))}
+                      onValueChange={(value: 'Individual' | 'Partnership' | 'Company' | 'LLP') => setFormData(prev => ({ ...prev, business_type: value }))}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -616,7 +616,7 @@ export default function CustomersPage() {
                     <Label htmlFor="status">Status</Label>
                     <Select 
                       value={formData.status} 
-                      onValueChange={(value: any) => setFormData(prev => ({ ...prev, status: value }))}
+                      onValueChange={(value: 'Active' | 'Inactive') => setFormData(prev => ({ ...prev, status: value }))}
                     >
                       <SelectTrigger>
                         <SelectValue />

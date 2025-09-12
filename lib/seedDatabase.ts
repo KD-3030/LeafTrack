@@ -1,16 +1,17 @@
 import bcrypt from 'bcryptjs';
-import { Model } from 'mongoose';
+// import { Model } from 'mongoose'; // Removed unused import
 import connectDB from './mongodb';
 import User from '../models/User';
 import Product from '../models/Product';
 import Assignment from '../models/Assignment';
-import { User as UserType } from '../types';
-import { Product as ProductType } from '../types';
-import { Assignment as AssignmentType } from '../types';
+// import { User as UserType } from '../types'; // Removed to avoid type conflicts
+// import { Product as ProductType } from '../types';
+// import { Assignment as AssignmentType } from '../types';
 
-const UserModel = User as Model<UserType>;
-const ProductModel = Product as Model<ProductType>;
-const AssignmentModel = Assignment as Model<AssignmentType>;
+// Use the models directly without type casting
+const UserModel = User;
+const ProductModel = Product;
+const AssignmentModel = Assignment;
 
 export async function seedDatabase() {
   try {

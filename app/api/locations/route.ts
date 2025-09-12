@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
     await connectDB();
     
     // Ensure User model is registered for population
-    User; // Force User model registration
+    void User; // Force User model registration (avoiding unused expression warning)
     
     // Verify token
     const authHeader = request.headers.get('authorization');
@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
     const timeFilter = new Date();
     timeFilter.setHours(timeFilter.getHours() - parseInt(hours));
 
-    let query: any = { timestamp: { $gte: timeFilter } };
+    const query: Record<string, unknown> = { timestamp: { $gte: timeFilter } };
 
     // If salesman, only show own locations
     if (decoded.role === 'Salesman') {

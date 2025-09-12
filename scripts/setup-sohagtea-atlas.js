@@ -1,7 +1,7 @@
 // scripts/setup-sohagtea-atlas.js
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
-require('dotenv').config();
+require('dotenv').config({ path: '.env.local' });
 
 console.log('🚀 Starting SohagTea Atlas Setup...');
 
@@ -252,7 +252,7 @@ async function setupSohagTeaAtlas() {
     if (error.message.includes('authentication failed')) {
       console.log('💡 Check your MongoDB Atlas credentials');
       console.log('   - Username: kinjaldutta005_db_admin');
-      console.log('   - Password: 8QeocRysRTQHS0LU');
+      console.log('   - Password: Check your .env.local file');
     }
     
     if (error.message.includes('network') || error.message.includes('timeout')) {
