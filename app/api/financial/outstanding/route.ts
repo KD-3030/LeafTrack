@@ -3,6 +3,8 @@ import { connectDB } from '@/lib/mongodb';
 import Invoice from '@/models/Invoice';
 import jwt from 'jsonwebtoken';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     // Verify authentication
@@ -97,6 +99,7 @@ export async function GET(request: NextRequest) {
       {
         $project: {
           invoice_number: 1,
+          customer_id: 1,
           customer_details: 1,
           invoice_date: 1,
           due_date: 1,

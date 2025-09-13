@@ -11,24 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { 
-  DollarSign, 
-  TrendingUp, 
-  TrendingDown,
-  CreditCard,
-  Receipt,
-  Calendar,
-  RefreshCw,
-  Plus,
-  Eye,
-  Check,
-  X,
-  AlertCircle,
-  Clock,
-  FileText,
-  BarChart3
-} from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
+import { DollarSign, TrendingUp, TrendingDown, Receipt, RefreshCw, Plus, Check, X, AlertCircle, BarChart3, Clock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface Payment {
@@ -64,6 +47,7 @@ interface FinancialStats {
 interface OutstandingInvoice {
   _id: string;
   invoice_number: string;
+  customer_id: string;
   customer_details: {
     name: string;
     email: string;
@@ -76,7 +60,6 @@ interface OutstandingInvoice {
 }
 
 export default function FinancialDashboard() {
-  const { user } = useAuth();
   const { toast } = useToast();
   const [stats, setStats] = useState<FinancialStats | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -97,6 +80,7 @@ export default function FinancialDashboard() {
 
   useEffect(() => {
     loadFinancialData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadFinancialData = async () => {
@@ -209,7 +193,7 @@ export default function FinancialDashboard() {
         },
         body: JSON.stringify({
           invoice_id: selectedInvoice._id,
-          customer_id: selectedInvoice.customer_details,
+          customer_id: selectedInvoice.customer_id,
           ...paymentForm,
         }),
       });

@@ -6,10 +6,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { MapPin, RefreshCw, Users, Clock, AlertCircle, Map } from 'lucide-react';
+import { RefreshCw, AlertCircle, Map, MapPin, Users, Clock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { OSM_CONFIG, OSM_GEOCODING, MAP_UTILS, MapStyle } from '@/lib/osmConfig';
-import { createColoredIcon, createPersonalizedIcon } from '@/lib/leafletIcons';
+import { OSM_CONFIG, OSM_GEOCODING, MapStyle } from '@/lib/osmConfig';
+import { createPersonalizedIcon } from '@/lib/leafletIcons';
 import SafeLeafletMap from './SafeLeafletMap';
 
 // Error boundary component for Leaflet components
@@ -719,7 +719,7 @@ export default function SalesmanLocationMap() {
       console.log(`Total locations received: ${data.locations.length}`);
       
       // Debug: Group by salesman to see what we're getting
-      const locationsBySalesman = {};
+      const locationsBySalesman: { [key: string]: number } = {};
       data.locations.forEach((loc: any) => {
         const salesmanName = loc.salesman_id?.name || 'Unknown';
         const salesmanId = loc.salesman_id?._id || 'Unknown ID';

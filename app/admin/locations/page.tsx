@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { MapPin, Users, Clock, Trash2, Download, RefreshCw } from 'lucide-react';
+import { Trash2, Download, RefreshCw, MapPin, Users, Clock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import SalesmanLocationMap from '@/components/admin/SalesmanLocationMap';
@@ -28,7 +28,7 @@ export default function LocationTrackingPage() {
   const { user } = useAuth();
   const [locations, setLocations] = useState<LocationData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [, setError] = useState<string | null>(null);
   const [timeFilter, setTimeFilter] = useState<string>('24');
 
   const getAuthToken = () => {
@@ -139,6 +139,7 @@ export default function LocationTrackingPage() {
     if (user && user.role === 'Admin') {
       fetchLocations();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, timeFilter]);
 
   const formatTimestamp = (timestamp: string) => {
@@ -173,7 +174,7 @@ export default function LocationTrackingPage() {
     return (
       <div className="text-center py-12">
         <h3 className="text-lg font-medium text-gray-900 mb-2">Access Denied</h3>
-        <p className="text-gray-600">You don't have permission to view this page.</p>
+        <p className="text-gray-600">You don&apos;t have permission to view this page.</p>
       </div>
     );
   }

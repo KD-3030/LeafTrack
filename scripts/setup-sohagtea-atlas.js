@@ -101,9 +101,23 @@ async function setupSohagTeaAtlas() {
     await Sale.deleteMany({});
     console.log('✅ Data cleared');
     
-    // Create admin user
+    // Create admin user with secure password
     console.log('👑 Creating admin user...');
-    const adminPassword = await bcrypt.hash('admin123', 10);
+    const crypto = require('crypto');
+    
+    // Generate secure admin password
+    function generateSecurePassword(length = 16) {
+      const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+      let password = '';
+      for (let i = 0; i < length; i++) {
+        password += charset.charAt(crypto.randomInt(charset.length));
+      }
+      return password;
+    }
+    
+    const adminPlainPassword = generateSecurePassword(16);
+    const adminPassword = await bcrypt.hash(adminPlainPassword, 12);
+    
     const admin = await User.create({
       name: 'SohagTea Admin',
       email: 'admin@sohagtea.com',
@@ -114,11 +128,15 @@ async function setupSohagTeaAtlas() {
       state: 'West Bengal',
       gstin: '19ABCDE1234F1Z5'
     });
-    console.log(`✅ Admin created: ${admin.name} (${admin.email})`);
     
-    // Create salesmen
+    console.log(`✅ Admin created: ${admin.name} (${admin.email})`);
+    console.log(`🔐 Admin password: ${adminPlainPassword}`);
+    console.log('⚠️  IMPORTANT: Save this password securely and change it after first login!');
+    
+    // Create salesmen with secure passwords
     console.log('👥 Creating salesmen...');
-    const salesmanPassword = await bcrypt.hash('salesman123', 10);
+    const salesmanPlainPassword = generateSecurePassword(16);
+    const salesmanPassword = await bcrypt.hash(salesmanPlainPassword, 12);
     const salesmen = await User.insertMany([
       {
         name: 'John Smith',
@@ -149,6 +167,8 @@ async function setupSohagTeaAtlas() {
       }
     ]);
     console.log(`✅ Created ${salesmen.length} salesmen`);
+    console.log(`🔐 Salesman password (for all): ${salesmanPlainPassword}`);
+    console.log('⚠️  IMPORTANT: Save this password securely and have salesmen change it after first login!');
     
     // Create tea products
     console.log('🍃 Creating tea products...');

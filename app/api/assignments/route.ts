@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
+import { connectDB } from '@/lib/mongodb';
 import Assignment, { IAssignment } from '@/models/Assignment';
-import Product from '@/models/Product'; // Import Product model for population
-import User from '@/models/User'; // Import User model for population
+import Product, { IProduct } from '@/models/Product';
 import { verifyToken } from '@/lib/auth';
 import { Model } from 'mongoose';
+import { JwtPayload } from 'jsonwebtoken';
+
+export const dynamic = 'force-dynamic';
+
+interface DecodedToken extends JwtPayload {
+  userId: string;
+  role: string;
+}
 
 export async function GET(request: NextRequest) {
   try {
     await connectDB();
-    
-    // Ensure models are registered by importing and accessing the default exports
-    // This forces the model registration code to run
-    const ProductModel = Product;
-    const UserModel = User;
     
     // Get auth token to identify the user
     const authHeader = request.headers.get('authorization');
@@ -22,7 +24,7 @@ export async function GET(request: NextRequest) {
     if (authHeader && authHeader.startsWith('Bearer ')) {
       try {
         const token = authHeader.substring(7);
-        const decoded = verifyToken(token);
+        const decoded = verifyToken(token) as DecodedToken;
         
         // If user is a salesman, filter assignments for that salesman only
         if (decoded && decoded.role === 'Salesman') {
@@ -38,7 +40,7 @@ export async function GET(request: NextRequest) {
     const AssignmentModel = Assignment as Model<IAssignment>;
     const assignments = await AssignmentModel.find(userFilter)
       .populate('salesman_id', 'name email')
-      .populate('product_id', 'name price')
+      .populate('productId', 'name manufacturingCost hsn_code totalStock gst_rate')
       .sort({ createdAt: -1 });
     
     return NextResponse.json({
@@ -49,7 +51,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Get assignments error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { success: false, error: 'Internal server error' },
       { status: 500 }
     );
   }
@@ -59,36 +61,48 @@ export async function POST(request: NextRequest) {
   try {
     await connectDB();
     
-    // Ensure models are registered by importing and accessing the default exports
-    // This forces the model registration code to run
-    const ProductModel = Product;
-    const UserModel = User;
-    
     // Verify admin token
     const authHeader = request.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json(
-        { error: 'Unauthorized' },
+        { success: false, error: 'Unauthorized' },
         { status: 401 }
       );
     }
 
     const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
+    const decoded = verifyToken(token) as DecodedToken;
     
     if (!decoded || decoded.role !== 'Admin') {
       return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
+        { success: false, error: 'Admin access required' },
+        { status: 403 }
       );
     }
 
-    const { salesman_id, product_id, quantity } = await request.json();
+    const { salesmanId, productId, quantity, sellingPricePerUnit } = await request.json();
 
     // Validate input
-    if (!salesman_id || !product_id || !quantity) {
+    if (!salesmanId || !productId || !quantity || !sellingPricePerUnit) {
       return NextResponse.json(
-        { error: 'All fields are required' },
+        { success: false, error: 'All fields are required: salesmanId, productId, quantity, sellingPricePerUnit' },
+        { status: 400 }
+      );
+    }
+
+    // Find the product and verify stock availability
+    const ProductModel = Product as Model<IProduct>;
+    const product = await ProductModel.findById(productId);
+    if (!product) {
+      return NextResponse.json(
+        { success: false, error: 'Product not found' },
+        { status: 404 }
+      );
+    }
+
+    if (product.totalStock < quantity) {
+      return NextResponse.json(
+        { success: false, error: `Insufficient stock. Available: ${product.totalStock}, Requested: ${quantity}` },
         { status: 400 }
       );
     }
@@ -96,14 +110,20 @@ export async function POST(request: NextRequest) {
     // Create assignment
     const AssignmentModel = Assignment as Model<IAssignment>;
     const assignment = await AssignmentModel.create({
-      salesman_id,
-      product_id,
+      salesman_id: salesmanId,
+      productId,
       quantity: parseInt(quantity),
+      sellingPricePerUnit: parseFloat(sellingPricePerUnit),
     });
 
+    // Decrement the product's total stock
+    product.totalStock -= parseInt(quantity);
+    await product.save();
+
+    // Populate the assignment for response
     const populatedAssignment = await AssignmentModel.findById(assignment._id)
       .populate('salesman_id', 'name email')
-      .populate('product_id', 'name price');
+      .populate('productId', 'name manufacturingCost hsn_code');
 
     return NextResponse.json({
       success: true,
@@ -113,7 +133,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Create assignment error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { success: false, error: 'Internal server error' },
       { status: 500 }
     );
   }

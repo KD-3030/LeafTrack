@@ -4,6 +4,8 @@ import Product, { IProduct } from '@/models/Product';
 import { verifyToken } from '@/lib/auth';
 import { Model } from 'mongoose';
 
+export const dynamic = 'force-dynamic';
+
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -30,7 +32,7 @@ export async function PUT(
       );
     }
 
-    const { name, price, stock_quantity } = await request.json();
+    const { name, manufacturingCost, totalStock, hsn_code, gst_rate } = await request.json();
 
     // Update product
     const ProductModel = Product as Model<IProduct>;
@@ -38,8 +40,10 @@ export async function PUT(
       params.id,
       {
         name,
-        price: parseFloat(price),
-        stock_quantity: parseInt(stock_quantity),
+        manufacturingCost: parseFloat(manufacturingCost),
+        totalStock: parseInt(totalStock),
+        hsn_code,
+        gst_rate: parseFloat(gst_rate),
       },
       { new: true }
     );

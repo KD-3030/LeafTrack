@@ -4,6 +4,8 @@ import Location, { ILocation } from '@/models/Location';
 import { verifyToken } from '@/lib/auth';
 import mongoose from 'mongoose';
 
+export const dynamic = 'force-dynamic';
+
 // Clear all location data (admin only)
 export async function DELETE(request: NextRequest) {
   try {

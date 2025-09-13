@@ -5,6 +5,8 @@ import { verifyToken } from '@/lib/auth';
 import bcrypt from 'bcryptjs';
 import { Model } from 'mongoose';
 
+export const dynamic = 'force-dynamic';
+
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }

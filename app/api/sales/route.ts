@@ -2,29 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import Sale from '@/models/Sale';
 import Assignment from '@/models/Assignment';
-import Product from '@/models/Product';
+// import Product from '@/models/Product';
 import Customer from '@/models/Customer';
-import User from '@/models/User';
-import jwt from 'jsonwebtoken';
+// import User from '@/models/User';
+import { requireAuth } from '@/lib/authMiddleware';
+
+export const dynamic = 'force-dynamic';
 
 // GET - List all sales with enhanced filtering
 export async function GET(request: NextRequest) {
   try {
     await connectDB();
     
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
     }
-
-    const token = authHeader.substring(7);
-    
-    let decoded;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
-    } catch (error) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+    const decoded = authResult;
 
     // Get query parameters for filtering
     const { searchParams } = new URL(request.url);
@@ -37,7 +31,17 @@ export async function GET(request: NextRequest) {
     const invoiceGenerated = searchParams.get('invoice_generated');
 
     // Build filter object
-    const filter: any = {};
+    interface SaleFilter {
+      salesman_id?: string;
+      customer_id?: string;
+      invoice_generated?: boolean;
+      sale_date?: {
+        $gte?: Date;
+        $lte?: Date;
+      };
+    }
+    
+    const filter: SaleFilter = {};
     
     if (salesmanId) filter.salesman_id = salesmanId;
     if (customerId) filter.customer_id = customerId;
@@ -52,8 +56,8 @@ export async function GET(request: NextRequest) {
     }
 
     // If user is a salesman, filter by their ID
-    if (decoded.role === 'salesman') {
-      filter.salesman_id = decoded.id;
+    if (decoded.role === 'Salesman') {
+      filter.salesman_id = decoded.userId;
     }
     
     // Get total count for pagination
@@ -63,7 +67,7 @@ export async function GET(request: NextRequest) {
     const sales = await Sale.find(filter)
       .populate('assignment_id')
       .populate('salesman_id', 'name email')
-      .populate('product_id', 'name price hsn_code gst_rate')
+      .populate('product_id', 'name manufacturingCost hsn_code gst_rate')
       .populate('customer_id', 'name email phone')
       .sort({ sale_date: -1 })
       .skip((page - 1) * limit)
@@ -91,20 +95,12 @@ export async function POST(request: NextRequest) {
   try {
     await connectDB();
     
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
     }
-
-    const token = authHeader.substring(7);
+    const decoded = authResult;
     
-    let decoded;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
-    } catch (error) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
-
     const saleData = await request.json();
 
     // Validate required fields
@@ -116,7 +112,7 @@ export async function POST(request: NextRequest) {
 
     // Verify assignment exists and get details
     const assignment = await Assignment.findById(saleData.assignment_id)
-      .populate('product_id')
+      .populate('productId', 'name manufacturingCost hsn_code gst_rate')
       .populate('salesman_id');
 
     if (!assignment) {
@@ -124,8 +120,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user has permission to create sale for this assignment
-    if (decoded.role === 'salesman' && assignment.salesman_id._id.toString() !== decoded.id) {
+    if (decoded.role === 'Salesman' && assignment.salesman_id._id.toString() !== decoded.userId) {
       return NextResponse.json({ error: 'Unauthorized to create sale for this assignment' }, { status: 403 });
+    }
+
+    // Check if assignment has sufficient quantity
+    if (saleData.quantity_sold > assignment.quantity) {
+      return NextResponse.json({ 
+        error: `Insufficient stock. Available: ${assignment.quantity} units` 
+      }, { status: 400 });
     }
 
     // Handle customer creation/selection
@@ -153,13 +156,15 @@ export async function POST(request: NextRequest) {
     const totalAmount = unitPrice * quantity * (1 - discountPercentage / 100);
 
     // Create sale
+    const productData = assignment.productId as unknown as { _id: string };
     const sale = new Sale({
       assignment_id: saleData.assignment_id,
       salesman_id: assignment.salesman_id._id,
-      product_id: assignment.product_id._id,
+      product_id: productData._id,
       customer_id: customerId,
       quantity_sold: quantity,
       unit_price: unitPrice,
+      priceAtSale: assignment.sellingPricePerUnit, // Store the selling price from assignment
       discount_percentage: discountPercentage,
       total_amount: totalAmount,
       payment_method: saleData.payment_method || 'Cash',
@@ -168,11 +173,15 @@ export async function POST(request: NextRequest) {
 
     await sale.save();
 
+    // Update assignment quantity (reduce by sold quantity)
+    assignment.quantity -= quantity;
+    await assignment.save();
+
     // Populate the created sale for response
     await sale.populate([
       { path: 'assignment_id' },
       { path: 'salesman_id', select: 'name email' },
-      { path: 'product_id', select: 'name price hsn_code gst_rate' },
+      { path: 'product_id', select: 'name manufacturingCost hsn_code gst_rate' },
       { path: 'customer_id', select: 'name email phone' }
     ]);
 
@@ -184,7 +193,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error creating sale:', error);
     
-    if (error.name === 'ValidationError') {
+    if (error instanceof Error && error.name === 'ValidationError') {
       return NextResponse.json({ 
         error: 'Validation failed', 
         details: error.message 

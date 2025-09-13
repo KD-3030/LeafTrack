@@ -4,28 +4,13 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
-  FileText, 
-  Plus, 
-  Search, 
-  Filter,
-  Eye,
-  Edit,
-  Download,
-  RefreshCw,
-  DollarSign,
-  Calendar,
-  TrendingUp,
-  AlertCircle
-} from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
+import { FileText, Plus, Search, Edit, Download, RefreshCw, DollarSign, TrendingUp, AlertCircle, Calendar, Filter, Eye } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { generateInvoicePDF } from '@/lib/pdfGenerator';
 
 interface Invoice {
   _id: string;
@@ -47,7 +32,17 @@ interface Invoice {
   balance_due: number;
   status: 'Draft' | 'Sent' | 'Paid' | 'Overdue' | 'Cancelled';
   payment_status: 'Pending' | 'Partial' | 'Paid';
-  items: any[];
+  items: { 
+    product_id: string; 
+    product_name: string;
+    hsn_code: string;
+    quantity: number; 
+    price: number;
+    unit_price: number;
+    taxable_amount: number;
+    gst_rate: number;
+    total_amount: number;
+  }[];
 }
 
 interface Sale {
@@ -68,14 +63,11 @@ interface Sale {
 }
 
 export default function InvoicingPage() {
-  const { user } = useAuth();
   const { toast } = useToast();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -83,6 +75,7 @@ export default function InvoicingPage() {
   useEffect(() => {
     loadInvoices();
     loadSales();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadInvoices = async () => {
@@ -116,7 +109,6 @@ export default function InvoicingPage() {
 
   const loadSales = async () => {
     try {
-      setIsLoading(true);
       const token = localStorage.getItem('leaftrack_token');
       const response = await fetch('/api/sales?invoice_generated=false', {
         headers: {
@@ -141,8 +133,6 @@ export default function InvoicingPage() {
         description: "Failed to load sales",
         variant: "destructive",
       });
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -186,7 +176,7 @@ export default function InvoicingPage() {
     }
   };
 
-  const updateInvoiceStatus = async (invoiceId: string, updates: any) => {
+  const updateInvoiceStatus = async (invoiceId: string, updates: Record<string, unknown>) => {
     try {
       const token = localStorage.getItem('leaftrack_token');
       const response = await fetch(`/api/invoices/${invoiceId}`, {
@@ -461,12 +451,46 @@ export default function InvoicingPage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => {
-                            // TODO: Implement PDF download
-                            toast({
-                              title: "Info",
-                              description: "PDF download will be implemented",
-                            });
+                          onClick={async () => {
+                            try {
+                              // Fetch full invoice details for PDF generation
+                              const token = localStorage.getItem('leaftrack_token');
+                              const response = await fetch(`/api/invoices/${invoice._id}`, {
+                                headers: {
+                                  'Authorization': `Bearer ${token}`,
+                                },
+                              });
+                              
+                              const data = await response.json();
+                              if (data.success && data.invoice) {
+                                const success = generateInvoicePDF(data.invoice);
+                                if (success) {
+                                  toast({
+                                    title: "Success",
+                                    description: "Invoice PDF downloaded successfully",
+                                  });
+                                } else {
+                                  toast({
+                                    title: "Error",
+                                    description: "Failed to generate PDF",
+                                    variant: "destructive",
+                                  });
+                                }
+                              } else {
+                                toast({
+                                  title: "Error",
+                                  description: "Failed to load invoice details",
+                                  variant: "destructive",
+                                });
+                              }
+                            } catch (error) {
+                              console.error('PDF generation error:', error);
+                              toast({
+                                title: "Error",
+                                description: "Failed to download PDF",
+                                variant: "destructive",
+                              });
+                            }
                           }}
                         >
                           <Download className="h-4 w-4" />

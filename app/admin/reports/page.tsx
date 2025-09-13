@@ -6,9 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
 import { 
   BarChart, 
   Bar, 
@@ -24,18 +23,7 @@ import {
   ResponsiveContainer,
   Cell
 } from 'recharts';
-import { 
-  TrendingUp, 
-  DollarSign, 
-  FileText, 
-  Users, 
-  Package,
-  Download,
-  Calendar,
-  Filter,
-  RefreshCw
-} from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
+import { TrendingUp, DollarSign, Download, RefreshCw, FileText, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface BusinessReport {
@@ -100,7 +88,6 @@ interface GSTReport {
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
 
 export default function ReportsPage() {
-  const { user } = useAuth();
   const [businessReport, setBusinessReport] = useState<BusinessReport | null>(null);
   const [profitLossReport, setProfitLossReport] = useState<ProfitLossReport | null>(null);
   const [gstReport, setGSTReport] = useState<GSTReport | null>(null);
@@ -112,6 +99,7 @@ export default function ReportsPage() {
 
   useEffect(() => {
     loadAllReports();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateRange]);
 
   const loadAllReports = async () => {
@@ -223,7 +211,7 @@ export default function ReportsPage() {
     }
   };
 
-  const convertToCSV = (data: any[]) => {
+  const convertToCSV = (data: Record<string, unknown>[]) => {
     if (!data.length) return '';
     
     const headers = Object.keys(data[0]);
@@ -250,7 +238,7 @@ export default function ReportsPage() {
     window.URL.revokeObjectURL(url);
   };
 
-  const formatMonthlyTrendData = (data: any[]) => {
+  const formatMonthlyTrendData = (data: { _id: { year: number; month: number }; revenue: number; invoices: number }[]) => {
     return data.map(item => ({
       name: `${item._id.month}/${item._id.year}`,
       revenue: item.revenue,

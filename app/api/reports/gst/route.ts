@@ -4,6 +4,8 @@ import Invoice, { IInvoice } from '@/models/Invoice';
 import { verifyToken } from '@/lib/auth';
 import { Model } from 'mongoose';
 
+export const dynamic = 'force-dynamic';
+
 // GET - Generate GST reports (GSTR-1 data)
 export async function GET(request: NextRequest) {
   try {

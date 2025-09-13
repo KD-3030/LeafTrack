@@ -3,6 +3,8 @@ import { connectDB } from '@/lib/mongodb';
 import Payment from '@/models/Payment';
 import jwt from 'jsonwebtoken';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -191,7 +193,7 @@ export async function DELETE(
     }
 
     // Check if user is admin
-    if (decoded.role !== 'admin') {
+    if (decoded.role !== 'Admin') {
       return NextResponse.json(
         { error: 'Only administrators can delete payments' },
         { status: 403 }

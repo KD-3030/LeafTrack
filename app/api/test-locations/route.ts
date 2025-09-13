@@ -5,6 +5,8 @@ import User, { IUser } from '@/models/User';
 import { verifyToken } from '@/lib/auth';
 import mongoose from 'mongoose';
 
+export const dynamic = 'force-dynamic';
+
 // Test endpoint to create sample location data
 export async function POST(request: NextRequest) {
   try {

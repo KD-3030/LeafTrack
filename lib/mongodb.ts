@@ -1,5 +1,6 @@
 // lib/mongodb.ts
 import mongoose from 'mongoose';
+import { logger } from './logger';
 
 const MONGODB_URI = process.env.MONGODB_URI!;
 
@@ -41,10 +42,10 @@ async function connectDB() {
 
   try {
     cached!.conn = await cached!.promise;
-    console.log('✅ Connected to MongoDB Atlas');
+    logger.database('✅ Connected to MongoDB Atlas');
   } catch (e) {
     cached!.promise = null;
-    console.error('❌ MongoDB Atlas connection failed:', e);
+    logger.error('❌ MongoDB Atlas connection failed:', e);
     throw e;
   }
 

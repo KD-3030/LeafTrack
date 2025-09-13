@@ -4,6 +4,8 @@ import Invoice from '@/models/Invoice';
 import Payment from '@/models/Payment';
 import jwt from 'jsonwebtoken';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     // Verify authentication

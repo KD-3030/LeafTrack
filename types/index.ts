@@ -18,8 +18,10 @@ export interface Product {
   id: string;
   _id?: string;
   name: string;
-  price: number;
-  stock_quantity: number;
+  manufacturingCost: number;
+  totalStock: number;
+  hsn_code: string;
+  gst_rate: number;
   created_at: string;
   updated_at?: string;
 }
@@ -28,8 +30,9 @@ export interface Assignment {
   id: string;
   _id?: string;
   salesman_id: string | User;
-  product_id: string | Product;
+  productId: string | Product; // Changed from product_id to productId
   quantity: number;
+  sellingPricePerUnit: number; // Added selling price
   salesman?: User;
   product?: Product;
   created_at: string;

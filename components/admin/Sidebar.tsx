@@ -3,18 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { 
-  LayoutDashboard, 
-  Package, 
-  FolderOpen, 
-  Users,
-  MapPin,
-  FileText,
-  BarChart3,
-  UserCheck,
-  Settings,
-  DollarSign,
-} from 'lucide-react';
+import { LayoutDashboard, BarChart3, UserCheck, Settings, DollarSign, Package, Users, FileText, MapPin } from 'lucide-react';
 
 const navigation = [
   {
@@ -23,7 +12,7 @@ const navigation = [
     icon: LayoutDashboard,
   },
   {
-    name: 'Products',
+    name: 'Products',             //need to fix the pricing and stock feature
     href: '/admin/products',
     icon: Package,
   },
@@ -51,7 +40,7 @@ const financialNavigation = [
     icon: FileText,
   },
   {
-    name: 'Customers',
+    name: 'Customers',               //need to add this functionality to the salesman section
     href: '/admin/customers',
     icon: UserCheck,
   },

@@ -4,7 +4,9 @@ import Product, { IProduct } from '@/models/Product';
 import { verifyToken } from '@/lib/auth';
 import { Model } from 'mongoose';
 
-export async function GET(request: NextRequest) {
+export const dynamic = 'force-dynamic';
+
+export async function GET() {
   try {
     await connectDB();
     
@@ -48,12 +50,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { name, price, stock_quantity } = await request.json();
+    const { name, manufacturingCost, totalStock, hsn_code, gst_rate } = await request.json();
 
     // Validate input
-    if (!name || price === undefined || stock_quantity === undefined) {
+    if (!name || manufacturingCost === undefined || totalStock === undefined || !hsn_code || gst_rate === undefined) {
       return NextResponse.json(
-        { error: 'All fields are required' },
+        { error: 'All fields are required: name, manufacturingCost, totalStock, hsn_code, gst_rate' },
         { status: 400 }
       );
     }
@@ -62,8 +64,10 @@ export async function POST(request: NextRequest) {
     const ProductModel = Product as Model<IProduct>;
     const product = await ProductModel.create({
       name,
-      price: parseFloat(price),
-      stock_quantity: parseInt(stock_quantity),
+      manufacturingCost: parseFloat(manufacturingCost),
+      totalStock: parseInt(totalStock),
+      hsn_code,
+      gst_rate: parseFloat(gst_rate),
     });
 
     return NextResponse.json({

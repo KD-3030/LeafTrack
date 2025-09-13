@@ -26,15 +26,25 @@
       "static/chunks/main-app.js",
       "static/chunks/app/admin/layout.js"
     ],
-    "/salesman/dashboard/page": [
+    "/admin/products/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/salesman/dashboard/page.js"
+      "static/chunks/app/admin/products/page.js"
     ],
-    "/salesman/layout": [
+    "/admin/salesmen/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/salesman/layout.js"
+      "static/chunks/app/admin/salesmen/page.js"
+    ],
+    "/admin/locations/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/admin/locations/page.js"
+    ],
+    "/admin/financial/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/admin/financial/page.js"
     ]
   }
 }

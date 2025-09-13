@@ -100,10 +100,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   } catch (error) {
     console.error('Error updating customer:', error);
     
-    if (error.name === 'ValidationError') {
+    if ((error as any).name === 'ValidationError') {
       return NextResponse.json({ 
         error: 'Validation failed', 
-        details: error.message 
+        details: (error as any).message 
       }, { status: 400 });
     }
     
@@ -149,3 +149,5 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: 'Failed to delete customer' }, { status: 500 });
   }
 }
+
+export const dynamic = 'force-dynamic';

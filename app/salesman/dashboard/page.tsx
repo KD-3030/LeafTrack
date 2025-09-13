@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Assignment } from '@/types';
-import { stockManager, StockUpdate } from '@/lib/stockManager';
+import { stockManager } from '@/lib/stockManager';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -28,7 +28,7 @@ export default function SalesmanDashboard() {
     if (user) {
       loadAssignments();
     }
-  }, [user]);
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     // Subscribe to stock updates to refresh data
@@ -40,7 +40,7 @@ export default function SalesmanDashboard() {
     });
 
     return unsubscribe;
-  }, [user]);
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadAssignments = async () => {
     if (!user) return;
@@ -83,15 +83,18 @@ export default function SalesmanDashboard() {
         id: assignment._id,
         _id: assignment._id,
         salesman_id: assignment.salesman_id._id,
-        product_id: assignment.product_id._id,
+        productId: assignment.productId._id, // Use productId from API
         quantity: assignment.quantity,
+        sellingPricePerUnit: assignment.sellingPricePerUnit || 0, // Add selling price
         created_at: assignment.createdAt,
         product: {
-          id: assignment.product_id._id,
-          _id: assignment.product_id._id,
-          name: assignment.product_id.name,
-          price: assignment.product_id.price,
-          stock_quantity: assignment.quantity, // Use assignment quantity as stock
+          id: assignment.productId._id,
+          _id: assignment.productId._id,
+          name: assignment.productId.name,
+          manufacturingCost: assignment.productId.manufacturingCost || 0,
+          totalStock: assignment.productId.totalStock || 0, // Use product's actual stock
+          hsn_code: assignment.productId.hsn_code || '',
+          gst_rate: assignment.productId.gst_rate || 0,
           created_at: assignment.createdAt,
         }
       }));
@@ -139,11 +142,9 @@ export default function SalesmanDashboard() {
 
     try {
       // Record the sale
-      const productId = typeof selectedAssignment.product_id === 'string' 
-        ? selectedAssignment.product_id 
-        : selectedAssignment.product_id._id || selectedAssignment.product_id.id;
-        
-      stockManager.addStockUpdate({
+      const productId = typeof selectedAssignment.productId === 'string' 
+        ? selectedAssignment.productId 
+        : selectedAssignment.productId.id;      stockManager.addStockUpdate({
         assignmentId: assignmentId,
         quantitySold: quantityToSell,
         timestamp: new Date().toISOString(),
@@ -179,7 +180,7 @@ export default function SalesmanDashboard() {
   const totalAssignedItems = assignments.reduce((sum, assignment) => sum + assignment.quantity, 0);
   const totalSoldItems = assignments.reduce((sum, assignment) => sum + getTotalSold(assignment), 0);
   const totalRemainingItems = totalAssignedItems - totalSoldItems;
-  const uniqueProducts = new Set(assignments.map(a => a.product_id)).size;
+  const uniqueProducts = new Set(assignments.map(a => a.productId)).size;
 
   if (isLoading) {
     return (
@@ -363,7 +364,7 @@ export default function SalesmanDashboard() {
                   </div>
                   <div className="text-right">
                     <p className="text-sm font-medium text-gray-900">
-                      ₹{assignment.product?.price.toFixed(2)}/unit
+                      ₹{(assignment.sellingPricePerUnit || 0).toFixed(2)}/unit
                     </p>
                     <p className="text-xs text-gray-600">
                       {new Date(assignment.created_at).toLocaleDateString()}
@@ -445,7 +446,7 @@ export default function SalesmanDashboard() {
                     <TableCell>
                       <div className="flex items-center">
                         <span className="text-lg">₹</span>
-                        <span className="ml-1">{assignment.product?.price.toFixed(2)}</span>
+                        <span className="ml-1">{(assignment.sellingPricePerUnit || 0).toFixed(2)}</span>
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
@@ -492,7 +493,7 @@ export default function SalesmanDashboard() {
                               />
                               <p className="text-sm text-gray-600">
                                 Available: {getRemainingStock(assignment)} units | 
-                                Price: ₹{assignment.product?.price.toFixed(2)} per unit
+                                Price: ₹{assignment.sellingPricePerUnit?.toFixed(2) || '0.00'} per unit
                               </p>
                             </div>
                             

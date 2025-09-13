@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import Payment from '@/models/Payment';
 import Invoice from '@/models/Invoice';
+import Customer from '@/models/Customer';
 import jwt from 'jsonwebtoken';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {

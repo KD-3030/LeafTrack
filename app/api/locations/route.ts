@@ -5,6 +5,8 @@ import User from '@/models/User'; // Import User model to ensure it's registered
 import { verifyToken } from '@/lib/auth';
 import mongoose from 'mongoose';
 
+export const dynamic = 'force-dynamic';
+
 // GET - Retrieve locations (admin can get all, salesman can get own)
 export async function GET(request: NextRequest) {
   try {

@@ -6,18 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Separator } from '@/components/ui/separator';
-import { 
-  Building, 
-  Phone, 
-  Mail, 
-  MapPin, 
-  CreditCard, 
-  Settings,
-  Save,
-  RefreshCw
-} from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
+
+import { Building, Settings, Save, RefreshCw, CreditCard } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface CompanySettings {
@@ -72,7 +62,6 @@ const initialSettings: CompanySettings = {
 };
 
 export default function CompanySettingsPage() {
-  const { user } = useAuth();
   const [settings, setSettings] = useState<CompanySettings>(initialSettings);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);

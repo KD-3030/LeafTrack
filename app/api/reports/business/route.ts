@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Invoice, { IInvoice } from '@/models/Invoice';
-import Sale from '@/models/Sale';
-import Product from '@/models/Product';
-import User from '@/models/User';
+// import Sale from '@/models/Sale';
+// import Product from '@/models/Product';
+// import User from '@/models/User';
 import { verifyToken } from '@/lib/auth';
 import { Model } from 'mongoose';
+
+export const dynamic = 'force-dynamic';
 
 // GET - Generate business reports and analytics
 export async function GET(request: NextRequest) {
@@ -29,7 +31,7 @@ export async function GET(request: NextRequest) {
     const reportType = searchParams.get('type') || 'overview';
     const fromDate = searchParams.get('from_date');
     const toDate = searchParams.get('to_date');
-    const period = searchParams.get('period') || 'month'; // day, week, month, year
+    // const period = searchParams.get('period') || 'month'; // day, week, month, year
 
     // Default date range (last 30 days if not specified)
     const endDate = toDate ? new Date(toDate) : new Date();

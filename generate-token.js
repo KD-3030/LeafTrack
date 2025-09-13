@@ -1,8 +1,14 @@
 // Test script to create sample location data
 const jwt = require('jsonwebtoken');
+require('dotenv').config();
 
-// Replace with your actual JWT secret from .env
-const JWT_SECRET = '4e53fd7aa89a8706384d130fcc3f6755'; // You should use the actual secret from your .env file
+// Use JWT secret from environment variables
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('❌ JWT_SECRET not found in environment variables');
+  console.log('Please ensure .env.local file exists with JWT_SECRET defined');
+  process.exit(1);
+}
 
 // Create an admin token
 const adminToken = jwt.sign(

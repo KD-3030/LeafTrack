@@ -2,8 +2,9 @@ import mongoose, { Document, Schema, Model } from 'mongoose';
 
 export interface IAssignment extends Document {
   salesman_id: mongoose.Types.ObjectId;
-  product_id: mongoose.Types.ObjectId;
+  productId: mongoose.Types.ObjectId; // Changed from batchId to productId
   quantity: number;
+  sellingPricePerUnit: number; // Dynamic price for this assignment
   createdAt: Date;
   updatedAt: Date;
 }
@@ -14,7 +15,7 @@ const AssignmentSchema = new Schema<IAssignment>({
     ref: 'User',
     required: [true, 'Salesman ID is required'],
   },
-  product_id: {
+  productId: {
     type: Schema.Types.ObjectId,
     ref: 'Product',
     required: [true, 'Product ID is required'],
@@ -23,6 +24,11 @@ const AssignmentSchema = new Schema<IAssignment>({
     type: Number,
     required: [true, 'Quantity is required'],
     min: [1, 'Quantity must be at least 1'],
+  },
+  sellingPricePerUnit: {
+    type: Number,
+    required: [true, 'Selling price per unit is required'],
+    min: [0, 'Selling price must be positive'],
   },
 }, {
   timestamps: true,

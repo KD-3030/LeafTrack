@@ -8,24 +8,24 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Package, Plus, Edit, Trash2, IndianRupee } from 'lucide-react';
+import { Package, Plus, Edit, Trash2, IndianRupee, Package2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export default function ProductsPage() {
-  const { user } = useAuth();
+  const { } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [newProduct, setNewProduct] = useState({
     name: '',
-    price: '',
-    stock_quantity: '',
+    manufacturingCost: '',
+    totalStock: '',
+    hsn_code: '',
+    gst_rate: '18',
   });
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [addStockProduct, setAddStockProduct] = useState<Product | null>(null);
-  const [additionalStock, setAdditionalStock] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [isAddStockDialogOpen, setIsAddStockDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -50,22 +50,27 @@ export default function ProductsPage() {
       }
     } catch (error) {
       console.error('Error loading products:', error);
-      toast.error('Failed to load products');
+      toast.error('Error loading products');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleAddProduct = async (e: React.FormEvent) => {
+  const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!newProduct.name || !newProduct.price || !newProduct.stock_quantity) {
+
+    if (!newProduct.name || !newProduct.manufacturingCost || !newProduct.totalStock || !newProduct.hsn_code) {
       toast.error('Please fill in all fields');
       return;
     }
 
+    const token = getAuthToken();
+    if (!token) {
+      toast.error('Authentication required');
+      return;
+    }
+
     try {
-      const token = getAuthToken();
       const response = await fetch('/api/products', {
         method: 'POST',
         headers: {
@@ -74,34 +79,39 @@ export default function ProductsPage() {
         },
         body: JSON.stringify({
           name: newProduct.name,
-          price: parseFloat(newProduct.price),
-          stock_quantity: parseInt(newProduct.stock_quantity),
+          manufacturingCost: parseFloat(newProduct.manufacturingCost),
+          totalStock: parseInt(newProduct.totalStock),
+          hsn_code: newProduct.hsn_code,
+          gst_rate: parseFloat(newProduct.gst_rate),
         }),
       });
 
       const data = await response.json();
-
       if (data.success) {
         setProducts([data.product, ...products]);
-        setNewProduct({ name: '', price: '', stock_quantity: '' });
+        setNewProduct({ name: '', manufacturingCost: '', totalStock: '', hsn_code: '', gst_rate: '18' });
         setIsDialogOpen(false);
-        toast.success('Product added successfully');
+        toast.success('Product created successfully');
       } else {
-        toast.error(data.error || 'Failed to add product');
+        toast.error(data.error || 'Failed to create product');
       }
     } catch (error) {
-      console.error('Error adding product:', error);
-      toast.error('Failed to add product');
+      console.error('Error creating product:', error);
+      toast.error('Error creating product');
     }
   };
 
   const handleEditProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     if (!editingProduct) return;
 
+    const token = getAuthToken();
+    if (!token) {
+      toast.error('Authentication required');
+      return;
+    }
+
     try {
-      const token = getAuthToken();
       const response = await fetch(`/api/products/${editingProduct._id}`, {
         method: 'PUT',
         headers: {
@@ -110,17 +120,16 @@ export default function ProductsPage() {
         },
         body: JSON.stringify({
           name: editingProduct.name,
-          price: editingProduct.price,
-          stock_quantity: editingProduct.stock_quantity,
+          manufacturingCost: editingProduct.manufacturingCost,
+          totalStock: editingProduct.totalStock,
+          hsn_code: editingProduct.hsn_code,
+          gst_rate: editingProduct.gst_rate,
         }),
       });
 
       const data = await response.json();
-
       if (data.success) {
-        setProducts(prev => prev.map(p => 
-          p._id === editingProduct._id ? data.product : p
-        ));
+        setProducts(products.map(p => p._id === editingProduct._id ? data.product : p));
         setEditingProduct(null);
         setIsEditDialogOpen(false);
         toast.success('Product updated successfully');
@@ -129,54 +138,22 @@ export default function ProductsPage() {
       }
     } catch (error) {
       console.error('Error updating product:', error);
-      toast.error('Failed to update product');
-    }
-  };
-
-  const handleAddStock = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!addStockProduct || !additionalStock) return;
-
-    try {
-      const token = getAuthToken();
-      const response = await fetch(`/api/products/${addStockProduct._id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          name: addStockProduct.name,
-          price: addStockProduct.price,
-          stock_quantity: addStockProduct.stock_quantity + parseInt(additionalStock),
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setProducts(prev => prev.map(p => 
-          p._id === addStockProduct._id ? data.product : p
-        ));
-        setAdditionalStock('');
-        setAddStockProduct(null);
-        setIsAddStockDialogOpen(false);
-        toast.success('Stock added successfully');
-      } else {
-        toast.error(data.error || 'Failed to add stock');
-      }
-    } catch (error) {
-      console.error('Error adding stock:', error);
-      toast.error('Failed to add stock');
+      toast.error('Error updating product');
     }
   };
 
   const handleDeleteProduct = async (productId: string) => {
-    if (!confirm('Are you sure you want to delete this product?')) return;
+    if (!confirm('Are you sure you want to delete this product?')) {
+      return;
+    }
+
+    const token = getAuthToken();
+    if (!token) {
+      toast.error('Authentication required');
+      return;
+    }
 
     try {
-      const token = getAuthToken();
       const response = await fetch(`/api/products/${productId}`, {
         method: 'DELETE',
         headers: {
@@ -185,329 +162,318 @@ export default function ProductsPage() {
       });
 
       const data = await response.json();
-
       if (data.success) {
-        setProducts(prev => prev.filter(p => p._id !== productId));
+        setProducts(products.filter(p => p._id !== productId));
         toast.success('Product deleted successfully');
       } else {
         toast.error(data.error || 'Failed to delete product');
       }
     } catch (error) {
       console.error('Error deleting product:', error);
-      toast.error('Failed to delete product');
+      toast.error('Error deleting product');
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
-      </div>
-    );
-  }
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+    }).format(amount);
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Products Management</h1>
-          <p className="text-gray-600 mt-2">Manage your tea leaf inventory and pricing</p>
-        </div>
-        
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="bg-green-600 hover:bg-green-700 shadow-lg">
-              <Plus className="h-4 w-4 mr-2" />
-              Add New Product
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="flex items-center space-x-2">
-                <Package className="h-5 w-5 text-green-600" />
-                <span>Add New Product</span>
-              </DialogTitle>
-              <DialogDescription>
-                Create a new tea product for your inventory.
-              </DialogDescription>
-            </DialogHeader>
-            <form onSubmit={handleAddProduct} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="productName">Product Name</Label>
-                <Input
-                  id="productName"
-                  value={newProduct.name}
-                  onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
-                  placeholder="e.g., Earl Grey Premium"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="price" className="flex items-center space-x-1">
+    <div className="min-h-screen bg-[#F5F5DC] p-6">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
+              <Package className="h-8 w-8 text-green-600" />
+              Products Management
+            </h1>
+            <p className="text-gray-600 mt-2">
+              Manage your product inventory with manufacturing costs and stock levels
+            </p>
+          </div>
+          
+          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="bg-green-600 hover:bg-green-700 text-white">
+                <Plus className="h-4 w-4 mr-2" />
+                Add New Product
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="bg-white">
+              <DialogHeader>
+                <DialogTitle>Add New Product</DialogTitle>
+                <DialogDescription>
+                  Create a new product with manufacturing cost and initial stock.
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={handleCreateProduct} className="space-y-4">
+                <div>
+                  <Label htmlFor="name">Product Name *</Label>
+                  <Input
+                    id="name"
+                    value={newProduct.name}
+                    onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
+                    placeholder="Enter product name"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <Label htmlFor="manufacturingCost" className="flex items-center space-x-1">
                     <IndianRupee className="h-4 w-4" />
-                    <span>Price (INR)</span>
+                    <span>Manufacturing Cost (INR) *</span>
                   </Label>
                   <Input
-                    id="price"
+                    id="manufacturingCost"
                     type="number"
                     step="0.01"
-                    value={newProduct.price}
-                    onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })}
+                    value={newProduct.manufacturingCost}
+                    onChange={(e) => setNewProduct({ ...newProduct, manufacturingCost: e.target.value })}
                     placeholder="0.00"
                     required
                   />
                 </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="stock">Initial Stock</Label>
+                
+                <div>
+                  <Label htmlFor="totalStock">Initial Stock Quantity *</Label>
                   <Input
-                    id="stock"
+                    id="totalStock"
                     type="number"
-                    value={newProduct.stock_quantity}
-                    onChange={(e) => setNewProduct({ ...newProduct, stock_quantity: e.target.value })}
+                    value={newProduct.totalStock}
+                    onChange={(e) => setNewProduct({ ...newProduct, totalStock: e.target.value })}
                     placeholder="0"
                     required
                   />
                 </div>
-              </div>
+                
+                <div>
+                  <Label htmlFor="hsn_code">HSN Code *</Label>
+                  <Input
+                    id="hsn_code"
+                    value={newProduct.hsn_code}
+                    onChange={(e) => setNewProduct({ ...newProduct, hsn_code: e.target.value })}
+                    placeholder="Enter HSN code"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <Label htmlFor="gst_rate">GST Rate (%) *</Label>
+                  <Select
+                    value={newProduct.gst_rate}
+                    onValueChange={(value) => setNewProduct({ ...newProduct, gst_rate: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select GST rate" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">0%</SelectItem>
+                      <SelectItem value="5">5%</SelectItem>
+                      <SelectItem value="12">12%</SelectItem>
+                      <SelectItem value="18">18%</SelectItem>
+                      <SelectItem value="28">28%</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div className="flex justify-end space-x-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsDialogOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" className="bg-green-600 hover:bg-green-700">
+                    Create Product
+                  </Button>
+                </div>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
 
-              <Button type="submit" className="w-full bg-green-600 hover:bg-green-700">
-                Add Product
-              </Button>
-            </form>
+        <Card className="bg-white shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Package2 className="h-5 w-5" />
+              Products Overview
+            </CardTitle>
+            <CardDescription>
+              View and manage all your products, their costs, and stock levels
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="flex justify-center items-center p-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Product Name</TableHead>
+                      <TableHead>Manufacturing Cost</TableHead>
+                      <TableHead>Current Stock</TableHead>
+                      <TableHead>HSN Code</TableHead>
+                      <TableHead>GST Rate</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {products.map((product) => (
+                      <TableRow key={product._id}>
+                        <TableCell className="font-medium">{product.name}</TableCell>
+                        <TableCell>{formatCurrency(product.manufacturingCost)}</TableCell>
+                        <TableCell>
+                          <span className={`font-medium ${
+                            (product.totalStock || 0) <= 10 ? 'text-red-600' : 
+                            (product.totalStock || 0) <= 50 ? 'text-yellow-600' : 'text-green-600'
+                          }`}>
+                            {product.totalStock || 0} units
+                          </span>
+                        </TableCell>
+                        <TableCell>{product.hsn_code}</TableCell>
+                        <TableCell>{product.gst_rate}%</TableCell>
+                        <TableCell>
+                          <div className="flex items-center space-x-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setEditingProduct(product);
+                                setIsEditDialogOpen(true);
+                              }}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => handleDeleteProduct(product._id!)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                
+                {products.length === 0 && (
+                  <div className="text-center py-8">
+                    <Package className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">No products found</h3>
+                    <p className="text-gray-500">Create your first product to get started.</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Edit Product Dialog */}
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent className="bg-white">
+            <DialogHeader>
+              <DialogTitle>Edit Product</DialogTitle>
+              <DialogDescription>
+                Update product information and manage stock levels.
+              </DialogDescription>
+            </DialogHeader>
+            {editingProduct && (
+              <form onSubmit={handleEditProduct} className="space-y-4">
+                <div>
+                  <Label htmlFor="edit-name">Product Name *</Label>
+                  <Input
+                    id="edit-name"
+                    value={editingProduct.name}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
+                    placeholder="Enter product name"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <Label htmlFor="edit-manufacturingCost" className="flex items-center space-x-1">
+                    <IndianRupee className="h-4 w-4" />
+                    <span>Manufacturing Cost (INR) *</span>
+                  </Label>
+                  <Input
+                    id="edit-manufacturingCost"
+                    type="number"
+                    step="0.01"
+                    value={editingProduct.manufacturingCost}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, manufacturingCost: parseFloat(e.target.value) })}
+                    placeholder="0.00"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <Label htmlFor="edit-totalStock">Total Stock *</Label>
+                  <Input
+                    id="edit-totalStock"
+                    type="number"
+                    value={editingProduct.totalStock || 0}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, totalStock: parseInt(e.target.value) || 0 })}
+                    placeholder="0"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <Label htmlFor="edit-hsn_code">HSN Code *</Label>
+                  <Input
+                    id="edit-hsn_code"
+                    value={editingProduct.hsn_code}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, hsn_code: e.target.value })}
+                    placeholder="Enter HSN code"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <Label htmlFor="edit-gst_rate">GST Rate (%) *</Label>
+                  <Select
+                    value={editingProduct.gst_rate.toString()}
+                    onValueChange={(value) => setEditingProduct({ ...editingProduct, gst_rate: parseFloat(value) })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select GST rate" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">0%</SelectItem>
+                      <SelectItem value="5">5%</SelectItem>
+                      <SelectItem value="12">12%</SelectItem>
+                      <SelectItem value="18">18%</SelectItem>
+                      <SelectItem value="28">28%</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div className="flex justify-end space-x-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsEditDialogOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" className="bg-green-600 hover:bg-green-700">
+                    Update Product
+                  </Button>
+                </div>
+              </form>
+            )}
           </DialogContent>
         </Dialog>
       </div>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="border-l-4 border-l-green-500">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Total Products</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-gray-900">{products.length}</div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-l-4 border-l-blue-500">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Total Stock</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-gray-900">
-              {products.reduce((sum, p) => sum + p.stock_quantity, 0)}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-l-4 border-l-purple-500">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Avg. Price</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-gray-900 flex items-center">
-              <IndianRupee className="h-5 w-5 mr-1" />
-              {products.length > 0 ? Math.round(products.reduce((sum, p) => sum + p.price, 0) / products.length) : 0}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="shadow-lg">
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <Package className="h-5 w-5 text-green-600" />
-            <span>All Products</span>
-          </CardTitle>
-          <CardDescription>
-            Manage your tea leaf product inventory and pricing
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {products.length === 0 ? (
-            <div className="text-center py-12">
-              <Package className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No Products Found</h3>
-              <p className="text-gray-600 mb-4">Add your first product to get started.</p>
-              <Button onClick={() => setIsDialogOpen(true)} className="bg-green-600 hover:bg-green-700">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Product
-              </Button>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Product Name</TableHead>
-                    <TableHead>Price (INR)</TableHead>
-                    <TableHead>Stock Quantity</TableHead>
-                    <TableHead>Last Updated</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {products.map((product) => (
-                    <TableRow key={product._id} className="hover:bg-gray-50">
-                      <TableCell className="font-medium">{product.name}</TableCell>
-                      <TableCell className="flex items-center">
-                        <IndianRupee className="h-4 w-4 mr-1" />
-                        {product.price.toFixed(2)}
-                      </TableCell>
-                      <TableCell>
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          product.stock_quantity > 100 ? 'bg-green-100 text-green-800' :
-                          product.stock_quantity > 50 ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-red-100 text-red-800'
-                        }`}>
-                          {product.stock_quantity}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-gray-600 text-sm">
-                        {product.updated_at ? new Date(product.updated_at).toLocaleDateString() : 'N/A'}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end space-x-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setAddStockProduct(product);
-                              setIsAddStockDialogOpen(true);
-                            }}
-                            className="text-blue-600 hover:text-blue-700"
-                          >
-                            <Plus className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setEditingProduct(product);
-                              setIsEditDialogOpen(true);
-                            }}
-                            className="text-green-600 hover:text-green-700"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleDeleteProduct(product._id)}
-                            className="text-red-600 hover:text-red-700"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Edit Product Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center space-x-2">
-              <Edit className="h-5 w-5 text-green-600" />
-              <span>Edit Product</span>
-            </DialogTitle>
-            <DialogDescription>
-              Update the product information.
-            </DialogDescription>
-          </DialogHeader>
-          {editingProduct && (
-            <form onSubmit={handleEditProduct} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="editProductName">Product Name</Label>
-                <Input
-                  id="editProductName"
-                  value={editingProduct.name}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="editPrice" className="flex items-center space-x-1">
-                    <IndianRupee className="h-4 w-4" />
-                    <span>Price (INR)</span>
-                  </Label>
-                  <Input
-                    id="editPrice"
-                    type="number"
-                    step="0.01"
-                    value={editingProduct.price}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, price: parseFloat(e.target.value) })}
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="editStock">Stock Quantity</Label>
-                  <Input
-                    id="editStock"
-                    type="number"
-                    value={editingProduct.stock_quantity}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, stock_quantity: parseInt(e.target.value) })}
-                    required
-                  />
-                </div>
-              </div>
-
-              <Button type="submit" className="w-full bg-green-600 hover:bg-green-700">
-                Update Product
-              </Button>
-            </form>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Stock Dialog */}
-      <Dialog open={isAddStockDialogOpen} onOpenChange={setIsAddStockDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center space-x-2">
-              <Plus className="h-5 w-5 text-blue-600" />
-              <span>Add Stock</span>
-            </DialogTitle>
-            <DialogDescription>
-              Add more inventory to {addStockProduct?.name}
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleAddStock} className="space-y-4">
-            <div className="bg-gray-50 p-4 rounded-lg">
-              <p className="text-sm text-gray-600">Current Stock: <span className="font-medium">{addStockProduct?.stock_quantity}</span></p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="additionalStock">Additional Stock Quantity</Label>
-              <Input
-                id="additionalStock"
-                type="number"
-                min="1"
-                value={additionalStock}
-                onChange={(e) => setAdditionalStock(e.target.value)}
-                placeholder="Enter quantity to add"
-                required
-              />
-            </div>
-
-            <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">
-              Add Stock
-            </Button>
-          </form>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

@@ -3,6 +3,14 @@ import { connectDB } from '@/lib/mongodb';
 import Invoice from '@/models/Invoice';
 import Payment from '@/models/Payment';
 import jwt from 'jsonwebtoken';
+import mongoose from 'mongoose';
+
+export const dynamic = 'force-dynamic';
+
+interface JWTPayload {
+  role: string;
+  id: string;
+}
 
 // GET - Get specific invoice
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
@@ -16,15 +24,18 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
     const token = authHeader.substring(7);
     
-    let decoded;
+    let decoded: JWTPayload;
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
-    } catch (error) {
+      decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
+    } catch {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
     
     // Build filter
-    const filter: any = { _id: params.id };
+    const filter: {
+      _id: string;
+      salesman_id?: string | mongoose.Types.ObjectId;
+    } = { _id: params.id };
     
     // If user is a salesman, only show their invoices
     if (decoded.role === 'salesman') {
@@ -75,14 +86,14 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
     const token = authHeader.substring(7);
     
-    let decoded;
+    let decoded: JWTPayload;
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
-    } catch (error) {
+      decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
+    } catch {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
     
-    if (decoded.role !== 'admin') {
+    if (decoded.role !== 'Admin') {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -123,7 +134,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
     // Update allowed invoice fields
     const allowedUpdates = ['status', 'notes', 'due_date'];
-    const filteredUpdates: any = {};
+    const filteredUpdates: Record<string, string | Date> = {};
     
     allowedUpdates.forEach(field => {
       if (updates[field] !== undefined) {
@@ -141,6 +152,13 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       filteredUpdates,
       { new: true, runValidators: true }
     ).lean();
+
+    if (!updatedInvoice) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Invoice not found after update' 
+      }, { status: 404 });
+    }
 
     // Recalculate payment status
     const allPayments = await Payment.find({
@@ -183,14 +201,14 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
 
     const token = authHeader.substring(7);
     
-    let decoded;
+    let decoded: JWTPayload;
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
-    } catch (error) {
+      decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
+    } catch {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
     
-    if (decoded.role !== 'admin') {
+    if (decoded.role !== 'Admin') {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 

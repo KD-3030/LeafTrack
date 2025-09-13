@@ -4,6 +4,8 @@ import CompanySettings, { ICompanySettings } from '@/models/CompanySettings';
 import { verifyToken } from '@/lib/auth';
 import { Model } from 'mongoose';
 
+export const dynamic = 'force-dynamic';
+
 // GET - Get company settings
 export async function GET(request: NextRequest) {
   try {
@@ -88,14 +90,12 @@ export async function PUT(request: NextRequest) {
     });
   } catch (error) {
     console.error('Error updating company settings:', error);
-    
-    if (error.name === 'ValidationError') {
-      return NextResponse.json({ 
-        error: 'Validation failed', 
-        details: error.message 
+
+    if ((error as any).name === 'ValidationError') {
+      return NextResponse.json({
+        error: 'Validation failed',
+        details: (error as any).message
       }, { status: 400 });
-    }
-    
-    return NextResponse.json({ error: 'Failed to update settings' }, { status: 500 });
+    }    return NextResponse.json({ error: 'Failed to update settings' }, { status: 500 });
   }
 }

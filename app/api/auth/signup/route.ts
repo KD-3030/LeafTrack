@@ -4,6 +4,8 @@ import User, { IUser } from '@/models/User';
 import { hashPassword, generateToken } from '@/lib/auth';
 import { Model } from 'mongoose';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   try {
     await connectDB();
@@ -40,11 +42,11 @@ export async function POST(request: NextRequest) {
     });
 
     // Generate token
-    const token = generateToken(user._id.toString(), user.role);
+    const token = generateToken((user._id as string).toString(), user.role);
 
     // Return user data (without password)
     const userData = {
-      id: user._id.toString(),
+      id: (user._id as string).toString(),
       name: user.name,
       email: user.email,
       role: user.role,

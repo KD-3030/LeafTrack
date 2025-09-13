@@ -7,6 +7,7 @@ export interface ISale extends Document {
   customer_id?: mongoose.Types.ObjectId; // Reference to customer
   quantity_sold: number;
   unit_price: number; // Actual selling price
+  priceAtSale: number; // Price at the moment of sale (from assignment)
   discount_percentage: number; // Discount given
   total_amount: number; // Final amount after discount
   sale_date: Date;
@@ -46,6 +47,11 @@ const SaleSchema = new Schema<ISale>({
     type: Number,
     required: [true, 'Unit price is required'],
     min: [0, 'Unit price must be positive'],
+  },
+  priceAtSale: {
+    type: Number,
+    required: [true, 'Price at sale is required'],
+    min: [0, 'Price at sale must be positive'],
   },
   discount_percentage: {
     type: Number,

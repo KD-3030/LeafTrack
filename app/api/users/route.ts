@@ -4,7 +4,9 @@ import User, { IUser } from '@/models/User';
 import { verifyToken } from '@/lib/auth';
 import { Model } from 'mongoose';
 
-export async function GET(request: NextRequest) {
+export const dynamic = 'force-dynamic';
+
+export async function GET() {
   try {
     await connectDB();
     

@@ -8,12 +8,10 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Users, Package, Edit, Trash2, UserPlus } from 'lucide-react';
+import { Edit, Trash2, Users, Package, Plus, IndianRupee, User as UserIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import { useAuth } from '@/contexts/AuthContext';
 
 export default function SalesmenPage() {
-  const { user } = useAuth();
   const [salesmen, setSalesmen] = useState<User[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -21,15 +19,24 @@ export default function SalesmenPage() {
   const [editingSalesman, setEditingSalesman] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
+  const [newSalesman, setNewSalesman] = useState({
+    name: '',
+    email: '',
+    password: '',
+  });
   const [newAssignment, setNewAssignment] = useState({
-    product_id: '',
+    productId: '',
     quantity: '',
+    sellingPricePerUnit: '',
   });
 
   useEffect(() => {
     loadSalesmen();
     loadProducts();
     loadAssignments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const getAuthToken = () => {
@@ -85,6 +92,46 @@ export default function SalesmenPage() {
       }
     } catch (error) {
       console.error('Error loading assignments:', error);
+    }
+  };
+
+  const handleCreateSalesman = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!newSalesman.name || !newSalesman.email || !newSalesman.password) {
+      toast.error('Please fill in all fields');
+      return;
+    }
+
+    try {
+      const token = getAuthToken();
+      const response = await fetch('/api/users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: newSalesman.name,
+          email: newSalesman.email,
+          password: newSalesman.password,
+          role: 'Salesman'
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setSalesmen(prev => [data.user, ...prev]);
+        setNewSalesman({ name: '', email: '', password: '' });
+        setIsAddDialogOpen(false);
+        toast.success('Salesman created successfully');
+      } else {
+        toast.error(data.error || 'Failed to create salesman');
+      }
+    } catch (error) {
+      console.error('Error creating salesman:', error);
+      toast.error('Failed to create salesman');
     }
   };
 
@@ -152,10 +199,10 @@ export default function SalesmenPage() {
     }
   };
 
-  const handleAssignStock = async (e: React.FormEvent) => {
+  const handleCreateAssignment = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!selectedSalesman || !newAssignment.product_id || !newAssignment.quantity) {
+    if (!selectedSalesman || !newAssignment.productId || !newAssignment.quantity || !newAssignment.sellingPricePerUnit) {
       toast.error('Please fill in all fields');
       return;
     }
@@ -169,300 +216,449 @@ export default function SalesmenPage() {
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
-          salesman_id: selectedSalesman._id,
-          product_id: newAssignment.product_id,
+          salesmanId: selectedSalesman._id,
+          productId: newAssignment.productId,
           quantity: parseInt(newAssignment.quantity),
+          sellingPricePerUnit: parseFloat(newAssignment.sellingPricePerUnit),
         }),
       });
 
       const data = await response.json();
 
       if (data.success) {
-        setAssignments([data.assignment, ...assignments]);
-        toast.success('Stock assigned successfully');
-        setNewAssignment({ product_id: '', quantity: '' });
-        setSelectedSalesman(null);
+        setAssignments(prev => [data.assignment, ...prev]);
+        setNewAssignment({ productId: '', quantity: '', sellingPricePerUnit: '' });
+        setIsAssignDialogOpen(false);
+        toast.success('Product assigned successfully');
+        // Reload products to get updated stock
+        loadProducts();
       } else {
-        toast.error(data.error || 'Failed to assign stock');
+        toast.error(data.error || 'Failed to create assignment');
       }
     } catch (error) {
-      console.error('Error assigning stock:', error);
-      toast.error('Failed to assign stock');
+      console.error('Error creating assignment:', error);
+      toast.error('Failed to create assignment');
     }
   };
 
-  const getSalesmanAssignments = (salesmanId: string) => {
-    return assignments.filter(assignment => {
-      // Handle both populated object and string ID cases
-      const assignmentSalesmanId = typeof assignment.salesman_id === 'object' 
-        ? assignment.salesman_id?._id || assignment.salesman_id?.id
-        : assignment.salesman_id;
-      return assignmentSalesmanId === salesmanId;
-    });
+  const handleDeleteAssignment = async (assignmentId: string) => {
+    if (!confirm('Are you sure you want to delete this assignment?')) return;
+
+    try {
+      const token = getAuthToken();
+      const response = await fetch(`/api/assignments/${assignmentId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setAssignments(prev => prev.filter(a => a._id !== assignmentId));
+        toast.success('Assignment deleted successfully');
+        // Reload products to get updated stock
+        loadProducts();
+      } else {
+        toast.error(data.error || 'Failed to delete assignment');
+      }
+    } catch (error) {
+      console.error('Error deleting assignment:', error);
+      toast.error('Failed to delete assignment');
+    }
   };
 
-  const getSalesmanSales = (salesmanId: string) => {
-    // This would come from sales data when implemented
-    return 0;
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+    }).format(amount);
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
-      </div>
-    );
-  }
+  const getProductName = (productId: string | Product) => {
+    if (typeof productId === 'object' && productId.name) {
+      return productId.name;
+    }
+    const product = products.find(p => p._id === productId);
+    return product ? product.name : 'Unknown Product';
+  };
+
+  const getSalesmanName = (salesmanId: string | User) => {
+    if (typeof salesmanId === 'object' && salesmanId.name) {
+      return salesmanId.name;
+    }
+    const salesman = salesmen.find(s => s._id === salesmanId);
+    return salesman ? salesman.name : 'Unknown Salesman';
+  };
+
+  const selectedProduct = products.find(p => p._id === newAssignment.productId);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Salesmen Management</h1>
-        <p className="text-gray-600 mt-2">Manage salesmen and assign stock allocations</p>
-      </div>
+    <div className="min-h-screen bg-[#F5F5DC] p-6">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
+              <Users className="h-8 w-8 text-green-600" />
+              Salesmen Management
+            </h1>
+            <p className="text-gray-600 mt-2">
+              Manage salesmen and assign products with custom pricing
+            </p>
+          </div>
+          
+          <div className="flex gap-2">
+            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+              <DialogTrigger asChild>
+                <Button className="bg-green-600 hover:bg-green-700 text-white">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Salesman
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="bg-white">
+                <DialogHeader>
+                  <DialogTitle>Add New Salesman</DialogTitle>
+                  <DialogDescription>
+                    Create a new salesman account with login credentials.
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleCreateSalesman} className="space-y-4">
+                  <div>
+                    <Label htmlFor="name">Full Name *</Label>
+                    <Input
+                      id="name"
+                      value={newSalesman.name}
+                      onChange={(e) => setNewSalesman({ ...newSalesman, name: e.target.value })}
+                      placeholder="Enter full name"
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="email">Email Address *</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={newSalesman.email}
+                      onChange={(e) => setNewSalesman({ ...newSalesman, email: e.target.value })}
+                      placeholder="Enter email address"
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="password">Password *</Label>
+                    <Input
+                      id="password"
+                      type="password"
+                      value={newSalesman.password}
+                      onChange={(e) => setNewSalesman({ ...newSalesman, password: e.target.value })}
+                      placeholder="Enter password"
+                      required
+                    />
+                  </div>
+                  
+                  <div className="flex justify-end space-x-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setIsAddDialogOpen(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button type="submit" className="bg-green-600 hover:bg-green-700">
+                      Create Salesman
+                    </Button>
+                  </div>
+                </form>
+              </DialogContent>
+            </Dialog>
 
-      <div className="grid lg:grid-cols-2 gap-6">
-        {/* Salesmen List */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2">
-              <Users className="h-5 w-5 text-green-600" />
-              <span>Salesmen</span>
-            </CardTitle>
-            <CardDescription>
-              All registered salesmen in the system
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {salesmen.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
-                No salesmen found. They can register via the signup page.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {salesmen.map((salesman) => {
-                  const salesmanAssignments = getSalesmanAssignments(salesman._id || salesman.id);
-                  const salesmanSales = getSalesmanSales(salesman._id || salesman.id);
-                  return (
-                    <div key={salesman._id || salesman.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
+            <Dialog open={isAssignDialogOpen} onOpenChange={setIsAssignDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" className="border-green-600 text-green-600 hover:bg-green-50">
+                  <Package className="h-4 w-4 mr-2" />
+                  Assign Product
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="bg-white">
+                <DialogHeader>
+                  <DialogTitle>Assign Product to Salesman</DialogTitle>
+                  <DialogDescription>
+                    Select a salesman, product, quantity, and set the selling price.
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleCreateAssignment} className="space-y-4">
+                  <div>
+                    <Label htmlFor="salesman">Salesman *</Label>
+                    <Select
+                      value={selectedSalesman?._id || ''}
+                      onValueChange={(value) => {
+                        const salesman = salesmen.find(s => s._id === value);
+                        setSelectedSalesman(salesman || null);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a salesman" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {salesmen.map((salesman) => (
+                          <SelectItem key={salesman._id} value={salesman._id!}>
+                            {salesman.name} ({salesman.email})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="product">Product *</Label>
+                    <Select
+                      value={newAssignment.productId}
+                      onValueChange={(value) => setNewAssignment({ ...newAssignment, productId: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a product" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {products.filter(product => product.totalStock > 0).map((product) => (
+                          <SelectItem key={product._id} value={product._id!}>
+                            {product.name} (Stock: {product.totalStock} units)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="quantity">Quantity *</Label>
+                    <Input
+                      id="quantity"
+                      type="number"
+                      min="1"
+                      max={selectedProduct?.totalStock || 999999}
+                      value={newAssignment.quantity}
+                      onChange={(e) => setNewAssignment({ ...newAssignment, quantity: e.target.value })}
+                      placeholder="Enter quantity to assign"
+                      required
+                    />
+                    {selectedProduct && (
+                      <p className="text-sm text-gray-500 mt-1">
+                        Available stock: {selectedProduct.totalStock} units
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <Label htmlFor="sellingPrice" className="flex items-center space-x-1">
+                      <IndianRupee className="h-4 w-4" />
+                      <span>Selling Price Per Unit (INR) *</span>
+                    </Label>
+                    <Input
+                      id="sellingPrice"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={newAssignment.sellingPricePerUnit}
+                      onChange={(e) => setNewAssignment({ ...newAssignment, sellingPricePerUnit: e.target.value })}
+                      placeholder="0.00"
+                      required
+                    />
+                    {selectedProduct && (
+                      <p className="text-sm text-gray-500 mt-1">
+                        Manufacturing cost: {formatCurrency(selectedProduct.manufacturingCost)} per unit
+                      </p>
+                    )}
+                  </div>
+
+                  {selectedProduct && newAssignment.quantity && newAssignment.sellingPricePerUnit && (
+                    <div className="p-4 bg-gray-50 rounded-lg">
+                      <h4 className="font-medium text-gray-900 mb-2">Assignment Summary</h4>
+                      <div className="space-y-1 text-sm">
+                        <p>Total Cost: {formatCurrency(selectedProduct.manufacturingCost * parseInt(newAssignment.quantity))}</p>
+                        <p>Total Selling Price: {formatCurrency(parseFloat(newAssignment.sellingPricePerUnit) * parseInt(newAssignment.quantity))}</p>
+                        <p className="font-medium text-green-600">
+                          Profit Margin: {formatCurrency((parseFloat(newAssignment.sellingPricePerUnit) - selectedProduct.manufacturingCost) * parseInt(newAssignment.quantity))}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  
+                  <div className="flex justify-end space-x-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setIsAssignDialogOpen(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button type="submit" className="bg-green-600 hover:bg-green-700">
+                      Assign Product
+                    </Button>
+                  </div>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* Salesmen Card */}
+          <Card className="bg-white shadow-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <UserIcon className="h-5 w-5" />
+                Salesmen ({salesmen.length})
+              </CardTitle>
+              <CardDescription>
+                All registered salesmen in the system
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <div className="flex justify-center items-center p-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
+                </div>
+              ) : salesmen.length === 0 ? (
+                <div className="text-center py-8">
+                  <UserIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No salesmen found</h3>
+                  <p className="text-gray-500">Create your first salesman to get started.</p>
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-80 overflow-y-auto">
+                  {salesmen.map((salesman) => (
+                    <div key={salesman._id} className="flex items-center justify-between p-3 border rounded-lg">
                       <div>
                         <h4 className="font-medium text-gray-900">{salesman.name}</h4>
-                        <p className="text-sm text-gray-600">{salesman.email}</p>
-                        <div className="flex space-x-4 text-xs">
-                          <span className="text-blue-600">
-                            {salesmanAssignments.length} assignments
-                          </span>
-                          <span className="text-green-600">
-                            {salesmanSales} items sold
-                          </span>
-                        </div>
+                        <p className="text-sm text-gray-500">{salesman.email}</p>
                       </div>
-                      
-                      <div className="flex space-x-2">
-                        {/* Edit Button */}
+                      <div className="flex items-center space-x-1">
                         <Button
-                          size="sm"
                           variant="outline"
+                          size="sm"
                           onClick={() => {
                             setEditingSalesman(salesman);
                             setIsEditDialogOpen(true);
                           }}
-                          className="text-blue-600 hover:text-blue-700"
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
-
-                        {/* Assign Stock Button */}
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <Button
-                              size="sm"
-                              onClick={() => setSelectedSalesman(salesman)}
-                              className="bg-green-600 hover:bg-green-700"
-                            >
-                              <Package className="h-4 w-4 mr-1" />
-                              Assign
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent>
-                            <DialogHeader>
-                              <DialogTitle>Assign Stock to {salesman.name}</DialogTitle>
-                              <DialogDescription>
-                                Select a product and quantity to assign to this salesman.
-                              </DialogDescription>
-                            </DialogHeader>
-                            <form onSubmit={handleAssignStock} className="space-y-4">
-                              <div className="space-y-2">
-                                <Label htmlFor="product">Product</Label>
-                                <Select
-                                  value={newAssignment.product_id}
-                                  onValueChange={(value) => setNewAssignment({ ...newAssignment, product_id: value })}
-                                  required
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select a product" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {products.map((product) => (
-                                      <SelectItem key={product._id || product.id} value={product._id || product.id}>
-                                        {product.name} (Stock: {product.stock_quantity})
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              
-                              <div className="space-y-2">
-                                <Label htmlFor="quantity">Quantity</Label>
-                                <Input
-                                  id="quantity"
-                                  type="number"
-                                  value={newAssignment.quantity}
-                                  onChange={(e) => setNewAssignment({ ...newAssignment, quantity: e.target.value })}
-                                  placeholder="Enter quantity"
-                                  required
-                                />
-                              </div>
-                              
-                              <Button type="submit" className="w-full bg-green-600 hover:bg-green-700">
-                                Assign Stock
-                              </Button>
-                            </form>
-                          </DialogContent>
-                        </Dialog>
-
-                        {/* Delete Button */}
                         <Button
+                          variant="destructive"
                           size="sm"
-                          variant="outline"
-                          onClick={() => handleDeleteSalesman(salesman._id || salesman.id)}
-                          className="text-red-600 hover:text-red-700"
+                          onClick={() => handleDeleteSalesman(salesman._id!)}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
-        {/* Recent Assignments */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2">
-              <Package className="h-5 w-5 text-green-600" />
-              <span>Recent Assignments</span>
-            </CardTitle>
-            <CardDescription>
-              Latest stock assignments to salesmen
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {assignments.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
-                No assignments found. Start assigning stock to salesmen.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {assignments.slice(0, 10).map((assignment) => (
-                  <div key={assignment._id || assignment.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
-                    <div>
-                      <h4 className="font-medium text-gray-900">
-                        {typeof assignment.salesman_id === 'object' && assignment.salesman_id?.name 
-                          ? assignment.salesman_id.name 
-                          : 'Unknown Salesman'}
-                      </h4>
-                      <p className="text-sm text-gray-600">
-                        {typeof assignment.product_id === 'object' && assignment.product_id?.name 
-                          ? assignment.product_id.name 
-                          : 'Unknown Product'}
-                      </p>
+          {/* Product Assignments Card */}
+          <Card className="bg-white shadow-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Package className="h-5 w-5" />
+                Active Assignments ({assignments.length})
+              </CardTitle>
+              <CardDescription>
+                Current product assignments to salesmen
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {assignments.length === 0 ? (
+                <div className="text-center py-8">
+                  <Package className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No assignments found</h3>
+                  <p className="text-gray-500">Assign products to salesmen to get started.</p>
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-80 overflow-y-auto">
+                  {assignments.map((assignment) => (
+                    <div key={assignment._id} className="p-3 border rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="font-medium text-gray-900">
+                          {getProductName(assignment.productId)}
+                        </h4>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => handleDeleteAssignment(assignment._id!)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="text-sm text-gray-600 space-y-1">
+                        <p>Salesman: {getSalesmanName(assignment.salesman_id)}</p>
+                        <p>Quantity: {assignment.quantity} units</p>
+                        <p>Selling Price: {formatCurrency(assignment.sellingPricePerUnit)} per unit</p>
+                        <p className="font-medium">Total Value: {formatCurrency(assignment.quantity * assignment.sellingPricePerUnit)}</p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="font-medium text-gray-900">Qty: {assignment.quantity}</p>
-                      <p className="text-xs text-gray-500">
-                        {assignment.createdAt ? new Date(assignment.createdAt).toLocaleDateString() : 'Unknown Date'}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Edit Salesman Dialog */}
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent className="bg-white">
+            <DialogHeader>
+              <DialogTitle>Edit Salesman</DialogTitle>
+              <DialogDescription>
+                Update salesman information.
+              </DialogDescription>
+            </DialogHeader>
+            {editingSalesman && (
+              <form onSubmit={handleEditSalesman} className="space-y-4">
+                <div>
+                  <Label htmlFor="edit-name">Full Name *</Label>
+                  <Input
+                    id="edit-name"
+                    value={editingSalesman.name}
+                    onChange={(e) => setEditingSalesman({ ...editingSalesman, name: e.target.value })}
+                    placeholder="Enter full name"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <Label htmlFor="edit-email">Email Address *</Label>
+                  <Input
+                    id="edit-email"
+                    type="email"
+                    value={editingSalesman.email}
+                    onChange={(e) => setEditingSalesman({ ...editingSalesman, email: e.target.value })}
+                    placeholder="Enter email address"
+                    required
+                  />
+                </div>
+                
+                <div className="flex justify-end space-x-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsEditDialogOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" className="bg-green-600 hover:bg-green-700">
+                    Update Salesman
+                  </Button>
+                </div>
+              </form>
             )}
-          </CardContent>
-        </Card>
+          </DialogContent>
+        </Dialog>
       </div>
-
-      {/* Edit Salesman Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center space-x-2">
-              <Edit className="h-5 w-5 text-blue-600" />
-              <span>Edit Salesman</span>
-            </DialogTitle>
-            <DialogDescription>
-              Update the salesman information.
-            </DialogDescription>
-          </DialogHeader>
-          {editingSalesman && (
-            <form onSubmit={handleEditSalesman} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="editName">Name</Label>
-                <Input
-                  id="editName"
-                  value={editingSalesman.name}
-                  onChange={(e) => setEditingSalesman({ ...editingSalesman, name: e.target.value })}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="editEmail">Email</Label>
-                <Input
-                  id="editEmail"
-                  type="email"
-                  value={editingSalesman.email}
-                  onChange={(e) => setEditingSalesman({ ...editingSalesman, email: e.target.value })}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="editRole">Role</Label>
-                <Select
-                  value={editingSalesman.role}
-                  onValueChange={(value: 'Admin' | 'Salesman') => setEditingSalesman({ ...editingSalesman, role: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Salesman">Salesman</SelectItem>
-                    <SelectItem value="Admin">Admin</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex space-x-2">
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  onClick={() => setIsEditDialogOpen(false)}
-                  className="flex-1"
-                >
-                  Cancel
-                </Button>
-                <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700">
-                  Update Salesman
-                </Button>
-              </div>
-            </form>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

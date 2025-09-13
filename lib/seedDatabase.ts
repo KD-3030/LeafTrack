@@ -24,17 +24,36 @@ export async function seedDatabase() {
     
     console.log('Cleared existing data...');
     
-    // Create Admin User
-    const adminPassword = await bcrypt.hash('admin123', 12);
-    const admin = await UserModel.create({
+    // Create Admin User with secure password
+    const crypto = await import('crypto');
+    
+    // Generate secure password
+    function generateSecurePassword(length = 16) {
+      const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+      let password = '';
+      for (let i = 0; i < length; i++) {
+        password += charset.charAt(crypto.randomInt(charset.length));
+      }
+      return password;
+    }
+    
+    const adminPlainPassword = generateSecurePassword(16);
+    const adminPassword = await bcrypt.hash(adminPlainPassword, 12);
+    
+    await UserModel.create({
       name: 'Admin User',
       email: 'admin@leaftrack.com',
       password: adminPassword,
       role: 'Admin'
     });
     
-    // Create Salesman Users
-    const salesmanPassword = await bcrypt.hash('sales123', 12);
+    console.log('✅ Admin user created');
+    console.log(`🔐 Admin password: ${adminPlainPassword}`);
+    console.log('⚠️  IMPORTANT: Save this password securely!');
+    
+    // Create Salesman Users with secure password
+    const salesmanPlainPassword = generateSecurePassword(16);
+    const salesmanPassword = await bcrypt.hash(salesmanPlainPassword, 12);
     
     const salesman1 = await UserModel.create({
       name: 'John Smith',
@@ -57,7 +76,9 @@ export async function seedDatabase() {
       role: 'Salesman'
     });
     
-    console.log('Created users...');
+    console.log('✅ Created users');
+    console.log(`🔐 Salesman password (for all): ${salesmanPlainPassword}`);
+    console.log('⚠️  IMPORTANT: Save this password securely!');
     
     // Create Tea Products using create instead of insertMany
     const products = [];
@@ -65,53 +86,73 @@ export async function seedDatabase() {
     const productsData = [
       {
         name: 'Earl Grey Premium',
-        price: 25.99,
-        stock_quantity: 150
+        manufacturingCost: 18.99,
+        totalStock: 150,
+        hsn_code: '0902',
+        gst_rate: 12
       },
       {
         name: 'Ceylon Black Tea',
-        price: 18.50,
-        stock_quantity: 200
+        manufacturingCost: 14.50,
+        totalStock: 200,
+        hsn_code: '0902',
+        gst_rate: 12
       },
       {
         name: 'Green Tea Sencha',
-        price: 22.00,
-        stock_quantity: 180
+        manufacturingCost: 16.00,
+        totalStock: 180,
+        hsn_code: '0902',
+        gst_rate: 12
       },
       {
         name: 'Chamomile Herbal',
-        price: 16.75,
-        stock_quantity: 120
+        manufacturingCost: 12.75,
+        totalStock: 120,
+        hsn_code: '1211',
+        gst_rate: 12
       },
       {
         name: 'Oolong Dragon Well',
-        price: 32.00,
-        stock_quantity: 90
+        manufacturingCost: 24.00,
+        totalStock: 90,
+        hsn_code: '0902',
+        gst_rate: 12
       },
       {
         name: 'Jasmine Green Tea',
-        price: 28.50,
-        stock_quantity: 110
+        manufacturingCost: 21.50,
+        totalStock: 110,
+        hsn_code: '0902',
+        gst_rate: 12
       },
       {
         name: 'English Breakfast',
-        price: 19.99,
-        stock_quantity: 250
+        manufacturingCost: 15.99,
+        totalStock: 250,
+        hsn_code: '0902',
+        gst_rate: 12
       },
       {
         name: 'Darjeeling Supreme',
-        price: 35.00,
-        stock_quantity: 75
+        manufacturingCost: 26.00,
+        totalStock: 75,
+        hsn_code: '0902',
+        gst_rate: 12
       },
       {
         name: 'White Peony Tea',
-        price: 45.00,
-        stock_quantity: 60
+        manufacturingCost: 34.00,
+        totalStock: 60,
+        hsn_code: '0902',
+        gst_rate: 12
       },
       {
         name: 'Peppermint Herbal',
-        price: 14.99,
-        stock_quantity: 140
+        manufacturingCost: 11.99,
+        totalStock: 140,
+        hsn_code: '1211',
+        gst_rate: 12
       }
     ];
     
@@ -124,23 +165,23 @@ export async function seedDatabase() {
     
     console.log('Created products...');
     
-    // Create Assignments
+    // Create Assignments with dynamic pricing
     const assignmentsData = [
       // John Smith assignments
-      { salesman_id: salesman1._id, product_id: products[0]._id, quantity: 25 },
-      { salesman_id: salesman1._id, product_id: products[1]._id, quantity: 30 },
-      { salesman_id: salesman1._id, product_id: products[2]._id, quantity: 20 },
+      { salesman_id: salesman1._id, productId: products[0]._id, quantity: 25, sellingPricePerUnit: 28.99 },
+      { salesman_id: salesman1._id, productId: products[1]._id, quantity: 30, sellingPricePerUnit: 22.50 },
+      { salesman_id: salesman1._id, productId: products[2]._id, quantity: 20, sellingPricePerUnit: 25.00 },
       
       // Sarah Johnson assignments
-      { salesman_id: salesman2._id, product_id: products[3]._id, quantity: 35 },
-      { salesman_id: salesman2._id, product_id: products[4]._id, quantity: 15 },
-      { salesman_id: salesman2._id, product_id: products[5]._id, quantity: 25 },
+      { salesman_id: salesman2._id, productId: products[3]._id, quantity: 35, sellingPricePerUnit: 19.75 },
+      { salesman_id: salesman2._id, productId: products[4]._id, quantity: 15, sellingPricePerUnit: 38.00 },
+      { salesman_id: salesman2._id, productId: products[5]._id, quantity: 25, sellingPricePerUnit: 34.50 },
       
       // Mike Wilson assignments
-      { salesman_id: salesman3._id, product_id: products[6]._id, quantity: 40 },
-      { salesman_id: salesman3._id, product_id: products[7]._id, quantity: 20 },
-      { salesman_id: salesman3._id, product_id: products[8]._id, quantity: 10 },
-      { salesman_id: salesman3._id, product_id: products[9]._id, quantity: 30 }
+      { salesman_id: salesman3._id, productId: products[6]._id, quantity: 40, sellingPricePerUnit: 24.99 },
+      { salesman_id: salesman3._id, productId: products[7]._id, quantity: 20, sellingPricePerUnit: 42.00 },
+      { salesman_id: salesman3._id, productId: products[8]._id, quantity: 10, sellingPricePerUnit: 54.00 },
+      { salesman_id: salesman3._id, productId: products[9]._id, quantity: 30, sellingPricePerUnit: 17.99 }
     ];
     
     // Create assignments one by one to avoid TypeScript issues

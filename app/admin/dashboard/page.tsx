@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Package, FolderOpen, Users, TrendingUp, ShoppingCart } from 'lucide-react';
+import { Package, Users, TrendingUp, ShoppingCart } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import SalesmanLocationMap from '@/components/admin/SalesmanLocationMap';
+import { User, Product } from '@/types';
 
 export default function AdminDashboard() {
   const { user } = useAuth();
@@ -37,8 +38,8 @@ export default function AdminDashboard() {
       const assignmentsData = await assignmentsResponse.json();
       
       if (productsData.success && usersData.success && assignmentsData.success) {
-        const salesmen = usersData.users.filter((user: any) => user.role === 'Salesman');
-        const totalStock = productsData.products.reduce((sum: number, product: any) => sum + product.stock_quantity, 0);
+        const salesmen = usersData.users.filter((user: User) => user.role === 'Salesman');
+        const totalStock = productsData.products.reduce((sum: number, product: Product) => sum + (product.totalStock || 0), 0);
         
         setStats({
           totalProducts: productsData.products.length,
@@ -83,7 +84,7 @@ export default function AdminDashboard() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
-        <p className="text-gray-600 mt-2">Welcome back, {user?.name}! Here's your inventory overview</p>
+        <p className="text-gray-600 mt-2">Welcome back, {user?.name}! Here&apos;s your inventory overview</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
