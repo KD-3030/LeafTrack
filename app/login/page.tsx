@@ -43,18 +43,6 @@ export default function LoginPage() {
     }
   };
 
-  // Demo credential buttons
-  const fillDemoCredentials = (userType: 'admin' | 'salesman') => {
-    if (userType === 'admin') {
-      setEmail('admin@sohagtea.com');
-      setPassword('admin123');
-      setRole('Admin');
-    } else {
-      setEmail('john.smith@sohagtea.com');
-      setPassword('salesman123');
-      setRole('Salesman');
-    }
-  };
   return (
     <div className="min-h-screen bg-[#F5F5DC]">
       <Navigation />
@@ -72,31 +60,6 @@ export default function LoginPage() {
           </CardHeader>
           
           <CardContent>
-            {/* Demo Credentials */}
-            <div className="mb-6 p-4 bg-green-50 rounded-lg border border-green-200">
-              <h3 className="text-sm font-medium text-green-800 mb-2">Demo Credentials:</h3>
-              <div className="space-y-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => fillDemoCredentials('admin')}
-                  className="w-full text-xs hover:bg-green-100"
-                >
-                  🔑 Admin Access
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => fillDemoCredentials('salesman')}
-                  className="w-full text-xs hover:bg-green-100"
-                >
-                  👤 Salesman Access
-                </Button>
-              </div>
-            </div>
-
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">Email Address</Label>
