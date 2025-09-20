@@ -98,3 +98,4 @@ coverage/
 
 #mongoDB
 .env.local
+.vercel

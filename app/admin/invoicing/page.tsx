@@ -2044,7 +2044,7 @@ export default function InvoicingPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <Label htmlFor="refund_method">Refund Method</Label>
-                    <Select value={refundMethod} onValueChange={setRefundMethod}>
+                    <Select value={refundMethod} onValueChange={(value: 'Cash' | 'Bank Transfer' | 'Cheque' | 'Credit Note') => setRefundMethod(value)}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>

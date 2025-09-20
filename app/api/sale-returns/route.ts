@@ -165,7 +165,7 @@ export async function POST(request: NextRequest) {
           phone: customer_details.phone || ''
         },
         return_date: return_date || new Date(),
-        return_items: return_items.map(item => ({
+        return_items: return_items.map((item: any) => ({
           product_name: item.product_name,
           quantity_returned: item.quantity_returned || item.quantity,
           unit_price: item.unit_price,
@@ -173,7 +173,7 @@ export async function POST(request: NextRequest) {
           condition: 'Good',
           reason: item.reason || return_reason || 'Manual entry return'
         })),
-        total_refund_amount: total_refund_amount || return_items.reduce((sum, item) => sum + (item.total_amount || 0), 0),
+        total_refund_amount: total_refund_amount || return_items.reduce((sum: number, item: any) => sum + (item.total_amount || 0), 0),
         refund_method: refund_method || 'Cash',
         return_reason: return_reason || 'Manual entry return',
         notes: notes || '',
