@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Product, { IProduct } from '@/models/Product';
-import { verifyToken } from '@/lib/auth';
+import { requireUserAuth, requireAdminAuth } from '@/lib/authMiddleware';
 import { Model } from 'mongoose';
 
 export const dynamic = 'force-dynamic';
@@ -31,23 +31,10 @@ export async function POST(request: NextRequest) {
   try {
     await connectDB();
     
-    // Verify admin token
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
-    
-    if (!decoded || decoded.role !== 'Admin') {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+    // Use standardized admin authentication
+    const authResult = requireAdminAuth(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
     }
 
     const { name, manufacturingCost, totalStock, hsn_code, gst_rate } = await request.json();

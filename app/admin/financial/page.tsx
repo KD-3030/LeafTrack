@@ -413,12 +413,16 @@ export default function FinancialDashboard() {
                       {payments.map((payment) => (
                         <TableRow key={payment._id}>
                           <TableCell className="font-medium">
-                            {payment.invoice_id.invoice_number}
+                            {payment.invoice_id?.invoice_number || 'No Invoice'}
                           </TableCell>
                           <TableCell>
                             <div>
-                              <div className="font-medium">{payment.customer_id.name}</div>
-                              <div className="text-sm text-gray-600">{payment.customer_id.email}</div>
+                              <div className="font-medium">
+                                {payment.customer_id?.name || 'Unknown Customer'}
+                              </div>
+                              <div className="text-sm text-gray-600">
+                                {payment.customer_id?.email || 'No email'}
+                              </div>
                             </div>
                           </TableCell>
                           <TableCell>₹{payment.amount_paid.toLocaleString()}</TableCell>
@@ -496,12 +500,16 @@ export default function FinancialDashboard() {
                     {outstandingInvoices.map((invoice) => (
                       <TableRow key={invoice._id}>
                         <TableCell className="font-medium">
-                          {invoice.invoice_number}
+                          {invoice.invoice_number || 'N/A'}
                         </TableCell>
                         <TableCell>
                           <div>
-                            <div className="font-medium">{invoice.customer_details.name}</div>
-                            <div className="text-sm text-gray-600">{invoice.customer_details.email}</div>
+                            <div className="font-medium">
+                              {invoice.customer_details?.name || 'Unknown Customer'}
+                            </div>
+                            <div className="text-sm text-gray-600">
+                              {invoice.customer_details?.email || 'No email'}
+                            </div>
                           </div>
                         </TableCell>
                         <TableCell>₹{invoice.grand_total.toLocaleString()}</TableCell>
@@ -616,7 +624,7 @@ export default function FinancialDashboard() {
             <DialogHeader>
               <DialogTitle>Record Payment</DialogTitle>
               <DialogDescription>
-                Record a new payment for invoice {selectedInvoice?.invoice_number}
+                Record a new payment for invoice {selectedInvoice?.invoice_number || 'N/A'}
               </DialogDescription>
             </DialogHeader>
             
@@ -627,16 +635,16 @@ export default function FinancialDashboard() {
                   <h3 className="font-semibold mb-2">Invoice Details</h3>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
-                      <span className="font-medium">Invoice:</span> {selectedInvoice.invoice_number}
+                      <span className="font-medium">Invoice:</span> {selectedInvoice?.invoice_number || 'N/A'}
                     </div>
                     <div>
-                      <span className="font-medium">Customer:</span> {selectedInvoice.customer_details.name}
+                      <span className="font-medium">Customer:</span> {selectedInvoice.customer_details?.name || 'Unknown Customer'}
                     </div>
                     <div>
-                      <span className="font-medium">Total Amount:</span> ₹{selectedInvoice.grand_total.toLocaleString()}
+                      <span className="font-medium">Total Amount:</span> ₹{(selectedInvoice?.grand_total || 0).toLocaleString()}
                     </div>
                     <div>
-                      <span className="font-medium">Balance Due:</span> ₹{selectedInvoice.balance_due.toLocaleString()}
+                      <span className="font-medium">Balance Due:</span> ₹{(selectedInvoice?.balance_due || 0).toLocaleString()}
                     </div>
                   </div>
                 </div>

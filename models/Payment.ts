@@ -26,6 +26,9 @@ export interface IPayment extends Document {
   reconciled_date?: Date;
   reconciled_by?: mongoose.Types.ObjectId;
   
+  // Tracking
+  created_by?: mongoose.Types.ObjectId;
+  
   createdAt: Date;
   updatedAt: Date;
 }
@@ -38,7 +41,7 @@ const PaymentSchema = new Schema<IPayment>({
   },
   customer_id: {
     type: Schema.Types.ObjectId,
-    ref: 'Customer',
+    ref: 'User',
     required: true,
   },
   salesman_id: {
@@ -95,6 +98,10 @@ const PaymentSchema = new Schema<IPayment>({
     type: Date,
   },
   reconciled_by: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+  },
+  created_by: {
     type: Schema.Types.ObjectId,
     ref: 'User',
   },

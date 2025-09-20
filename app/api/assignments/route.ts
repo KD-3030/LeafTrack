@@ -2,40 +2,31 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import Assignment, { IAssignment } from '@/models/Assignment';
 import Product, { IProduct } from '@/models/Product';
-import { verifyToken } from '@/lib/auth';
+import { requireUserAuth, requireAdminAuth, DecodedToken } from '@/lib/authMiddleware';
 import { Model } from 'mongoose';
-import { JwtPayload } from 'jsonwebtoken';
 
 export const dynamic = 'force-dynamic';
-
-interface DecodedToken extends JwtPayload {
-  userId: string;
-  role: string;
-}
 
 export async function GET(request: NextRequest) {
   try {
     await connectDB();
     
-    // Get auth token to identify the user
-    const authHeader = request.headers.get('authorization');
+    // Use standardized authentication with user filtering
+    const authResult = requireUserAuth(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
+    const decoded = authResult as DecodedToken;
+    
+    // Create user filter for data access
     let userFilter = {};
     
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      try {
-        const token = authHeader.substring(7);
-        const decoded = verifyToken(token) as DecodedToken;
-        
-        // If user is a salesman, filter assignments for that salesman only
-        if (decoded && decoded.role === 'Salesman') {
-          userFilter = { salesman_id: decoded.userId };
-        }
-        // Admin can see all assignments (no filter)
-      } catch (error) {
-        // If token is invalid, continue without filtering (for backwards compatibility)
-        console.warn('Invalid token in assignments request:', error);
-      }
+    // If user is a salesman, filter assignments for that salesman only
+    if (decoded.role === 'Salesman') {
+      userFilter = { salesman_id: decoded.userId };
     }
+    // Admin can see all assignments (no filter)
     
     const AssignmentModel = Assignment as Model<IAssignment>;
     const assignments = await AssignmentModel.find(userFilter)
@@ -61,23 +52,10 @@ export async function POST(request: NextRequest) {
   try {
     await connectDB();
     
-    // Verify admin token
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token) as DecodedToken;
-    
-    if (!decoded || decoded.role !== 'Admin') {
-      return NextResponse.json(
-        { success: false, error: 'Admin access required' },
-        { status: 403 }
-      );
+    // Use standardized admin authentication
+    const authResult = requireAdminAuth(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
     }
 
     const { salesmanId, productId, quantity, sellingPricePerUnit } = await request.json();

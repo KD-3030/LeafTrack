@@ -2,29 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import Payment from '@/models/Payment';
 import Invoice from '@/models/Invoice';
-import Customer from '@/models/Customer';
-import jwt from 'jsonwebtoken';
+import { requireUserAuth, DecodedToken } from '@/lib/authMiddleware';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify authentication
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json(
-        { error: 'Unauthorized - No token provided' },
-        { status: 401 }
-      );
+    // Use standardized authentication
+    const authResult = requireUserAuth(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
-    if (!decoded) {
-      return NextResponse.json(
-        { error: 'Unauthorized - Invalid token' },
-        { status: 401 }
-      );
-    }
+    const decoded = authResult as DecodedToken;
 
     await connectDB();
 
@@ -157,23 +147,13 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // Verify authentication
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json(
-        { error: 'Unauthorized - No token provided' },
-        { status: 401 }
-      );
+    // Use standardized authentication
+    const authResult = requireUserAuth(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
-    if (!decoded) {
-      return NextResponse.json(
-        { error: 'Unauthorized - Invalid token' },
-        { status: 401 }
-      );
-    }
-
+    const decoded = authResult as DecodedToken;
     await connectDB();
 
     const body = await request.json();
@@ -239,7 +219,7 @@ export async function POST(request: NextRequest) {
       payment_date: new Date(),
       status: 'Pending', // Start as pending for review
       reconciled: false,
-      created_by: decoded.id,
+      created_by: decoded.userId,
       notes
     };
 

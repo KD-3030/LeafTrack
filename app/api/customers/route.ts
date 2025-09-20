@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Customer, { ICustomer } from '@/models/Customer';
-import { verifyToken } from '@/lib/auth';
+import { requireUserAuth, requireAdminAuth } from '@/lib/authMiddleware';
 import { Model } from 'mongoose';
 
 export const dynamic = 'force-dynamic';

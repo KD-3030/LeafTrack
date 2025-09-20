@@ -8,7 +8,10 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { FileText, Plus, Search, Edit, Download, RefreshCw, DollarSign, TrendingUp, AlertCircle, Calendar, Filter, Eye } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { FileText, Plus, Search, Edit, Download, RefreshCw, DollarSign, TrendingUp, AlertCircle, Calendar, Filter, Eye, ArrowLeft, Trash2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { generateInvoicePDF } from '@/lib/pdfGenerator';
 
@@ -32,6 +35,9 @@ interface Invoice {
   balance_due: number;
   status: 'Draft' | 'Sent' | 'Paid' | 'Overdue' | 'Cancelled';
   payment_status: 'Pending' | 'Partial' | 'Paid';
+  payment_date?: string;
+  createdAt: string;
+  updatedAt: string;
   items: { 
     product_id: string; 
     product_name: string;
@@ -62,19 +68,151 @@ interface Sale {
   invoice_generated: boolean;
 }
 
+interface Customer {
+  _id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  gstin?: string;
+  address?: string;
+}
+
+interface Product {
+  _id: string;
+  name: string;
+  hsn_code: string;
+  price: number;
+  gst_rate: number;
+  totalStock: number;
+}
+
+interface ManualInvoiceItem {
+  product_id: string;
+  product_name: string;
+  hsn_code: string;
+  quantity: number;
+  unit_price: number;
+  gst_rate: number;
+  taxable_amount: number;
+  tax_amount: number;
+  total_amount: number;
+}
+
+interface ManualInvoiceForm {
+  customer_id: string;
+  invoice_date: string;
+  due_date: string;
+  payment_terms: string;
+  notes?: string;
+  items: ManualInvoiceItem[];
+}
+
+interface SaleReturn {
+  _id: string;
+  return_number: string;
+  original_invoice_id?: {
+    invoice_number: string;
+    invoice_date: string;
+  };
+  customer_id?: {
+    name: string;
+    email: string;
+  };
+  customer_details?: {
+    name: string;
+    email?: string;
+    phone?: string;
+  };
+  is_manual_entry?: boolean;
+  return_items: {
+    product_id?: string;
+    product_name: string;
+    return_quantity?: number;
+    quantity_returned?: number;
+    unit_price: number;
+    condition?: 'Good' | 'Damaged' | 'Defective';
+    reason?: string;
+    total_refund?: number;
+    total_amount?: number;
+  }[];
+  total_refund?: number;
+  total_refund_amount?: number;
+  status: 'Pending' | 'Approved' | 'Rejected' | 'Completed';
+  refund_status: 'Pending' | 'Processed' | 'Failed';
+  refund_method: 'Cash' | 'Bank Transfer' | 'Cheque' | 'Credit Note';
+  return_date: string;
+  return_reason?: string;
+  admin_approval?: boolean;
+  approved_by?: {
+    name: string;
+  };
+  approval_date?: string;
+  notes?: string;
+}
+
 export default function InvoicingPage() {
   const { toast } = useToast();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [saleReturns, setSaleReturns] = useState<SaleReturn[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isManualInvoiceDialogOpen, setIsManualInvoiceDialogOpen] = useState(false);
+  const [isReturnDialogOpen, setIsReturnDialogOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [selectedReturnInvoice, setSelectedReturnInvoice] = useState<Invoice | null>(null);
+  
+  // Manual invoice form state
+  const [manualInvoiceForm, setManualInvoiceForm] = useState<ManualInvoiceForm>({
+    customer_id: '',
+    invoice_date: new Date().toISOString().split('T')[0],
+    due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days from now
+    payment_terms: '30 days',
+    notes: '',
+    items: []
+  });
+  const [selectedProduct, setSelectedProduct] = useState('');
+  const [itemQuantity, setItemQuantity] = useState(1);
+  const [itemUnitPrice, setItemUnitPrice] = useState(0);
+
+  // Sale return form state
+  const [returnItems, setReturnItems] = useState<{
+    product_id: string;
+    product_name: string;
+    original_quantity: number;
+    return_quantity: number;
+    unit_price: number;
+    condition: 'Good' | 'Damaged' | 'Defective';
+    reason: string;
+  }[]>([]);
+  const [returnNotes, setReturnNotes] = useState('');
+  const [refundMethod, setRefundMethod] = useState<'Cash' | 'Bank Transfer' | 'Cheque' | 'Credit Note'>('Cash');
+  const [isManualReturnMode, setIsManualReturnMode] = useState(false);
+  const [manualReturnData, setManualReturnData] = useState({
+    customerName: '',
+    customerEmail: '',
+    customerPhone: '',
+    returnDate: new Date().toISOString().split('T')[0],
+    refundAmount: 0,
+    reason: '',
+    items: [] as Array<{
+      productName: string;
+      quantity: number;
+      unitPrice: number;
+      totalAmount: number;
+    }>
+  });
 
   useEffect(() => {
     loadInvoices();
     loadSales();
+    loadCustomers();
+    loadProducts();
+    loadSaleReturns();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -131,6 +269,491 @@ export default function InvoicingPage() {
       toast({
         title: "Error",
         description: "Failed to load sales",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const loadCustomers = async () => {
+    try {
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch('/api/customers', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setCustomers(data.customers);
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to load customers",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error loading customers:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load customers",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const loadProducts = async () => {
+    try {
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch('/api/products', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setProducts(data.products);
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to load products",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error loading products:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load products",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const loadSaleReturns = async () => {
+    try {
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch('/api/sale-returns', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setSaleReturns(data.returns);
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to load sale returns",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error loading sale returns:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load sale returns",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const initializeSaleReturn = (invoice: Invoice) => {
+    const returnItemsFromInvoice = invoice.items.map(item => ({
+      product_id: item.product_id,
+      product_name: item.product_name,
+      original_quantity: item.quantity,
+      return_quantity: 0,
+      unit_price: item.unit_price,
+      condition: 'Good' as const,
+      reason: ''
+    }));
+
+    setReturnItems(returnItemsFromInvoice);
+    setSelectedReturnInvoice(invoice);
+    setReturnNotes('');
+    setRefundMethod('Cash');
+    setIsManualReturnMode(false); // Ensure we're in invoice-based mode
+    setIsReturnDialogOpen(true);
+  };
+
+  const updateReturnItem = (index: number, field: string, value: string | number) => {
+    setReturnItems(prev => prev.map((item, i) => 
+      i === index ? { ...item, [field]: value } : item
+    ));
+  };
+
+  const submitSaleReturn = async () => {
+    if (!selectedReturnInvoice) return;
+
+    const validReturnItems = returnItems.filter(item => item.return_quantity > 0);
+    
+    if (validReturnItems.length === 0) {
+      toast({
+        title: "Error",
+        description: "Please select at least one item to return",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate return quantities don't exceed original quantities
+    for (const item of validReturnItems) {
+      if (item.return_quantity > item.original_quantity) {
+        toast({
+          title: "Error",
+          description: `Cannot return more than ${item.original_quantity} units of ${item.product_name}`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (!item.reason.trim()) {
+        toast({
+          title: "Error",
+          description: `Please provide a reason for returning ${item.product_name}`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    try {
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch('/api/sale-returns', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          original_invoice_id: selectedReturnInvoice._id,
+          return_items: validReturnItems,
+          refund_method: refundMethod,
+          notes: returnNotes
+        }),
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        toast({
+          title: "Success",
+          description: "Sale return request submitted successfully",
+        });
+        setIsReturnDialogOpen(false);
+        loadSaleReturns();
+      } else {
+        toast({
+          title: "Error",
+          description: data.error || "Failed to submit return request",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error submitting sale return:', error);
+      toast({
+        title: "Error",
+        description: "Failed to submit return request",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const submitManualReturn = async () => {
+    try {
+      // Validate required fields
+      if (!manualReturnData.customerName.trim()) {
+        toast({
+          title: "Validation Error",
+          description: "Customer name is required",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (manualReturnData.items.length === 0) {
+        toast({
+          title: "Validation Error",
+          description: "At least one return item is required",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (!manualReturnData.reason.trim()) {
+        toast({
+          title: "Validation Error",
+          description: "Return reason is required",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Validate all items have required fields
+      for (let i = 0; i < manualReturnData.items.length; i++) {
+        const item = manualReturnData.items[i];
+        if (!item.productName.trim()) {
+          toast({
+            title: "Validation Error",
+            description: `Product name is required for item ${i + 1}`,
+            variant: "destructive",
+          });
+          return;
+        }
+        if (item.quantity <= 0) {
+          toast({
+            title: "Validation Error",
+            description: `Quantity must be greater than 0 for item ${i + 1}`,
+            variant: "destructive",
+          });
+          return;
+        }
+        if (item.unitPrice <= 0) {
+          toast({
+            title: "Validation Error",
+            description: `Unit price must be greater than 0 for item ${i + 1}`,
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
+      const token = localStorage.getItem('leaftrack_token');
+      const totalRefundAmount = manualReturnData.items.reduce((sum, item) => sum + item.totalAmount, 0);
+
+      const response = await fetch('/api/sale-returns', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          customer_details: {
+            name: manualReturnData.customerName,
+            email: manualReturnData.customerEmail || '',
+            phone: manualReturnData.customerPhone || ''
+          },
+          return_date: manualReturnData.returnDate,
+          return_items: manualReturnData.items.map(item => ({
+            product_name: item.productName,
+            quantity_returned: item.quantity,
+            unit_price: item.unitPrice,
+            total_amount: item.totalAmount,
+            reason: manualReturnData.reason
+          })),
+          total_refund_amount: totalRefundAmount,
+          refund_method: refundMethod,
+          return_reason: manualReturnData.reason,
+          status: 'Pending',
+          refund_status: 'Pending',
+          is_manual_entry: true
+        })
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        toast({
+          title: "Success",
+          description: "Manual return created successfully",
+        });
+        
+        loadSaleReturns();
+        setIsReturnDialogOpen(false);
+        setIsManualReturnMode(false);
+        
+        // Reset manual return data
+        setManualReturnData({
+          customerName: '',
+          customerEmail: '',
+          customerPhone: '',
+          returnDate: new Date().toISOString().split('T')[0],
+          refundAmount: 0,
+          reason: '',
+          items: []
+        });
+      } else {
+        toast({
+          title: "Error",
+          description: data.error || "Failed to create manual return",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error creating manual return:', error);
+      toast({
+        title: "Error",
+        description: "Failed to create manual return",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const updateReturnStatus = async (returnId: string, status: string, refundStatus?: string, adminNotes?: string) => {
+    try {
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch('/api/sale-returns', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          return_id: returnId,
+          status: status,
+          refund_status: refundStatus,
+          admin_notes: adminNotes
+        }),
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        toast({
+          title: "Success",
+          description: "Return status updated successfully",
+        });
+        loadSaleReturns();
+      } else {
+        toast({
+          title: "Error",
+          description: data.error || "Failed to update return status",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error updating return status:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update return status",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const addItemToManualInvoice = () => {
+    const product = products.find(p => p._id === selectedProduct);
+    if (!product) {
+      toast({
+        title: "Error",
+        description: "Please select a product",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (itemQuantity <= 0) {
+      toast({
+        title: "Error",
+        description: "Quantity must be greater than 0",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (itemUnitPrice <= 0) {
+      toast({
+        title: "Error",
+        description: "Unit price must be greater than 0",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const taxableAmount = itemQuantity * itemUnitPrice;
+    const taxAmount = (taxableAmount * product.gst_rate) / 100;
+    const totalAmount = taxableAmount + taxAmount;
+
+    const newItem: ManualInvoiceItem = {
+      product_id: product._id,
+      product_name: product.name,
+      hsn_code: product.hsn_code,
+      quantity: itemQuantity,
+      unit_price: itemUnitPrice,
+      gst_rate: product.gst_rate,
+      taxable_amount: taxableAmount,
+      tax_amount: taxAmount,
+      total_amount: totalAmount
+    };
+
+    setManualInvoiceForm(prev => ({
+      ...prev,
+      items: [...prev.items, newItem]
+    }));
+
+    // Reset form
+    setSelectedProduct('');
+    setItemQuantity(1);
+    setItemUnitPrice(0);
+  };
+
+  const removeItemFromManualInvoice = (index: number) => {
+    setManualInvoiceForm(prev => ({
+      ...prev,
+      items: prev.items.filter((_, i) => i !== index)
+    }));
+  };
+
+  const createManualInvoice = async () => {
+    try {
+      if (!manualInvoiceForm.customer_id) {
+        toast({
+          title: "Error",
+          description: "Please select a customer",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (manualInvoiceForm.items.length === 0) {
+        toast({
+          title: "Error",
+          description: "Please add at least one item",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch('/api/invoices/manual', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(manualInvoiceForm),
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        toast({
+          title: "Success",
+          description: "Manual invoice created successfully",
+        });
+        setIsManualInvoiceDialogOpen(false);
+        setManualInvoiceForm({
+          customer_id: '',
+          invoice_date: new Date().toISOString().split('T')[0],
+          due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          payment_terms: '30 days',
+          notes: '',
+          items: []
+        });
+        loadInvoices();
+      } else {
+        toast({
+          title: "Error",
+          description: data.error || "Failed to create manual invoice",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error creating manual invoice:', error);
+      toast({
+        title: "Error",
+        description: "Failed to create manual invoice",
         variant: "destructive",
       });
     }
@@ -259,17 +882,34 @@ export default function InvoicingPage() {
             <h1 className="text-3xl font-bold text-gray-900">Invoice Management</h1>
             <p className="text-gray-600 mt-1">Manage GST-compliant invoices and billing</p>
           </div>
-          <Button
-            onClick={() => setIsCreateDialogOpen(true)}
-            className="bg-green-600 hover:bg-green-700"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Create Invoice
-          </Button>
+          <div className="flex gap-3">
+            <Button
+              onClick={() => setIsManualInvoiceDialogOpen(true)}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Manual Invoice
+            </Button>
+            <Button
+              onClick={() => setIsCreateDialogOpen(true)}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              From Sale
+            </Button>
+          </div>
         </div>
 
-        {/* Statistics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        {/* Tabs for Invoices and Returns */}
+        <Tabs defaultValue="invoices" className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="invoices">Invoices</TabsTrigger>
+            <TabsTrigger value="returns">Returns</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="invoices" className="space-y-6">
+            {/* Statistics Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
@@ -451,6 +1091,14 @@ export default function InvoicingPage() {
                         <Button
                           size="sm"
                           variant="outline"
+                          onClick={() => initializeSaleReturn(invoice)}
+                          title="Create Return"
+                        >
+                          <ArrowLeft className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
                           onClick={async () => {
                             try {
                               // Fetch full invoice details for PDF generation
@@ -589,6 +1237,11 @@ export default function InvoicingPage() {
                       <p><strong>Due Date:</strong> {new Date(selectedInvoice.due_date).toLocaleDateString()}</p>
                       <p><strong>Status:</strong> {getStatusBadge(selectedInvoice.status)}</p>
                       <p><strong>Payment:</strong> {getPaymentStatusBadge(selectedInvoice.payment_status)}</p>
+                      {selectedInvoice.payment_date && (
+                        <p><strong>Payment Date:</strong> {new Date(selectedInvoice.payment_date).toLocaleDateString()}</p>
+                      )}
+                      <p><strong>Created:</strong> {new Date(selectedInvoice.createdAt).toLocaleDateString()}</p>
+                      <p><strong>Last Updated:</strong> {new Date(selectedInvoice.updatedAt).toLocaleDateString()}</p>
                     </div>
                   </div>
                 </div>
@@ -642,6 +1295,806 @@ export default function InvoicingPage() {
                       </div>
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Manual Invoice Dialog */}
+        <Dialog open={isManualInvoiceDialogOpen} onOpenChange={setIsManualInvoiceDialogOpen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Create Manual Invoice</DialogTitle>
+              <DialogDescription>
+                Create a custom invoice with selected customers and products
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-6">
+              {/* Customer and Invoice Details */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="customer">Customer *</Label>
+                    <Select 
+                      value={manualInvoiceForm.customer_id} 
+                      onValueChange={(value) => setManualInvoiceForm(prev => ({...prev, customer_id: value}))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select customer" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {customers.map((customer) => (
+                          <SelectItem key={customer._id} value={customer._id}>
+                            {customer.name} - {customer.email}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="invoice_date">Invoice Date *</Label>
+                    <Input
+                      id="invoice_date"
+                      type="date"
+                      value={manualInvoiceForm.invoice_date}
+                      onChange={(e) => setManualInvoiceForm(prev => ({...prev, invoice_date: e.target.value}))}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="due_date">Due Date *</Label>
+                    <Input
+                      id="due_date"
+                      type="date"
+                      value={manualInvoiceForm.due_date}
+                      onChange={(e) => setManualInvoiceForm(prev => ({...prev, due_date: e.target.value}))}
+                    />
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="payment_terms">Payment Terms</Label>
+                    <Select 
+                      value={manualInvoiceForm.payment_terms} 
+                      onValueChange={(value) => setManualInvoiceForm(prev => ({...prev, payment_terms: value}))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select payment terms" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Immediate">Immediate</SelectItem>
+                        <SelectItem value="15 days">15 days</SelectItem>
+                        <SelectItem value="30 days">30 days</SelectItem>
+                        <SelectItem value="45 days">45 days</SelectItem>
+                        <SelectItem value="60 days">60 days</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Add Product Section */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Add Products</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div>
+                      <Label htmlFor="product">Product *</Label>
+                      <Select value={selectedProduct} onValueChange={setSelectedProduct}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select product" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {products.map((product) => (
+                            <SelectItem key={product._id} value={product._id}>
+                              {product.name} (₹{product.price})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    <div>
+                      <Label htmlFor="quantity">Quantity *</Label>
+                      <Input
+                        id="quantity"
+                        type="number"
+                        min="1"
+                        value={itemQuantity}
+                        onChange={(e) => setItemQuantity(parseInt(e.target.value) || 1)}
+                      />
+                    </div>
+                    
+                    <div>
+                      <Label htmlFor="unit_price">Unit Price *</Label>
+                      <Input
+                        id="unit_price"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={itemUnitPrice}
+                        onChange={(e) => setItemUnitPrice(parseFloat(e.target.value) || 0)}
+                        placeholder="Enter unit price"
+                      />
+                    </div>
+                    
+                    <div className="flex items-end">
+                      <Button onClick={addItemToManualInvoice} className="w-full">
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Item
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Invoice Items */}
+              {manualInvoiceForm.items.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Invoice Items</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Product</TableHead>
+                          <TableHead>HSN</TableHead>
+                          <TableHead>Qty</TableHead>
+                          <TableHead>Rate</TableHead>
+                          <TableHead>Taxable</TableHead>
+                          <TableHead>GST</TableHead>
+                          <TableHead>Total</TableHead>
+                          <TableHead>Action</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {manualInvoiceForm.items.map((item, index) => (
+                          <TableRow key={index}>
+                            <TableCell>{item.product_name}</TableCell>
+                            <TableCell>{item.hsn_code}</TableCell>
+                            <TableCell>{item.quantity}</TableCell>
+                            <TableCell>₹{item.unit_price}</TableCell>
+                            <TableCell>₹{item.taxable_amount}</TableCell>
+                            <TableCell>{item.gst_rate}%</TableCell>
+                            <TableCell>₹{item.total_amount.toFixed(2)}</TableCell>
+                            <TableCell>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => removeItemFromManualInvoice(index)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                    
+                    {/* Invoice Summary */}
+                    <div className="mt-4 flex justify-end">
+                      <div className="w-64 space-y-2 border-t pt-4">
+                        <div className="flex justify-between">
+                          <span>Subtotal:</span>
+                          <span>₹{manualInvoiceForm.items.reduce((sum, item) => sum + item.taxable_amount, 0).toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Tax:</span>
+                          <span>₹{manualInvoiceForm.items.reduce((sum, item) => sum + item.tax_amount, 0).toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between font-semibold border-t pt-2">
+                          <span>Grand Total:</span>
+                          <span>₹{manualInvoiceForm.items.reduce((sum, item) => sum + item.total_amount, 0).toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Notes */}
+              <div>
+                <Label htmlFor="notes">Notes (Optional)</Label>
+                <Textarea
+                  id="notes"
+                  placeholder="Add any additional notes for the invoice..."
+                  value={manualInvoiceForm.notes}
+                  onChange={(e) => setManualInvoiceForm(prev => ({...prev, notes: e.target.value}))}
+                  rows={3}
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-end space-x-4">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setIsManualInvoiceDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={createManualInvoice}
+                  disabled={!manualInvoiceForm.customer_id || manualInvoiceForm.items.length === 0}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  Create Invoice
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+          </TabsContent>
+
+          <TabsContent value="returns" className="space-y-6">
+            {/* Manual Sales Return Entry */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Plus className="h-5 w-5 text-blue-600" />
+                  <span>Create Manual Sales Return</span>
+                </CardTitle>
+                <CardDescription>
+                  Manually enter a sales return without selecting from existing invoices
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button 
+                  onClick={() => {
+                    setIsManualReturnMode(true);
+                    setSelectedReturnInvoice(null);
+                    setIsReturnDialogOpen(true);
+                  }}
+                  className="mb-4"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create Manual Return
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Sale Returns Table */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <ArrowLeft className="h-5 w-5 text-orange-600" />
+                  <span>Sale Returns</span>
+                </CardTitle>
+                <CardDescription>
+                  All return requests and their status
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Return #</TableHead>
+                      <TableHead>Invoice</TableHead>
+                      <TableHead>Customer</TableHead>
+                      <TableHead>Return Date</TableHead>
+                      <TableHead>Refund Amount</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Refund Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {saleReturns.map((saleReturn) => (
+                      <TableRow key={saleReturn._id}>
+                        <TableCell className="font-medium">
+                          {saleReturn.return_number}
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            {saleReturn.is_manual_entry ? (
+                              <>
+                                <div className="font-medium">Manual Entry</div>
+                                <div className="text-sm text-gray-600">
+                                  {new Date(saleReturn.return_date).toLocaleDateString()}
+                                </div>
+                              </>
+                            ) : saleReturn.original_invoice_id ? (
+                              <>
+                                <div className="font-medium">{saleReturn.original_invoice_id.invoice_number}</div>
+                                <div className="text-sm text-gray-600">
+                                  {new Date(saleReturn.original_invoice_id.invoice_date).toLocaleDateString()}
+                                </div>
+                              </>
+                            ) : (
+                              <div className="text-gray-500">N/A</div>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            {saleReturn.is_manual_entry && saleReturn.customer_details ? (
+                              <>
+                                <div className="font-medium">{saleReturn.customer_details.name}</div>
+                                <div className="text-sm text-gray-600">{saleReturn.customer_details.email || 'No email'}</div>
+                              </>
+                            ) : saleReturn.customer_id ? (
+                              <>
+                                <div className="font-medium">{saleReturn.customer_id.name}</div>
+                                <div className="text-sm text-gray-600">{saleReturn.customer_id.email}</div>
+                              </>
+                            ) : (
+                              <div className="text-gray-500">N/A</div>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {new Date(saleReturn.return_date).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell>
+                          ₹{(saleReturn.total_refund_amount || saleReturn.total_refund || 0).toLocaleString()}
+                        </TableCell>
+                        <TableCell>
+                          <Badge className={
+                            saleReturn.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
+                            saleReturn.status === 'Approved' ? 'bg-blue-100 text-blue-800' :
+                            saleReturn.status === 'Completed' ? 'bg-green-100 text-green-800' :
+                            'bg-red-100 text-red-800'
+                          }>
+                            {saleReturn.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className={
+                            saleReturn.refund_status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
+                            saleReturn.refund_status === 'Processed' ? 'bg-green-100 text-green-800' :
+                            'bg-red-100 text-red-800'
+                          }>
+                            {saleReturn.refund_status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            {saleReturn.status === 'Pending' && (
+                              <>
+                                <Button
+                                  size="sm"
+                                  onClick={() => updateReturnStatus(saleReturn._id, 'Approved', 'Pending')}
+                                  className="bg-green-600 hover:bg-green-700"
+                                >
+                                  Approve
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => updateReturnStatus(saleReturn._id, 'Rejected')}
+                                >
+                                  Reject
+                                </Button>
+                              </>
+                            )}
+                            {saleReturn.status === 'Approved' && saleReturn.refund_status === 'Pending' && (
+                              <Button
+                                size="sm"
+                                onClick={() => updateReturnStatus(saleReturn._id, 'Completed', 'Processed')}
+                                className="bg-blue-600 hover:bg-blue-700"
+                              >
+                                Mark Refunded
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+
+        {/* Sale Return Dialog */}
+        <Dialog open={isReturnDialogOpen} onOpenChange={(open) => {
+          setIsReturnDialogOpen(open);
+          if (!open) {
+            setIsManualReturnMode(false);
+            setManualReturnData({
+              customerName: '',
+              customerEmail: '',
+              customerPhone: '',
+              returnDate: new Date().toISOString().split('T')[0],
+              refundAmount: 0,
+              reason: '',
+              items: []
+            });
+          }
+        }}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>
+                {isManualReturnMode ? 'Create Manual Sale Return' : 'Create Sale Return'}
+              </DialogTitle>
+              <DialogDescription>
+                {isManualReturnMode 
+                  ? 'Enter return details manually without linking to an existing invoice'
+                  : selectedReturnInvoice 
+                    ? `Select items to return from invoice ${selectedReturnInvoice?.invoice_number}`
+                    : 'Create a new sale return'
+                }
+              </DialogDescription>
+            </DialogHeader>
+            
+            {isManualReturnMode ? (
+              /* Manual Return Form */
+              <div className="space-y-6">
+                {/* Customer Information */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Customer Information</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="customerName">Customer Name *</Label>
+                        <Input
+                          id="customerName"
+                          value={manualReturnData.customerName}
+                          onChange={(e) => setManualReturnData({
+                            ...manualReturnData,
+                            customerName: e.target.value
+                          })}
+                          placeholder="Enter customer name"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="customerEmail">Email</Label>
+                        <Input
+                          id="customerEmail"
+                          type="email"
+                          value={manualReturnData.customerEmail}
+                          onChange={(e) => setManualReturnData({
+                            ...manualReturnData,
+                            customerEmail: e.target.value
+                          })}
+                          placeholder="customer@example.com"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="customerPhone">Phone</Label>
+                        <Input
+                          id="customerPhone"
+                          value={manualReturnData.customerPhone}
+                          onChange={(e) => setManualReturnData({
+                            ...manualReturnData,
+                            customerPhone: e.target.value
+                          })}
+                          placeholder="Enter phone number"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="returnDate">Return Date *</Label>
+                        <Input
+                          id="returnDate"
+                          type="date"
+                          value={manualReturnData.returnDate}
+                          onChange={(e) => setManualReturnData({
+                            ...manualReturnData,
+                            returnDate: e.target.value
+                          })}
+                          required
+                        />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Return Items */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
+                      <span>Return Items</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setManualReturnData({
+                            ...manualReturnData,
+                            items: [...manualReturnData.items, {
+                              productName: '',
+                              quantity: 1,
+                              unitPrice: 0,
+                              totalAmount: 0
+                            }]
+                          });
+                        }}
+                      >
+                        <Plus className="h-4 w-4 mr-1" />
+                        Add Item
+                      </Button>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {manualReturnData.items.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500">
+                        No items added. Click &ldquo;Add Item&rdquo; to get started.
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {manualReturnData.items.map((item, index) => (
+                          <div key={index} className="grid grid-cols-12 gap-2 items-end p-3 border rounded-lg">
+                            <div className="col-span-4">
+                              <Label>Product Name</Label>
+                              <Input
+                                value={item.productName}
+                                onChange={(e) => {
+                                  const updatedItems = [...manualReturnData.items];
+                                  updatedItems[index].productName = e.target.value;
+                                  setManualReturnData({
+                                    ...manualReturnData,
+                                    items: updatedItems
+                                  });
+                                }}
+                                placeholder="Enter product name"
+                              />
+                            </div>
+                            <div className="col-span-2">
+                              <Label>Quantity</Label>
+                              <Input
+                                type="number"
+                                min="1"
+                                value={item.quantity}
+                                onChange={(e) => {
+                                  const quantity = parseInt(e.target.value) || 1;
+                                  const updatedItems = [...manualReturnData.items];
+                                  updatedItems[index].quantity = quantity;
+                                  updatedItems[index].totalAmount = quantity * updatedItems[index].unitPrice;
+                                  setManualReturnData({
+                                    ...manualReturnData,
+                                    items: updatedItems
+                                  });
+                                }}
+                              />
+                            </div>
+                            <div className="col-span-2">
+                              <Label>Unit Price</Label>
+                              <Input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={item.unitPrice}
+                                onChange={(e) => {
+                                  const unitPrice = parseFloat(e.target.value) || 0;
+                                  const updatedItems = [...manualReturnData.items];
+                                  updatedItems[index].unitPrice = unitPrice;
+                                  updatedItems[index].totalAmount = updatedItems[index].quantity * unitPrice;
+                                  setManualReturnData({
+                                    ...manualReturnData,
+                                    items: updatedItems
+                                  });
+                                }}
+                              />
+                            </div>
+                            <div className="col-span-2">
+                              <Label>Total</Label>
+                              <Input
+                                type="number"
+                                value={item.totalAmount}
+                                readOnly
+                                className="bg-gray-50"
+                              />
+                            </div>
+                            <div className="col-span-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="w-full"
+                                onClick={() => {
+                                  const updatedItems = manualReturnData.items.filter((_, i) => i !== index);
+                                  setManualReturnData({
+                                    ...manualReturnData,
+                                    items: updatedItems
+                                  });
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                        <div className="flex justify-end pt-4 border-t">
+                          <div className="text-lg font-semibold">
+                            Total Refund Amount: ₹{manualReturnData.items.reduce((sum, item) => sum + item.totalAmount, 0).toLocaleString()}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Return Details */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Return Details</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="returnReason">Return Reason *</Label>
+                        <Textarea
+                          id="returnReason"
+                          value={manualReturnData.reason}
+                          onChange={(e) => setManualReturnData({
+                            ...manualReturnData,
+                            reason: e.target.value
+                          })}
+                          placeholder="Enter reason for return"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="refundMethod">Refund Method</Label>
+                        <Select value={refundMethod} onValueChange={(value: 'Cash' | 'Bank Transfer' | 'Cheque' | 'Credit Note') => setRefundMethod(value)}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Cash">Cash</SelectItem>
+                            <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                            <SelectItem value="Cheque">Cheque</SelectItem>
+                            <SelectItem value="Credit Note">Credit Note</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            ) : selectedReturnInvoice && (
+              <div className="space-y-6">
+                {/* Customer Info */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Customer & Invoice Details</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p><strong>Customer:</strong> {selectedReturnInvoice.customer_details.name}</p>
+                        <p><strong>Email:</strong> {selectedReturnInvoice.customer_details.email}</p>
+                      </div>
+                      <div>
+                        <p><strong>Invoice:</strong> {selectedReturnInvoice.invoice_number}</p>
+                        <p><strong>Invoice Date:</strong> {new Date(selectedReturnInvoice.invoice_date).toLocaleDateString()}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Return Items */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Select Items to Return</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Product</TableHead>
+                          <TableHead>Original Qty</TableHead>
+                          <TableHead>Return Qty</TableHead>
+                          <TableHead>Unit Price</TableHead>
+                          <TableHead>Condition</TableHead>
+                          <TableHead>Reason</TableHead>
+                          <TableHead>Refund</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {returnItems.map((item, index) => (
+                          <TableRow key={index}>
+                            <TableCell className="font-medium">{item.product_name}</TableCell>
+                            <TableCell>{item.original_quantity}</TableCell>
+                            <TableCell>
+                              <Input
+                                type="number"
+                                min="0"
+                                max={item.original_quantity}
+                                value={item.return_quantity}
+                                onChange={(e) => updateReturnItem(index, 'return_quantity', parseInt(e.target.value) || 0)}
+                                className="w-20"
+                              />
+                            </TableCell>
+                            <TableCell>₹{item.unit_price}</TableCell>
+                            <TableCell>
+                              <Select 
+                                value={item.condition} 
+                                onValueChange={(value) => updateReturnItem(index, 'condition', value)}
+                              >
+                                <SelectTrigger className="w-32">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="Good">Good</SelectItem>
+                                  <SelectItem value="Damaged">Damaged</SelectItem>
+                                  <SelectItem value="Defective">Defective</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                placeholder="Return reason"
+                                value={item.reason}
+                                onChange={(e) => updateReturnItem(index, 'reason', e.target.value)}
+                                className="w-32"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              ₹{(item.return_quantity * item.unit_price).toFixed(2)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+
+                {/* Return Summary */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <Label htmlFor="refund_method">Refund Method</Label>
+                    <Select value={refundMethod} onValueChange={setRefundMethod}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Cash">Cash</SelectItem>
+                        <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                        <SelectItem value="Cheque">Cheque</SelectItem>
+                        <SelectItem value="Credit Note">Credit Note</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <div className="w-48 space-y-2">
+                      <div className="flex justify-between">
+                        <span>Total Refund:</span>
+                        <span className="font-semibold">
+                          ₹{returnItems.reduce((sum, item) => sum + (item.return_quantity * item.unit_price), 0).toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Notes */}
+                <div>
+                  <Label htmlFor="return_notes">Additional Notes</Label>
+                  <Textarea
+                    id="return_notes"
+                    placeholder="Add any additional notes about the return..."
+                    value={returnNotes}
+                    onChange={(e) => setReturnNotes(e.target.value)}
+                    rows={3}
+                  />
+                </div>
+
+                {/* Actions */}
+                <div className="flex justify-end space-x-4">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setIsReturnDialogOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    onClick={isManualReturnMode ? submitManualReturn : submitSaleReturn}
+                    className="bg-orange-600 hover:bg-orange-700"
+                  >
+                    {isManualReturnMode ? 'Create Manual Return' : 'Submit Return Request'}
+                  </Button>
                 </div>
               </div>
             )}
