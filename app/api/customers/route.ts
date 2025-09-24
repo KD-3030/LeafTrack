@@ -11,17 +11,13 @@ export async function GET(request: NextRequest) {
   try {
     await connectDB();
     
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // Use the proper authentication middleware
+    const authResult = requireUserAuth(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
     }
-
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
     
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+    const decoded = authResult;
 
     // Get query parameters for filtering
     const { searchParams } = new URL(request.url);
@@ -33,7 +29,14 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '50');
 
     // Build filter object
-    const filter: any = {};
+    interface CustomerFilter {
+      status?: string;
+      state?: RegExp;
+      'address.state'?: string;
+      business_type?: string;
+      $or?: Array<Record<string, RegExp>>;
+    }
+    const filter: CustomerFilter = {};
     
     if (status && status !== 'all') filter.status = status;
     if (state && state !== 'all') filter.state = new RegExp(state, 'i');
@@ -82,16 +85,10 @@ export async function POST(request: NextRequest) {
   try {
     await connectDB();
     
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
-    
-    if (!decoded || (decoded.role !== 'Admin' && decoded.role !== 'Salesman')) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    // Use the proper authentication middleware
+    const authResult = requireUserAuth(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
     }
 
     const customerData = await request.json();
@@ -134,10 +131,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error creating customer:', error);
     
-    if ((error as any).name === 'ValidationError') {
+    if (error instanceof Error && error.name === 'ValidationError') {
       return NextResponse.json({ 
         error: 'Validation failed', 
-        details: (error as any).message 
+        details: error.message 
       }, { status: 400 });
     }
     
