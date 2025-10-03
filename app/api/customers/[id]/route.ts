@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Customer, { ICustomer } from '@/models/Customer';
-import { verifyToken } from '@/lib/auth';
+import { requireUserAuth } from '@/lib/authMiddleware';
 import { Model } from 'mongoose';
 
 interface RouteParams {
@@ -15,16 +15,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     await connectDB();
     
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
-    
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    // Use the proper authentication middleware
+    const authResult = requireUserAuth(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
     }
 
     const CustomerModel = Customer as Model<ICustomer>;
@@ -49,16 +43,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     await connectDB();
     
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
-    
-    if (!decoded || (decoded.role !== 'Admin' && decoded.role !== 'Salesman')) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    // Use the proper authentication middleware
+    const authResult = requireUserAuth(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
     }
 
     const updateData = await request.json();
@@ -70,7 +58,21 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
     }
 
-    // If email is being updated, check for conflicts
+    // If phone is being updated, check for conflicts
+    if (updateData.phone && updateData.phone !== existingCustomer.phone) {
+      const phoneConflict = await CustomerModel.findOne({ 
+        phone: updateData.phone,
+        _id: { $ne: params.id }
+      });
+      
+      if (phoneConflict) {
+        return NextResponse.json({ 
+          error: 'Phone number already exists' 
+        }, { status: 409 });
+      }
+    }
+
+    // If email is being updated, check for conflicts (email is now optional)
     if (updateData.email && updateData.email !== existingCustomer.email) {
       const emailConflict = await CustomerModel.findOne({ 
         email: updateData.email,
@@ -100,10 +102,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   } catch (error) {
     console.error('Error updating customer:', error);
     
-    if ((error as any).name === 'ValidationError') {
+    if (error instanceof Error && error.name === 'ValidationError') {
       return NextResponse.json({ 
         error: 'Validation failed', 
-        details: (error as any).message 
+        details: error.message 
       }, { status: 400 });
     }
     
@@ -116,15 +118,14 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     await connectDB();
     
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // Use the proper authentication middleware (Admin only for deletion)
+    const authResult = requireUserAuth(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
     }
 
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
-    
-    if (!decoded || decoded.role !== 'Admin') {
+    // Check if user has admin role for deletion
+    if (authResult.role !== 'Admin') {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 

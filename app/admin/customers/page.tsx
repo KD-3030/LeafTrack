@@ -30,8 +30,8 @@ import { toast } from 'sonner';
 interface Customer {
   _id: string;
   name: string;
-  email: string;
-  phone?: string;
+  email?: string; // Now optional
+  phone: string; // Now required
   address?: string;
   city?: string;
   state?: string;
@@ -50,8 +50,8 @@ interface Customer {
 
 interface CustomerFormData {
   name: string;
-  email: string;
-  phone: string;
+  email: string; // Keep as string for form, but not required
+  phone: string; // Now required
   address: string;
   city: string;
   state: string;
@@ -209,8 +209,8 @@ export default function CustomersPage() {
     setEditingCustomer(customer);
     setFormData({
       name: customer.name,
-      email: customer.email,
-      phone: customer.phone || '',
+      email: customer.email || '',
+      phone: customer.phone,
       address: customer.address || '',
       city: customer.city || '',
       state: customer.state || '',
@@ -235,8 +235,8 @@ export default function CustomersPage() {
   const filteredCustomers = customers.filter(customer => {
     const matchesSearch = 
       customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      customer.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (customer.phone && customer.phone.includes(searchTerm)) ||
+      (customer.email && customer.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      customer.phone.includes(searchTerm) ||
       (customer.business_name && customer.business_name.toLowerCase().includes(searchTerm.toLowerCase()));
     
     const matchesStatus = statusFilter === 'all' || customer.status.toLowerCase() === statusFilter;
@@ -404,21 +404,21 @@ export default function CustomersPage() {
                       <TableCell>
                         <div>
                           <div className="font-medium">{customer.name}</div>
-                          <div className="text-sm text-gray-600">{customer.email}</div>
+                          <div className="text-sm text-gray-600">{customer.phone}</div>
                         </div>
                       </TableCell>
                       <TableCell>
                         <div className="space-y-1">
-                          {customer.phone && (
+                          <div className="flex items-center text-sm">
+                            <Phone className="h-3 w-3 mr-1" />
+                            {customer.phone}
+                          </div>
+                          {customer.email && (
                             <div className="flex items-center text-sm">
-                              <Phone className="h-3 w-3 mr-1" />
-                              {customer.phone}
+                              <Mail className="h-3 w-3 mr-1" />
+                              {customer.email}
                             </div>
                           )}
-                          <div className="flex items-center text-sm">
-                            <Mail className="h-3 w-3 mr-1" />
-                            {customer.email}
-                          </div>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -521,21 +521,21 @@ export default function CustomersPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="email">Email *</Label>
+                    <Label htmlFor="email">Email</Label>
                     <Input
                       id="email"
                       type="email"
                       value={formData.email}
                       onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                      required
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="phone">Phone</Label>
+                    <Label htmlFor="phone">Phone *</Label>
                     <Input
                       id="phone"
                       value={formData.phone}
                       onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
+                      required
                     />
                   </div>
                   <div className="space-y-2">
@@ -723,8 +723,8 @@ export default function CustomersPage() {
                     <h3 className="font-semibold text-lg mb-3">Basic Information</h3>
                     <div className="space-y-2">
                       <p><strong>Name:</strong> {selectedCustomer.name}</p>
-                      <p><strong>Email:</strong> {selectedCustomer.email}</p>
-                      {selectedCustomer.phone && <p><strong>Phone:</strong> {selectedCustomer.phone}</p>}
+                      <p><strong>Phone:</strong> {selectedCustomer.phone}</p>
+                      {selectedCustomer.email && <p><strong>Email:</strong> {selectedCustomer.email}</p>}
                       {selectedCustomer.business_name && <p><strong>Business:</strong> {selectedCustomer.business_name}</p>}
                       <p><strong>Type:</strong> {getBusinessTypeBadge(selectedCustomer.business_type)}</p>
                       <p><strong>Status:</strong> {getStatusBadge(selectedCustomer.status)}</p>

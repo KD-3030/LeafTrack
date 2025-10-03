@@ -213,7 +213,7 @@ export async function POST(request: NextRequest) {
     // Create payment record
     const paymentData: any = {
       invoice_id,
-      customer_id: customer_id || invoice.customer_details,
+      customer_id: customer_id || invoice.customer_id, // Use the actual ObjectId, not customer_details
       amount_paid: parseFloat(amount_paid),
       payment_method,
       payment_date: new Date(),

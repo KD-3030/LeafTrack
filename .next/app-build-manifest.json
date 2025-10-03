@@ -26,6 +26,16 @@
       "static/chunks/main-app.js",
       "static/chunks/app/admin/layout.js"
     ],
+    "/admin/invoicing/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/admin/invoicing/page.js"
+    ],
+    "/admin/financial/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/admin/financial/page.js"
+    ],
     "/admin/customers/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",

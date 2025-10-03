@@ -230,15 +230,20 @@ const SaleReturnSchema = new Schema<ISaleReturn>({
 
 // Generate unique return number
 SaleReturnSchema.pre('save', async function(next) {
-  if (this.isNew && !this.return_number) {
-    const count = await mongoose.model('SaleReturn').countDocuments();
-    this.return_number = `RET${String(count + 1).padStart(6, '0')}`;
+  try {
+    if (this.isNew && !this.return_number) {
+      const SaleReturnModel = this.constructor as Model<ISaleReturn>;
+      const count = await SaleReturnModel.countDocuments();
+      this.return_number = `RET${String(count + 1).padStart(6, '0')}`;
+    }
+    next();
+  } catch (error) {
+    console.error('Error in SaleReturn pre-save hook:', error);
+    next(error);
   }
-  next();
 });
 
 // Indexes for better query performance
-SaleReturnSchema.index({ return_number: 1 });
 SaleReturnSchema.index({ original_invoice_id: 1 });
 SaleReturnSchema.index({ customer_id: 1 });
 SaleReturnSchema.index({ return_date: -1 });

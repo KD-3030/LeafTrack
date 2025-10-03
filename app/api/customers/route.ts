@@ -94,9 +94,9 @@ export async function POST(request: NextRequest) {
     const customerData = await request.json();
 
     // Validate required fields
-    if (!customerData.name || !customerData.email) {
+    if (!customerData.name || !customerData.phone) {
       return NextResponse.json(
-        { error: 'Name and email are required' },
+        { error: 'Name and phone number are required' },
         { status: 400 }
       );
     }

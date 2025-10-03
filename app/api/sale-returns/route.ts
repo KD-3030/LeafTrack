@@ -201,6 +201,7 @@ export async function POST(request: NextRequest) {
 
       // Start transaction to ensure data consistency
       const session = await mongoose.startSession();
+      let savedReturn: typeof SaleReturn.prototype | null = null;
       
       try {
         await session.withTransaction(async () => {
@@ -242,8 +243,13 @@ export async function POST(request: NextRequest) {
             returnItem.total_refund = itemSubtotal + itemTax;
           }
 
+          // Generate return number before creating the sale return
+          const returnCount = await SaleReturn.countDocuments();
+          const return_number = `RET${String(returnCount + 1).padStart(6, '0')}`;
+
           // Create the sale return record
           const saleReturn = new SaleReturn({
+            return_number,
             original_invoice_id,
             original_sale_id: invoice.sale_id,
             customer_id: invoice.customer_id,
@@ -258,7 +264,7 @@ export async function POST(request: NextRequest) {
             refund_status: 'Pending'
           });
 
-          await saleReturn.save({ session });
+          savedReturn = await saleReturn.save({ session });
 
           // If items are in good condition, restore to inventory
           for (const returnItem of return_items) {
@@ -270,7 +276,6 @@ export async function POST(request: NextRequest) {
               );
             }
           }
-
         });
 
         await session.endSession();
@@ -278,7 +283,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           success: true,
           message: 'Sale return created successfully',
-          return_number: (await SaleReturn.findOne().sort({ createdAt: -1 }))?.return_number
+          return_number: savedReturn?.return_number,
+          data: savedReturn
         });
 
       } catch (transactionError) {

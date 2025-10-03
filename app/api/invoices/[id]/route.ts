@@ -119,7 +119,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
         // Create a payment record for the difference
         const payment = new Payment({
           invoice_id: params.id,
-          customer_id: invoice.customer_details,
+          customer_id: invoice.customer_id, // Use the actual ObjectId, not customer_details
           amount_paid: newPaymentAmount,
           payment_method: updates.payment_method,
           payment_date: updates.payment_date || new Date(),

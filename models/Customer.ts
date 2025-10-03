@@ -2,8 +2,8 @@ import mongoose, { Document, Schema, Model } from 'mongoose';
 
 export interface ICustomer extends Document {
   name: string;
-  email: string;
-  phone?: string;
+  email?: string; // Now optional
+  phone: string; // Now required
   address?: string;
   city?: string;
   state?: string;
@@ -36,14 +36,16 @@ const CustomerSchema = new Schema<ICustomer>({
   },
   email: {
     type: String,
-    required: [true, 'Email is required'],
     unique: true,
     lowercase: true,
     trim: true,
+    sparse: true, // Allows multiple null/undefined values
   },
   phone: {
     type: String,
+    required: [true, 'Phone number is required'],
     trim: true,
+    unique: true, // Ensure unique phone numbers
   },
   address: {
     type: String,

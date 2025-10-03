@@ -3,6 +3,7 @@ import { connectDB } from '@/lib/mongodb';
 import Invoice from '@/models/Invoice';
 import Customer from '@/models/Customer';
 import Product from '@/models/Product';
+import CompanySettings from '@/models/CompanySettings';
 import { requireAdminAuth, DecodedToken } from '@/lib/authMiddleware';
 import mongoose from 'mongoose';
 
@@ -48,6 +49,12 @@ export async function POST(request: NextRequest) {
           throw new Error('Customer not found');
         }
 
+        // Get company settings for invoice
+        const companySettings = await CompanySettings.findOne().session(session);
+        if (!companySettings) {
+          throw new Error('Company settings not found. Please configure company details first.');
+        }
+
         // Validate all products exist and calculate totals
         let subtotal = 0;
         let totalTax = 0;
@@ -91,6 +98,7 @@ export async function POST(request: NextRequest) {
         const invoice = new Invoice({
           invoice_number: invoiceNumber,
           invoice_type: 'Manual',
+          manually_created: true, // Mark as manually created (makes sale_id optional)
           invoice_date: new Date(invoice_date),
           due_date: new Date(due_date),
           customer_id: customer._id,
@@ -101,10 +109,19 @@ export async function POST(request: NextRequest) {
             gstin: customer.gstin,
             address: customer.address
           },
+          company_details: {
+            name: companySettings.company_name,
+            address: `${companySettings.address}, ${companySettings.city}, ${companySettings.state} ${companySettings.pincode}`,
+            gstin: companySettings.gstin,
+            phone: companySettings.phone,
+            email: companySettings.email,
+          },
           salesman_id: decoded.userId, // Admin creating the invoice
           items: validatedItems,
           subtotal: subtotal,
-          tax_amount: totalTax,
+          taxable_amount: subtotal, // Required field - same as subtotal for now
+          total_tax: totalTax, // Required field - using totalTax
+          tax_amount: totalTax, // Keep for compatibility
           grand_total: grandTotal,
           paid_amount: 0,
           balance_due: grandTotal,
@@ -113,7 +130,6 @@ export async function POST(request: NextRequest) {
           payment_terms: payment_terms || '30 days',
           notes: notes || '',
           created_by: decoded.userId,
-          manually_created: true
         });
 
         await invoice.save({ session });

@@ -68,6 +68,7 @@ export interface IInvoice extends Document {
   // Metadata
   notes?: string;
   terms_and_conditions?: string;
+  manually_created?: boolean; // Flag for manually created invoices
   
   createdAt: Date;
   updatedAt: Date;
@@ -138,7 +139,10 @@ const InvoiceSchema = new Schema<IInvoice>({
   sale_id: {
     type: Schema.Types.ObjectId,
     ref: 'Sale',
-    required: true,
+    required: function(this: IInvoice) {
+      // Only require sale_id for non-manual invoices
+      return !this.manually_created;
+    },
   },
   customer_id: {
     type: Schema.Types.ObjectId,
@@ -229,6 +233,10 @@ const InvoiceSchema = new Schema<IInvoice>({
   },
   notes: String,
   terms_and_conditions: String,
+  manually_created: {
+    type: Boolean,
+    default: false,
+  },
 }, {
   timestamps: true,
 });
