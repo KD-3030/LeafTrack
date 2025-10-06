@@ -670,6 +670,7 @@ export default function InvoicingPage() {
     let taxableAmount: number;
     let taxAmount: number;
     let totalAmount: number;
+    let unitPriceToStore: number;
 
     // Calculate based on GST application mode
     if (gstApplicationMode === 'not_applied') {
@@ -677,17 +678,22 @@ export default function InvoicingPage() {
       taxableAmount = itemQuantity * itemUnitPrice;
       taxAmount = 0;
       totalAmount = taxableAmount;
+      unitPriceToStore = itemUnitPrice;
     } else if (gstApplicationMode === 'inclusive') {
       // GST Inclusive - Amount already includes GST, need to extract it
+      // User enters price WITH GST included, so final amount = entered amount
       const totalWithGst = itemQuantity * itemUnitPrice;
-      taxableAmount = totalWithGst / (1 + product.gst_rate / 100);
+      const baseUnitPrice = itemUnitPrice / (1 + product.gst_rate / 100);
+      taxableAmount = itemQuantity * baseUnitPrice;
       taxAmount = totalWithGst - taxableAmount;
-      totalAmount = totalWithGst;
+      totalAmount = totalWithGst; // Final amount is what user entered
+      unitPriceToStore = baseUnitPrice; // Store the extracted base price
     } else {
       // GST Applied (default) - Add GST to the amount
       taxableAmount = itemQuantity * itemUnitPrice;
       taxAmount = (taxableAmount * product.gst_rate) / 100;
       totalAmount = taxableAmount + taxAmount;
+      unitPriceToStore = itemUnitPrice;
     }
 
     const newItem: ManualInvoiceItem = {
@@ -695,7 +701,7 @@ export default function InvoicingPage() {
       product_name: product.name,
       hsn_code: product.hsn_code,
       quantity: itemQuantity,
-      unit_price: itemUnitPrice,
+      unit_price: unitPriceToStore,
       gst_rate: gstApplicationMode === 'not_applied' ? 0 : product.gst_rate,
       taxable_amount: taxableAmount,
       tax_amount: taxAmount,
@@ -957,7 +963,7 @@ export default function InvoicingPage() {
       if (data.success) {
         toast({
           title: "Success",
-          description: data.message || "Invoice cancelled successfully",
+          description: data.message || "Invoice deleted successfully",
         });
         setIsDeleteDialogOpen(false);
         setInvoiceToDelete(null);
@@ -966,7 +972,7 @@ export default function InvoicingPage() {
         if (data.hasPayments && !forceDelete) {
           // Show option to force delete
           const shouldForceDelete = window.confirm(
-            `This invoice has ${data.paymentCount} confirmed payment(s). Do you want to delete the invoice anyway? This will also remove all associated payments.`
+            `This invoice has ${data.paymentCount} confirmed payment(s). Do you want to delete the invoice anyway? This will permanently remove the invoice and all associated payments.`
           );
           if (shouldForceDelete) {
             handleDeleteInvoice(true);
@@ -974,16 +980,16 @@ export default function InvoicingPage() {
         } else {
           toast({
             title: "Error",
-            description: data.error || "Failed to cancel invoice",
+            description: data.error || "Failed to delete invoice",
             variant: "destructive",
           });
         }
       }
     } catch (error) {
-      console.error('Error cancelling invoice:', error);
+      console.error('Error deleting invoice:', error);
       toast({
         title: "Error",
-        description: "Failed to cancel invoice",
+        description: "Failed to delete invoice",
         variant: "destructive",
       });
     }
@@ -2586,10 +2592,10 @@ export default function InvoicingPage() {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-red-600">
                 <AlertCircle className="h-5 w-5" />
-                Cancel Invoice
+                Delete Invoice
               </DialogTitle>
               <DialogDescription>
-                Are you sure you want to cancel this invoice? This action cannot be undone.
+                Are you sure you want to permanently delete this invoice? This action cannot be undone and will completely remove the invoice from the database.
               </DialogDescription>
             </DialogHeader>
             {invoiceToDelete && (
@@ -2616,10 +2622,10 @@ export default function InvoicingPage() {
                 </Card>
 
                 {invoiceToDelete.paid_amount > 0 && (
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
-                    <p className="text-sm text-yellow-800">
+                  <div className="bg-red-50 border border-red-200 rounded-md p-3">
+                    <p className="text-sm text-red-800">
                       <strong>Warning:</strong> This invoice has received payments totaling ₹
-                      {invoiceToDelete.paid_amount.toLocaleString()}. It cannot be cancelled if there are confirmed payments.
+                      {invoiceToDelete.paid_amount.toLocaleString()}. Deleting this invoice will also permanently remove all associated payment records.
                     </p>
                   </div>
                 )}
@@ -2639,7 +2645,7 @@ export default function InvoicingPage() {
                     onClick={() => handleDeleteInvoice(false)}
                   >
                     <Trash2 className="h-4 w-4 mr-2" />
-                    Cancel Invoice
+                    Delete Permanently
                   </Button>
                 </div>
               </div>

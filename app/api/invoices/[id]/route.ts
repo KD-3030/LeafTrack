@@ -243,26 +243,24 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       });
     }
 
-    // Update status to cancelled
-    const updatedInvoice = await Invoice.findByIdAndUpdate(
-      params.id,
-      {
-        status: 'Cancelled',
-        updated_at: new Date(),
-        updated_by: decoded.id,
-        cancellation_reason: forceDelete 
-          ? 'Cancelled by administrator (force delete with payments removed)' 
-          : 'Cancelled by administrator'
-      },
-      { new: true }
-    );
+    // Permanently delete the invoice from the database
+    const deletedInvoice = await Invoice.findByIdAndDelete(params.id);
+
+    if (!deletedInvoice) {
+      return NextResponse.json({ 
+        error: 'Invoice not found or already deleted' 
+      }, { status: 404 });
+    }
 
     return NextResponse.json({
       success: true,
       message: forceDelete 
-        ? `Invoice cancelled successfully. ${payments.length} payment(s) were removed.`
-        : 'Invoice cancelled successfully',
-      invoice: updatedInvoice,
+        ? `Invoice deleted successfully. ${payments.length} payment(s) were removed.`
+        : 'Invoice deleted successfully',
+      deletedInvoice: {
+        _id: deletedInvoice._id,
+        invoice_number: deletedInvoice.invoice_number,
+      },
       paymentsDeleted: forceDelete ? payments.length : 0
     });
   } catch (error) {
