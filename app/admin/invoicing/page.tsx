@@ -1603,9 +1603,12 @@ export default function InvoicingPage() {
                       <Input
                         id="quantity"
                         type="number"
-                        min="1"
-                        value={itemQuantity === 1 ? '' : itemQuantity}
-                        onChange={(e) => setItemQuantity(parseInt(e.target.value) || 1)}
+                        min="0"
+                        value={itemQuantity}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setItemQuantity(val === '' ? 0 : parseInt(val) || 0);
+                        }}
                         placeholder="Enter quantity"
                       />
                     </div>
@@ -1621,8 +1624,11 @@ export default function InvoicingPage() {
                         type="number"
                         min="0"
                         step="0.01"
-                        value={itemUnitPrice === 0 ? '' : itemUnitPrice}
-                        onChange={(e) => setItemUnitPrice(parseFloat(e.target.value) || 0)}
+                        value={itemUnitPrice}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setItemUnitPrice(val === '' ? 0 : parseFloat(val) || 0);
+                        }}
                         placeholder="Enter unit price"
                       />
                     </div>
