@@ -131,7 +131,7 @@ const SaleReturnSchema = new Schema<ISaleReturn>({
   },
   customer_id: {
     type: Schema.Types.ObjectId,
-    ref: 'User',
+    ref: 'Customer',
     required: false, // Optional for manual entries
   },
   salesman_id: {

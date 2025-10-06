@@ -3,6 +3,8 @@ import { connectDB } from '@/lib/mongodb';
 import SaleReturn from '@/models/SaleReturn';
 import Invoice from '@/models/Invoice';
 import Product from '@/models/Product';
+import Customer from '@/models/Customer'; // Import Customer model for populate
+import User from '@/models/User'; // Import User model for populate (salesman, approved_by)
 import { requireUserAuth, requireAdminAuth, DecodedToken } from '@/lib/authMiddleware';
 import mongoose from 'mongoose';
 
@@ -12,6 +14,11 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     await connectDB();
+    
+    // Ensure models are registered before populate
+    if (!Customer || !User) {
+      throw new Error('Required models not loaded');
+    }
     
     // Use standardized authentication
     const authResult = requireUserAuth(request);
