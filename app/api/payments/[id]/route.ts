@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import Payment from '@/models/Payment';
+import Customer from '@/models/Customer'; // Import Customer model for populate
 import jwt, { JwtPayload } from 'jsonwebtoken';
 
 export const dynamic = 'force-dynamic';

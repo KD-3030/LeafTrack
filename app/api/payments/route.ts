@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import mongoose from 'mongoose';
 import { connectDB } from '@/lib/mongodb';
 import Payment from '@/models/Payment';
 import Invoice from '@/models/Invoice';
+import Customer from '@/models/Customer'; // Import Customer model for populate
 import { requireUserAuth } from '@/lib/authMiddleware';
 
 export const dynamic = 'force-dynamic';
@@ -15,6 +17,12 @@ export async function GET(request: NextRequest) {
     }
 
     await connectDB();
+    
+    // Ensure Customer model is registered before populate
+    // This forces the model to be registered in mongoose
+    if (!Customer) {
+      throw new Error('Customer model not loaded');
+    }
 
     const { searchParams } = new URL(request.url);
     const limit = parseInt(searchParams.get('limit') || '20');
@@ -228,7 +236,7 @@ export async function POST(request: NextRequest) {
     // Create payment record
     interface PaymentData {
       invoice_id: string;
-      customer_id: string;
+      customer_id: string | mongoose.Types.ObjectId;
       amount_paid: number;
       payment_method: string;
       payment_date: Date;
@@ -243,9 +251,19 @@ export async function POST(request: NextRequest) {
       cheque_date?: Date;
       bank_name?: string;
     }
+    
+    // Ensure customer_id is set correctly
+    const finalCustomerId = customer_id || invoice.customer_id;
+    if (!finalCustomerId) {
+      return NextResponse.json(
+        { error: 'Customer ID is required' },
+        { status: 400 }
+      );
+    }
+    
     const paymentData: PaymentData = {
       invoice_id,
-      customer_id: customer_id || invoice.customer_id, // Use the actual ObjectId, not customer_details
+      customer_id: finalCustomerId, // Use the actual ObjectId, not customer_details
       amount_paid: parseFloat(amount_paid),
       payment_method,
       payment_date: payment_date ? new Date(payment_date) : new Date(),
@@ -276,11 +294,35 @@ export async function POST(request: NextRequest) {
     const payment = new Payment(paymentData);
     await payment.save();
 
-    // Populate the response
+    // Debug: Check if customer exists
+    const Customer = (await import('@/models/Customer')).default;
+    const customerExists = await Customer.findById(finalCustomerId).lean();
+    console.log('Customer check:', {
+      customerId: finalCustomerId,
+      customerExists: !!customerExists,
+      customerData: customerExists ? { name: customerExists.name, email: customerExists.email, phone: customerExists.phone } : null
+    });
+
+    // Populate the response with the same options as GET
     const populatedPayment = await Payment.findById(payment._id)
-      .populate('invoice_id', 'invoice_number grand_total due_date')
-      .populate('customer_id', 'name email phone')
+      .populate({
+        path: 'invoice_id',
+        select: 'invoice_number grand_total due_date',
+        options: { strictPopulate: false }
+      })
+      .populate({
+        path: 'customer_id',
+        select: 'name email phone',
+        options: { strictPopulate: false }
+      })
       .lean();
+
+    console.log('Payment created successfully:', {
+      paymentId: payment._id,
+      customerId: finalCustomerId,
+      populatedCustomer: populatedPayment?.customer_id,
+      invoicePopulated: !!populatedPayment?.invoice_id
+    });
 
     return NextResponse.json({
       success: true,
@@ -289,8 +331,14 @@ export async function POST(request: NextRequest) {
     }, { status: 201 });
   } catch (error) {
     console.error('Payment creation error:', error);
+    if (error instanceof Error) {
+      console.error('Error details:', error.message, error.stack);
+    }
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { 
+        error: 'Internal server error',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }

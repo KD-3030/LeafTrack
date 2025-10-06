@@ -146,7 +146,7 @@ const InvoiceSchema = new Schema<IInvoice>({
   },
   customer_id: {
     type: Schema.Types.ObjectId,
-    ref: 'User',
+    ref: 'Customer',
     required: true,
   },
   salesman_id: {

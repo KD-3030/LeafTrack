@@ -157,11 +157,14 @@ export default function FinancialDashboard() {
       }
 
       const data = await response.json();
+      console.log('Recent payments loaded:', data);
+      
       if (data.success && Array.isArray(data.payments)) {
         // Filter out any payments with critical null data
         const validPayments = data.payments.filter((payment: Payment) => 
           payment && payment._id && payment.payment_date
         );
+        console.log('Valid payments after filtering:', validPayments.length, 'out of', data.payments.length);
         setPayments(validPayments);
       } else {
         console.error('Invalid payment data structure:', data);
@@ -231,6 +234,8 @@ export default function FinancialDashboard() {
       });
 
       const data = await response.json();
+      console.log('Payment recording response:', data);
+      
       if (data.success) {
         toast({
           title: "Success",
@@ -249,7 +254,11 @@ export default function FinancialDashboard() {
           bank_name: '',
           notes: '',
         });
-        loadFinancialData();
+        
+        // Add a small delay to ensure database write completes
+        console.log('Reloading financial data after payment...');
+        await loadFinancialData();
+        console.log('Financial data reloaded');
       } else {
         toast({
           title: "Error",
