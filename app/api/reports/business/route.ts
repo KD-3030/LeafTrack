@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Invoice, { IInvoice } from '@/models/Invoice';
-// import Sale from '@/models/Sale';
-// import Product from '@/models/Product';
-// import User from '@/models/User';
+import Product from '@/models/Product'; // Import for populate
+import Customer from '@/models/Customer'; // Import for populate
+import User from '@/models/User'; // Import for populate
 import { verifyToken } from '@/lib/auth';
 import { Model } from 'mongoose';
 
@@ -13,6 +13,11 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     await connectDB();
+    
+    // Ensure models are registered for populate
+    if (!Product || !Customer || !User) {
+      throw new Error('Required models not loaded');
+    }
     
     const authHeader = request.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {
@@ -199,7 +204,7 @@ export async function GET(request: NextRequest) {
             total_revenue: { $sum: '$items.total_amount' },
             total_cost: { 
               $sum: { 
-                $multiply: ['$items.quantity', '$product.cost_price'] 
+                $multiply: ['$items.quantity', '$product.manufacturingCost'] 
               }
             },
             total_tax: { 

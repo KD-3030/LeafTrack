@@ -174,13 +174,15 @@ export default function ReportsPage() {
 
       const data = await response.json();
       if (data.success) {
+        console.log('GST Report loaded:', data);
         setGSTReport(data);
       } else {
-        toast.error('Failed to load GST report');
+        console.error('GST Report error:', data);
+        toast.error(data.details || 'Failed to load GST report');
       }
     } catch (error) {
       console.error('Error loading GST report:', error);
-      toast.error('Failed to load GST report');
+      toast.error('Failed to load GST report: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
   };
 
@@ -197,30 +199,98 @@ export default function ReportsPage() {
       );
 
       const data = await response.json();
-      if (data.success) {
+      if (data.success && data.data) {
+        console.log('GSTR-1 data:', data);
+        
+        if (data.data.length === 0) {
+          toast.error('No invoices found for the selected date range');
+          return;
+        }
+        
         // Convert to CSV and download
         const csvContent = convertToCSV(data.data);
-        downloadCSV(csvContent, `GSTR1_${dateRange.from}_to_${dateRange.to}.csv`);
-        toast.success('GSTR-1 report exported successfully');
+        if (csvContent) {
+          downloadCSV(csvContent, `GSTR1_${dateRange.from}_to_${dateRange.to}.csv`);
+          toast.success(`GSTR-1 report exported successfully (${data.data.length} invoices)`);
+        } else {
+          toast.error('Failed to generate CSV content');
+        }
       } else {
-        toast.error('Failed to export GSTR-1 report');
+        console.error('GSTR-1 export error:', data);
+        toast.error(data.details || 'Failed to export GSTR-1 report');
       }
     } catch (error) {
       console.error('Error exporting GSTR-1:', error);
-      toast.error('Failed to export GSTR-1 report');
+      toast.error('Failed to export GSTR-1 report: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
   };
 
-  const convertToCSV = (data: Record<string, unknown>[]) => {
-    if (!data.length) return '';
+  const convertToCSV = (data: any[]) => {
+    if (!data || data.length === 0) return '';
     
-    const headers = Object.keys(data[0]);
+    // Flatten GSTR-1 data structure for CSV export
+    const flattenedData: any[] = [];
+    
+    data.forEach(invoice => {
+      if (invoice.items && invoice.items.length > 0) {
+        invoice.items.forEach((item: any) => {
+          flattenedData.push({
+            invoice_number: invoice.invoice_number,
+            invoice_date: new Date(invoice.invoice_date).toLocaleDateString('en-IN'),
+            customer_name: invoice.customer_name || '',
+            customer_gstin: invoice.customer_gstin || 'Unregistered',
+            customer_state: invoice.customer_state || '',
+            invoice_type: invoice.invoice_type,
+            item_description: item.item_description,
+            hsn_code: item.hsn_code,
+            quantity: item.quantity,
+            unit_price: item.unit_price.toFixed(2),
+            discount: item.discount,
+            taxable_amount: item.taxable_amount.toFixed(2),
+            gst_rate: item.gst_rate,
+            cgst_amount: item.cgst_amount.toFixed(2),
+            sgst_amount: item.sgst_amount.toFixed(2),
+            igst_amount: item.igst_amount.toFixed(2),
+            total_amount: item.total_amount.toFixed(2),
+          });
+        });
+      } else {
+        // Handle invoices without items
+        flattenedData.push({
+          invoice_number: invoice.invoice_number,
+          invoice_date: new Date(invoice.invoice_date).toLocaleDateString('en-IN'),
+          customer_name: invoice.customer_name || '',
+          customer_gstin: invoice.customer_gstin || 'Unregistered',
+          customer_state: invoice.customer_state || '',
+          invoice_type: invoice.invoice_type,
+          item_description: '',
+          hsn_code: '',
+          quantity: 0,
+          unit_price: 0,
+          discount: 0,
+          taxable_amount: invoice.total_taxable_amount.toFixed(2),
+          gst_rate: 0,
+          cgst_amount: invoice.total_cgst.toFixed(2),
+          sgst_amount: invoice.total_sgst.toFixed(2),
+          igst_amount: invoice.total_igst.toFixed(2),
+          total_amount: invoice.invoice_value.toFixed(2),
+        });
+      }
+    });
+    
+    if (flattenedData.length === 0) return '';
+    
+    const headers = Object.keys(flattenedData[0]);
     const csvRows = [
       headers.join(','),
-      ...data.map(row => 
+      ...flattenedData.map(row => 
         headers.map(header => {
           const value = row[header];
-          return typeof value === 'string' ? `"${value}"` : value;
+          // Escape quotes in strings and wrap in quotes
+          if (typeof value === 'string') {
+            return `"${value.replace(/"/g, '""')}"`;
+          }
+          return value;
         }).join(',')
       )
     ];
