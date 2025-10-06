@@ -163,8 +163,11 @@ export default function InvoicingPage() {
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isManualInvoiceDialogOpen, setIsManualInvoiceDialogOpen] = useState(false);
   const [isReturnDialogOpen, setIsReturnDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [selectedReturnInvoice, setSelectedReturnInvoice] = useState<Invoice | null>(null);
+  const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
   
   // Manual invoice form state
   const [manualInvoiceForm, setManualInvoiceForm] = useState<ManualInvoiceForm>({
@@ -835,6 +838,135 @@ export default function InvoicingPage() {
     }
   };
 
+  const openEditDialog = async (invoice: Invoice) => {
+    try {
+      // Fetch full invoice details
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch(`/api/invoices/${invoice._id}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      
+      const data = await response.json();
+      if (data.success && data.invoice) {
+        setSelectedInvoice(data.invoice);
+        setIsEditDialogOpen(true);
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to load invoice details",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error loading invoice for edit:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load invoice details",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const saveInvoiceEdits = async () => {
+    if (!selectedInvoice) return;
+
+    try {
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch(`/api/invoices/${selectedInvoice._id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          status: selectedInvoice.status,
+          due_date: selectedInvoice.due_date,
+          notes: (selectedInvoice as any).notes,
+          items: selectedInvoice.items,
+          grand_total: selectedInvoice.grand_total,
+        }),
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        toast({
+          title: "Success",
+          description: "Invoice updated successfully",
+        });
+        setIsEditDialogOpen(false);
+        setSelectedInvoice(null);
+        loadInvoices();
+      } else {
+        toast({
+          title: "Error",
+          description: data.error || "Failed to update invoice",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error saving invoice edits:', error);
+      toast({
+        title: "Error",
+        description: "Failed to save invoice edits",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteInvoice = async (forceDelete: boolean = false) => {
+    if (!invoiceToDelete) return;
+
+    try {
+      const token = localStorage.getItem('leaftrack_token');
+      const url = forceDelete 
+        ? `/api/invoices/${invoiceToDelete._id}?force=true`
+        : `/api/invoices/${invoiceToDelete._id}`;
+      
+      const response = await fetch(url, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        toast({
+          title: "Success",
+          description: data.message || "Invoice cancelled successfully",
+        });
+        setIsDeleteDialogOpen(false);
+        setInvoiceToDelete(null);
+        loadInvoices();
+      } else {
+        if (data.hasPayments && !forceDelete) {
+          // Show option to force delete
+          const shouldForceDelete = window.confirm(
+            `This invoice has ${data.paymentCount} confirmed payment(s). Do you want to delete the invoice anyway? This will also remove all associated payments.`
+          );
+          if (shouldForceDelete) {
+            handleDeleteInvoice(true);
+          }
+        } else {
+          toast({
+            title: "Error",
+            description: data.error || "Failed to cancel invoice",
+            variant: "destructive",
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error cancelling invoice:', error);
+      toast({
+        title: "Error",
+        description: "Failed to cancel invoice",
+        variant: "destructive",
+      });
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     const styles = {
       Draft: 'bg-gray-100 text-gray-800',
@@ -1067,23 +1199,16 @@ export default function InvoicingPage() {
                             setSelectedInvoice(invoice);
                             setIsViewDialogOpen(true);
                           }}
+                          title="View Invoice"
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
-                        {invoice.payment_status !== 'Paid' && (
+                        {invoice.status !== 'Cancelled' && invoice.status !== 'Paid' && (
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => {
-                              const paidAmount = prompt('Enter paid amount:', invoice.balance_due.toString());
-                              if (paidAmount) {
-                                updateInvoiceStatus(invoice._id, {
-                                  paid_amount: invoice.paid_amount + parseFloat(paidAmount),
-                                  payment_date: new Date().toISOString(),
-                                  payment_method: 'Cash',
-                                });
-                              }
-                            }}
+                            onClick={() => openEditDialog(invoice)}
+                            title="Edit Invoice"
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
@@ -1140,9 +1265,23 @@ export default function InvoicingPage() {
                               });
                             }
                           }}
+                          title="Download PDF"
                         >
                           <Download className="h-4 w-4" />
                         </Button>
+                        {invoice.status !== 'Cancelled' && (
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => {
+                              setInvoiceToDelete(invoice);
+                              setIsDeleteDialogOpen(true);
+                            }}
+                            title="Cancel Invoice"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -2094,6 +2233,332 @@ export default function InvoicingPage() {
                     className="bg-orange-600 hover:bg-orange-700"
                   >
                     {isManualReturnMode ? 'Create Manual Return' : 'Submit Return Request'}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Invoice Dialog */}
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit Invoice</DialogTitle>
+              <DialogDescription>
+                Update invoice details, items, status, and notes
+              </DialogDescription>
+            </DialogHeader>
+            {selectedInvoice && (
+              <div className="space-y-6">
+                {/* Invoice Details */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm">Invoice Information</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label className="text-sm text-gray-600">Invoice Number</Label>
+                        <p className="font-medium">{selectedInvoice.invoice_number}</p>
+                      </div>
+                      <div>
+                        <Label className="text-sm text-gray-600">Customer</Label>
+                        <p className="font-medium">{selectedInvoice.customer_details.name}</p>
+                      </div>
+                      <div>
+                        <Label className="text-sm text-gray-600">Invoice Date</Label>
+                        <p className="font-medium">{new Date(selectedInvoice.invoice_date).toLocaleDateString()}</p>
+                      </div>
+                      <div>
+                        <Label className="text-sm text-gray-600">Payment Status</Label>
+                        {getPaymentStatusBadge(selectedInvoice.payment_status)}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Invoice Items */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm">Invoice Items</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Product</TableHead>
+                          <TableHead>HSN</TableHead>
+                          <TableHead>Qty</TableHead>
+                          <TableHead>Unit Price</TableHead>
+                          <TableHead>GST %</TableHead>
+                          <TableHead className="text-right">Total</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {selectedInvoice.items.map((item, index) => (
+                          <TableRow key={index}>
+                            <TableCell>
+                              <Input
+                                value={item.product_name}
+                                onChange={(e) => {
+                                  const updatedItems = [...selectedInvoice.items];
+                                  updatedItems[index].product_name = e.target.value;
+                                  setSelectedInvoice({ ...selectedInvoice, items: updatedItems });
+                                }}
+                                className="w-40"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                value={item.hsn_code}
+                                onChange={(e) => {
+                                  const updatedItems = [...selectedInvoice.items];
+                                  updatedItems[index].hsn_code = e.target.value;
+                                  setSelectedInvoice({ ...selectedInvoice, items: updatedItems });
+                                }}
+                                className="w-24"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                type="number"
+                                value={item.quantity}
+                                onChange={(e) => {
+                                  const updatedItems = [...selectedInvoice.items];
+                                  const qty = parseFloat(e.target.value) || 0;
+                                  updatedItems[index].quantity = qty;
+                                  const taxableAmount = qty * item.unit_price;
+                                  const taxAmount = (taxableAmount * item.gst_rate) / 100;
+                                  updatedItems[index].taxable_amount = taxableAmount;
+                                  updatedItems[index].total_amount = taxableAmount + taxAmount;
+                                  
+                                  // Recalculate grand total
+                                  const newGrandTotal = updatedItems.reduce((sum, i) => sum + i.total_amount, 0);
+                                  setSelectedInvoice({ 
+                                    ...selectedInvoice, 
+                                    items: updatedItems,
+                                    grand_total: newGrandTotal,
+                                    balance_due: newGrandTotal - selectedInvoice.paid_amount
+                                  });
+                                }}
+                                className="w-20"
+                                min="0"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                type="number"
+                                value={item.unit_price}
+                                onChange={(e) => {
+                                  const updatedItems = [...selectedInvoice.items];
+                                  const price = parseFloat(e.target.value) || 0;
+                                  updatedItems[index].unit_price = price;
+                                  const taxableAmount = item.quantity * price;
+                                  const taxAmount = (taxableAmount * item.gst_rate) / 100;
+                                  updatedItems[index].taxable_amount = taxableAmount;
+                                  updatedItems[index].total_amount = taxableAmount + taxAmount;
+                                  
+                                  // Recalculate grand total
+                                  const newGrandTotal = updatedItems.reduce((sum, i) => sum + i.total_amount, 0);
+                                  setSelectedInvoice({ 
+                                    ...selectedInvoice, 
+                                    items: updatedItems,
+                                    grand_total: newGrandTotal,
+                                    balance_due: newGrandTotal - selectedInvoice.paid_amount
+                                  });
+                                }}
+                                className="w-24"
+                                min="0"
+                                step="0.01"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                type="number"
+                                value={item.gst_rate}
+                                onChange={(e) => {
+                                  const updatedItems = [...selectedInvoice.items];
+                                  const gstRate = parseFloat(e.target.value) || 0;
+                                  updatedItems[index].gst_rate = gstRate;
+                                  const taxableAmount = item.quantity * item.unit_price;
+                                  const taxAmount = (taxableAmount * gstRate) / 100;
+                                  updatedItems[index].taxable_amount = taxableAmount;
+                                  updatedItems[index].total_amount = taxableAmount + taxAmount;
+                                  
+                                  // Recalculate grand total
+                                  const newGrandTotal = updatedItems.reduce((sum, i) => sum + i.total_amount, 0);
+                                  setSelectedInvoice({ 
+                                    ...selectedInvoice, 
+                                    items: updatedItems,
+                                    grand_total: newGrandTotal,
+                                    balance_due: newGrandTotal - selectedInvoice.paid_amount
+                                  });
+                                }}
+                                className="w-20"
+                                min="0"
+                                max="100"
+                              />
+                            </TableCell>
+                            <TableCell className="text-right font-medium">
+                              ₹{item.total_amount.toFixed(2)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                    <div className="mt-4 flex justify-end">
+                      <div className="w-64 space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span>Subtotal:</span>
+                          <span>₹{selectedInvoice.items.reduce((sum, item) => sum + item.taxable_amount, 0).toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span>Total Tax:</span>
+                          <span>₹{selectedInvoice.items.reduce((sum, item) => sum + (item.total_amount - item.taxable_amount), 0).toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between font-bold text-lg border-t pt-2">
+                          <span>Grand Total:</span>
+                          <span>₹{selectedInvoice.grand_total.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between text-sm text-red-600">
+                          <span>Balance Due:</span>
+                          <span>₹{selectedInvoice.balance_due.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Other Editable Fields */}
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="edit_status">Invoice Status</Label>
+                    <Select
+                      value={selectedInvoice.status}
+                      onValueChange={(value) => 
+                        setSelectedInvoice({ ...selectedInvoice, status: value as Invoice['status'] })
+                      }
+                    >
+                      <SelectTrigger id="edit_status">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Draft">Draft</SelectItem>
+                        <SelectItem value="Sent">Sent</SelectItem>
+                        <SelectItem value="Paid">Paid</SelectItem>
+                        <SelectItem value="Overdue">Overdue</SelectItem>
+                        <SelectItem value="Cancelled">Cancelled</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="edit_due_date">Due Date</Label>
+                    <Input
+                      id="edit_due_date"
+                      type="date"
+                      value={new Date(selectedInvoice.due_date).toISOString().split('T')[0]}
+                      onChange={(e) =>
+                        setSelectedInvoice({ ...selectedInvoice, due_date: e.target.value })
+                      }
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="edit_notes">Notes</Label>
+                    <Textarea
+                      id="edit_notes"
+                      placeholder="Add notes about this invoice..."
+                      value={(selectedInvoice as any).notes || ''}
+                      onChange={(e) =>
+                        setSelectedInvoice({ ...selectedInvoice, notes: e.target.value } as any)
+                      }
+                      rows={4}
+                    />
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex justify-end space-x-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setIsEditDialogOpen(false);
+                      setSelectedInvoice(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button onClick={saveInvoiceEdits} className="bg-blue-600 hover:bg-blue-700">
+                    Save Changes
+                  </Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-red-600">
+                <AlertCircle className="h-5 w-5" />
+                Cancel Invoice
+              </DialogTitle>
+              <DialogDescription>
+                Are you sure you want to cancel this invoice? This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            {invoiceToDelete && (
+              <div className="space-y-4">
+                <Card>
+                  <CardContent className="pt-6 space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Invoice Number:</span>
+                      <span className="font-medium">{invoiceToDelete.invoice_number}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Customer:</span>
+                      <span className="font-medium">{invoiceToDelete.customer_details.name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Amount:</span>
+                      <span className="font-medium">₹{invoiceToDelete.grand_total.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Status:</span>
+                      <span>{getStatusBadge(invoiceToDelete.status)}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {invoiceToDelete.paid_amount > 0 && (
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+                    <p className="text-sm text-yellow-800">
+                      <strong>Warning:</strong> This invoice has received payments totaling ₹
+                      {invoiceToDelete.paid_amount.toLocaleString()}. It cannot be cancelled if there are confirmed payments.
+                    </p>
+                  </div>
+                )}
+
+                <div className="flex justify-end space-x-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setIsDeleteDialogOpen(false);
+                      setInvoiceToDelete(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => handleDeleteInvoice(false)}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Cancel Invoice
                   </Button>
                 </div>
               </div>

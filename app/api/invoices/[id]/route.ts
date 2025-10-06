@@ -133,8 +133,8 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     }
 
     // Update allowed invoice fields
-    const allowedUpdates = ['status', 'notes', 'due_date'];
-    const filteredUpdates: Record<string, string | Date> = {};
+    const allowedUpdates = ['status', 'notes', 'due_date', 'items', 'grand_total'];
+    const filteredUpdates: Record<string, any> = {};
     
     allowedUpdates.forEach(field => {
       if (updates[field] !== undefined) {
@@ -218,16 +218,29 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
 
+    // Check for query parameter to force delete
+    const { searchParams } = new URL(request.url);
+    const forceDelete = searchParams.get('force') === 'true';
+
     // Check if there are confirmed payments
     const payments = await Payment.find({
       invoice_id: params.id,
       status: 'Confirmed'
     });
 
-    if (payments.length > 0) {
+    if (payments.length > 0 && !forceDelete) {
       return NextResponse.json({ 
-        error: 'Cannot cancel invoice with confirmed payments' 
+        error: 'Cannot cancel invoice with confirmed payments. Use force=true to delete anyway.',
+        hasPayments: true,
+        paymentCount: payments.length
       }, { status: 400 });
+    }
+
+    // If forcing delete with payments, delete the payments first
+    if (forceDelete && payments.length > 0) {
+      await Payment.deleteMany({
+        invoice_id: params.id
+      });
     }
 
     // Update status to cancelled
@@ -237,15 +250,20 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
         status: 'Cancelled',
         updated_at: new Date(),
         updated_by: decoded.id,
-        cancellation_reason: 'Cancelled by administrator'
+        cancellation_reason: forceDelete 
+          ? 'Cancelled by administrator (force delete with payments removed)' 
+          : 'Cancelled by administrator'
       },
       { new: true }
     );
 
     return NextResponse.json({
       success: true,
-      message: 'Invoice cancelled successfully',
+      message: forceDelete 
+        ? `Invoice cancelled successfully. ${payments.length} payment(s) were removed.`
+        : 'Invoice cancelled successfully',
       invoice: updatedInvoice,
+      paymentsDeleted: forceDelete ? payments.length : 0
     });
   } catch (error) {
     console.error('Error cancelling invoice:', error);

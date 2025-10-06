@@ -80,6 +80,9 @@ export async function PUT(
 
     const body = await request.json();
     const {
+      amount_paid,
+      payment_method,
+      payment_date,
       status,
       reconciled,
       transaction_id,
@@ -102,9 +105,24 @@ export async function PUT(
 
     // Update fields
     const updateData: any = {
-      updated_by: decoded.id,
+      updated_by: decoded.userId || decoded.id,
       updated_at: new Date()
     };
+
+    // Allow editing amount_paid
+    if (amount_paid !== undefined) {
+      updateData.amount_paid = amount_paid;
+    }
+
+    // Allow editing payment_method
+    if (payment_method !== undefined) {
+      updateData.payment_method = payment_method;
+    }
+
+    // Allow editing payment_date
+    if (payment_date !== undefined) {
+      updateData.payment_date = new Date(payment_date);
+    }
 
     if (status !== undefined) {
       updateData.status = status;
@@ -114,7 +132,7 @@ export async function PUT(
       updateData.reconciled = reconciled;
       if (reconciled) {
         updateData.reconciled_date = new Date();
-        updateData.reconciled_by = decoded.id;
+        updateData.reconciled_by = decoded.userId || decoded.id;
       }
     }
 
@@ -202,6 +220,10 @@ export async function DELETE(
 
     await connectDB();
 
+    // Check if force delete is requested
+    const { searchParams } = new URL(request.url);
+    const forceDelete = searchParams.get('force') === 'true';
+
     // Find the payment
     const payment = await Payment.findById(params.id);
     if (!payment) {
@@ -211,10 +233,20 @@ export async function DELETE(
       );
     }
 
-    // Check if payment is reconciled
+    // If force delete is requested, permanently delete the payment
+    if (forceDelete) {
+      await Payment.findByIdAndDelete(params.id);
+      
+      return NextResponse.json({
+        success: true,
+        message: 'Payment permanently deleted',
+      });
+    }
+
+    // Check if payment is reconciled for soft delete
     if (payment.reconciled && payment.status === 'Confirmed') {
       return NextResponse.json(
-        { error: 'Cannot delete reconciled payments. Please contact system administrator.' },
+        { error: 'Cannot delete reconciled payments. Use force delete option or contact system administrator.' },
         { status: 400 }
       );
     }

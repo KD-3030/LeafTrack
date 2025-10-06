@@ -55,8 +55,16 @@ export async function GET(request: NextRequest) {
 
     // Get payments with populated invoice and customer data
     const payments = await Payment.find(filter)
-      .populate('invoice_id', 'invoice_number grand_total due_date')
-      .populate('customer_id', 'name email phone')
+      .populate({
+        path: 'invoice_id',
+        select: 'invoice_number grand_total due_date',
+        options: { strictPopulate: false }
+      })
+      .populate({
+        path: 'customer_id',
+        select: 'name email phone',
+        options: { strictPopulate: false }
+      })
       .sort(getSortObject(sortBy))
       .skip((page - 1) * limit)
       .limit(limit)
