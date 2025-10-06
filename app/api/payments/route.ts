@@ -176,6 +176,7 @@ export async function POST(request: NextRequest) {
       customer_id,
       amount_paid,
       payment_method,
+      payment_date,
       transaction_id,
       bank_reference,
       cheque_number,
@@ -247,7 +248,7 @@ export async function POST(request: NextRequest) {
       customer_id: customer_id || invoice.customer_id, // Use the actual ObjectId, not customer_details
       amount_paid: parseFloat(amount_paid),
       payment_method,
-      payment_date: new Date(),
+      payment_date: payment_date ? new Date(payment_date) : new Date(),
       status: 'Pending', // Start as pending for review
       reconciled: false,
       created_by: authResult.userId,

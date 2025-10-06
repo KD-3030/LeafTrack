@@ -70,6 +70,7 @@ export default function FinancialDashboard() {
   const [paymentForm, setPaymentForm] = useState({
     amount_paid: 0,
     payment_method: 'Cash',
+    payment_date: new Date().toISOString().split('T')[0], // Default to today
     transaction_id: '',
     bank_reference: '',
     cheque_number: '',
@@ -240,6 +241,7 @@ export default function FinancialDashboard() {
         setPaymentForm({
           amount_paid: 0,
           payment_method: 'Cash',
+          payment_date: new Date().toISOString().split('T')[0],
           transaction_id: '',
           bank_reference: '',
           cheque_number: '',
@@ -1088,6 +1090,20 @@ export default function FinancialDashboard() {
                         </SelectContent>
                       </Select>
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="payment_date">Payment Date *</Label>
+                    <Input
+                      id="payment_date"
+                      type="date"
+                      value={paymentForm.payment_date}
+                      onChange={(e) => setPaymentForm(prev => ({ 
+                        ...prev, 
+                        payment_date: e.target.value 
+                      }))}
+                      max={new Date().toISOString().split('T')[0]} // Don't allow future dates
+                    />
                   </div>
 
                   {/* Additional fields based on payment method */}
