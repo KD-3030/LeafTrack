@@ -138,7 +138,7 @@ interface SaleReturn {
   }[];
   total_refund?: number;
   total_refund_amount?: number;
-  status: 'Pending' | 'Approved' | 'Rejected' | 'Completed';
+  status: 'Pending' | 'Processing' | 'Rejected' | 'Completed';
   refund_status: 'Pending' | 'Processed' | 'Failed';
   refund_method: 'Cash' | 'Bank Transfer' | 'Cheque' | 'Credit Note';
   return_date: string;
@@ -1858,7 +1858,7 @@ export default function InvoicingPage() {
                         <TableCell>
                           <Badge className={
                             saleReturn.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
-                            saleReturn.status === 'Approved' ? 'bg-blue-100 text-blue-800' :
+                            saleReturn.status === 'Processing' ? 'bg-blue-100 text-blue-800' :
                             saleReturn.status === 'Completed' ? 'bg-green-100 text-green-800' :
                             'bg-red-100 text-red-800'
                           }>
@@ -1880,7 +1880,7 @@ export default function InvoicingPage() {
                               <>
                                 <Button
                                   size="sm"
-                                  onClick={() => updateReturnStatus(saleReturn._id, 'Approved', 'Pending')}
+                                  onClick={() => updateReturnStatus(saleReturn._id, 'Processing', 'Pending')}
                                   className="bg-green-600 hover:bg-green-700"
                                 >
                                   Approve
@@ -1894,7 +1894,7 @@ export default function InvoicingPage() {
                                 </Button>
                               </>
                             )}
-                            {saleReturn.status === 'Approved' && saleReturn.refund_status === 'Pending' && (
+                            {saleReturn.status === 'Processing' && saleReturn.refund_status === 'Pending' && (
                               <Button
                                 size="sm"
                                 onClick={() => updateReturnStatus(saleReturn._id, 'Completed', 'Processed')}
