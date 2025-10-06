@@ -79,7 +79,24 @@ export default function SalesmanDashboard() {
       const userAssignments = data.assignments || [];
       
       // Transform the data to match our interface
-      const transformedAssignments = userAssignments.map((assignment: any) => ({
+      interface RawAssignment {
+        _id: string;
+        salesman_id: { _id: string };
+        productId: { 
+          _id: string; 
+          name: string; 
+          price: number; 
+          hsn_code?: string;
+          manufacturingCost?: number;
+          totalStock?: number;
+          gst_rate?: number;
+        };
+        quantity: number;
+        sellingPricePerUnit?: number;
+        createdAt: string;
+      }
+      
+      const transformedAssignments = userAssignments.map((assignment: RawAssignment) => ({
         id: assignment._id,
         _id: assignment._id,
         salesman_id: assignment.salesman_id._id,
@@ -159,7 +176,8 @@ export default function SalesmanDashboard() {
       
       // Refresh the assignments to show updated stock
       loadAssignments();
-    } catch (error) {
+    } catch (err) {
+      console.error('Error recording sale:', err);
       toast.error('Failed to record sale');
     }
   };
@@ -284,7 +302,7 @@ export default function SalesmanDashboard() {
       {/* Performance Summary */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Today's Summary</CardTitle>
+          <CardTitle className="text-lg">Today&apos;s Summary</CardTitle>
           <CardDescription>Your performance overview</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -401,7 +419,7 @@ export default function SalesmanDashboard() {
               <Package className="h-16 w-16 text-gray-300 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">No Stock Assigned</h3>
               <p className="text-gray-600">
-                You don't have any assigned inventory yet. Contact your admin for stock allocation.
+                You don&apos;t have any assigned inventory yet. Contact your admin for stock allocation.
               </p>
             </div>
           ) : (

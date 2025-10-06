@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Customer, { ICustomer } from '@/models/Customer';
-import { requireUserAuth, requireAdminAuth } from '@/lib/authMiddleware';
+import { requireUserAuth } from '@/lib/authMiddleware';
 import { Model } from 'mongoose';
 
 export const dynamic = 'force-dynamic';
@@ -16,8 +16,6 @@ export async function GET(request: NextRequest) {
     if (authResult instanceof NextResponse) {
       return authResult;
     }
-    
-    const decoded = authResult;
 
     // Get query parameters for filtering
     const { searchParams } = new URL(request.url);
@@ -101,15 +99,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if customer with email already exists
+    // Convert empty email to undefined to work with sparse index
+    if (customerData.email === '' || customerData.email === null) {
+      customerData.email = undefined;
+    }
+
+    // Check if customer with email already exists (only if email is provided)
     const CustomerModel = Customer as Model<ICustomer>;
-    const existingCustomer = await CustomerModel.findOne({ email: customerData.email });
-    
-    if (existingCustomer) {
-      return NextResponse.json(
-        { error: 'Customer with this email already exists' },
-        { status: 400 }
-      );
+    if (customerData.email) {
+      const existingCustomer = await CustomerModel.findOne({ email: customerData.email });
+      
+      if (existingCustomer) {
+        return NextResponse.json(
+          { error: 'Customer with this email already exists' },
+          { status: 400 }
+        );
+      }
     }
 
     // Create customer with defaults

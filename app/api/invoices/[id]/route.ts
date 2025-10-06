@@ -134,7 +134,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
     // Update allowed invoice fields
     const allowedUpdates = ['status', 'notes', 'due_date', 'items', 'grand_total'];
-    const filteredUpdates: Record<string, any> = {};
+    const filteredUpdates: Record<string, unknown> = {};
     
     allowedUpdates.forEach(field => {
       if (updates[field] !== undefined) {

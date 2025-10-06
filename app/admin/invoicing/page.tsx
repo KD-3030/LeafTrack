@@ -36,6 +36,7 @@ interface Invoice {
   status: 'Draft' | 'Sent' | 'Paid' | 'Overdue' | 'Cancelled';
   payment_status: 'Pending' | 'Partial' | 'Paid';
   payment_date?: string;
+  notes?: string;
   createdAt: string;
   updatedAt: string;
   items: { 
@@ -181,6 +182,7 @@ export default function InvoicingPage() {
   const [selectedProduct, setSelectedProduct] = useState('');
   const [itemQuantity, setItemQuantity] = useState(1);
   const [itemUnitPrice, setItemUnitPrice] = useState(0);
+  const [gstApplicationMode, setGstApplicationMode] = useState<'applied' | 'not_applied' | 'inclusive'>('applied');
 
   // Sale return form state
   const [returnItems, setReturnItems] = useState<{
@@ -665,9 +667,28 @@ export default function InvoicingPage() {
       return;
     }
 
-    const taxableAmount = itemQuantity * itemUnitPrice;
-    const taxAmount = (taxableAmount * product.gst_rate) / 100;
-    const totalAmount = taxableAmount + taxAmount;
+    let taxableAmount: number;
+    let taxAmount: number;
+    let totalAmount: number;
+
+    // Calculate based on GST application mode
+    if (gstApplicationMode === 'not_applied') {
+      // GST Not Applied - No tax calculation
+      taxableAmount = itemQuantity * itemUnitPrice;
+      taxAmount = 0;
+      totalAmount = taxableAmount;
+    } else if (gstApplicationMode === 'inclusive') {
+      // GST Inclusive - Amount already includes GST, need to extract it
+      const totalWithGst = itemQuantity * itemUnitPrice;
+      taxableAmount = totalWithGst / (1 + product.gst_rate / 100);
+      taxAmount = totalWithGst - taxableAmount;
+      totalAmount = totalWithGst;
+    } else {
+      // GST Applied (default) - Add GST to the amount
+      taxableAmount = itemQuantity * itemUnitPrice;
+      taxAmount = (taxableAmount * product.gst_rate) / 100;
+      totalAmount = taxableAmount + taxAmount;
+    }
 
     const newItem: ManualInvoiceItem = {
       product_id: product._id,
@@ -675,7 +696,7 @@ export default function InvoicingPage() {
       hsn_code: product.hsn_code,
       quantity: itemQuantity,
       unit_price: itemUnitPrice,
-      gst_rate: product.gst_rate,
+      gst_rate: gstApplicationMode === 'not_applied' ? 0 : product.gst_rate,
       taxable_amount: taxableAmount,
       tax_amount: taxAmount,
       total_amount: totalAmount
@@ -802,6 +823,7 @@ export default function InvoicingPage() {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const updateInvoiceStatus = async (invoiceId: string, updates: Record<string, unknown>) => {
     try {
       const token = localStorage.getItem('leaftrack_token');
@@ -883,7 +905,7 @@ export default function InvoicingPage() {
         body: JSON.stringify({
           status: selectedInvoice.status,
           due_date: selectedInvoice.due_date,
-          notes: (selectedInvoice as any).notes,
+          notes: selectedInvoice.notes,
           items: selectedInvoice.items,
           grand_total: selectedInvoice.grand_total,
         }),
@@ -1521,7 +1543,44 @@ export default function InvoicingPage() {
                 <CardHeader>
                   <CardTitle className="text-lg">Add Products</CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
+                  {/* GST Application Mode Dropdown */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <Label htmlFor="gst_mode" className="text-base font-semibold mb-2 block">
+                      GST Application Mode *
+                    </Label>
+                    <Select value={gstApplicationMode} onValueChange={(value: 'applied' | 'not_applied' | 'inclusive') => setGstApplicationMode(value)}>
+                      <SelectTrigger className="bg-white">
+                        <SelectValue placeholder="Select GST mode" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="applied">
+                          <div className="flex flex-col">
+                            <span className="font-semibold">GST Applied (Add GST)</span>
+                            <span className="text-xs text-gray-600">Price + GST = Final Amount</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="not_applied">
+                          <div className="flex flex-col">
+                            <span className="font-semibold">GST Not Applied (No GST)</span>
+                            <span className="text-xs text-gray-600">Price = Final Amount (No tax)</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="inclusive">
+                          <div className="flex flex-col">
+                            <span className="font-semibold">GST Inclusive (GST Included)</span>
+                            <span className="text-xs text-gray-600">Price already includes GST</span>
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-gray-600 mt-2">
+                      {gstApplicationMode === 'applied' && '✓ GST will be added to the unit price'}
+                      {gstApplicationMode === 'not_applied' && '✓ No GST will be calculated or charged'}
+                      {gstApplicationMode === 'inclusive' && '✓ GST will be extracted from the unit price'}
+                    </p>
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div>
                       <Label htmlFor="product">Product *</Label>
@@ -1545,19 +1604,24 @@ export default function InvoicingPage() {
                         id="quantity"
                         type="number"
                         min="1"
-                        value={itemQuantity}
+                        value={itemQuantity === 1 ? '' : itemQuantity}
                         onChange={(e) => setItemQuantity(parseInt(e.target.value) || 1)}
+                        placeholder="Enter quantity"
                       />
                     </div>
                     
                     <div>
-                      <Label htmlFor="unit_price">Unit Price *</Label>
+                      <Label htmlFor="unit_price">
+                        Unit Price * 
+                        {gstApplicationMode === 'inclusive' && <span className="text-xs text-gray-600"> (GST Incl.)</span>}
+                        {gstApplicationMode === 'applied' && <span className="text-xs text-gray-600"> (Before GST)</span>}
+                      </Label>
                       <Input
                         id="unit_price"
                         type="number"
                         min="0"
                         step="0.01"
-                        value={itemUnitPrice}
+                        value={itemUnitPrice === 0 ? '' : itemUnitPrice}
                         onChange={(e) => setItemUnitPrice(parseFloat(e.target.value) || 0)}
                         placeholder="Enter unit price"
                       />
@@ -1599,10 +1663,16 @@ export default function InvoicingPage() {
                             <TableCell>{item.product_name}</TableCell>
                             <TableCell>{item.hsn_code}</TableCell>
                             <TableCell>{item.quantity}</TableCell>
-                            <TableCell>₹{item.unit_price}</TableCell>
-                            <TableCell>₹{item.taxable_amount}</TableCell>
-                            <TableCell>{item.gst_rate}%</TableCell>
-                            <TableCell>₹{item.total_amount.toFixed(2)}</TableCell>
+                            <TableCell>₹{item.unit_price.toFixed(2)}</TableCell>
+                            <TableCell>₹{item.taxable_amount.toFixed(2)}</TableCell>
+                            <TableCell>
+                              {item.gst_rate > 0 ? (
+                                <span>{item.gst_rate}%</span>
+                              ) : (
+                                <Badge variant="outline" className="bg-gray-100">No GST</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="font-semibold">₹{item.total_amount.toFixed(2)}</TableCell>
                             <TableCell>
                               <Button
                                 size="sm"
@@ -2300,30 +2370,32 @@ export default function InvoicingPage() {
                           <TableRow key={index}>
                             <TableCell>
                               <Input
-                                value={item.product_name}
+                                value={item.product_name || ''}
                                 onChange={(e) => {
                                   const updatedItems = [...selectedInvoice.items];
                                   updatedItems[index].product_name = e.target.value;
                                   setSelectedInvoice({ ...selectedInvoice, items: updatedItems });
                                 }}
+                                placeholder="Product name"
                                 className="w-40"
                               />
                             </TableCell>
                             <TableCell>
                               <Input
-                                value={item.hsn_code}
+                                value={item.hsn_code || ''}
                                 onChange={(e) => {
                                   const updatedItems = [...selectedInvoice.items];
                                   updatedItems[index].hsn_code = e.target.value;
                                   setSelectedInvoice({ ...selectedInvoice, items: updatedItems });
                                 }}
+                                placeholder="HSN code"
                                 className="w-24"
                               />
                             </TableCell>
                             <TableCell>
                               <Input
                                 type="number"
-                                value={item.quantity}
+                                value={item.quantity ?? ''}
                                 onChange={(e) => {
                                   const updatedItems = [...selectedInvoice.items];
                                   const qty = parseFloat(e.target.value) || 0;
@@ -2342,6 +2414,7 @@ export default function InvoicingPage() {
                                     balance_due: newGrandTotal - selectedInvoice.paid_amount
                                   });
                                 }}
+                                placeholder="Enter quantity"
                                 className="w-20"
                                 min="0"
                               />
@@ -2349,7 +2422,7 @@ export default function InvoicingPage() {
                             <TableCell>
                               <Input
                                 type="number"
-                                value={item.unit_price}
+                                value={item.unit_price ?? ''}
                                 onChange={(e) => {
                                   const updatedItems = [...selectedInvoice.items];
                                   const price = parseFloat(e.target.value) || 0;
@@ -2368,6 +2441,7 @@ export default function InvoicingPage() {
                                     balance_due: newGrandTotal - selectedInvoice.paid_amount
                                   });
                                 }}
+                                placeholder="Enter price"
                                 className="w-24"
                                 min="0"
                                 step="0.01"
@@ -2376,7 +2450,7 @@ export default function InvoicingPage() {
                             <TableCell>
                               <Input
                                 type="number"
-                                value={item.gst_rate}
+                                value={item.gst_rate ?? ''}
                                 onChange={(e) => {
                                   const updatedItems = [...selectedInvoice.items];
                                   const gstRate = parseFloat(e.target.value) || 0;
@@ -2395,6 +2469,7 @@ export default function InvoicingPage() {
                                     balance_due: newGrandTotal - selectedInvoice.paid_amount
                                   });
                                 }}
+                                placeholder="Enter GST rate"
                                 className="w-20"
                                 min="0"
                                 max="100"
@@ -2470,9 +2545,9 @@ export default function InvoicingPage() {
                     <Textarea
                       id="edit_notes"
                       placeholder="Add notes about this invoice..."
-                      value={(selectedInvoice as any).notes || ''}
+                      value={selectedInvoice.notes || ''}
                       onChange={(e) =>
-                        setSelectedInvoice({ ...selectedInvoice, notes: e.target.value } as any)
+                        setSelectedInvoice({ ...selectedInvoice, notes: e.target.value })
                       }
                       rows={4}
                     />

@@ -479,7 +479,10 @@ export default function FinancialDashboard() {
               <CardContent>
                 <div className="text-2xl font-bold">₹{stats.total_paid.toLocaleString()}</div>
                 <p className="text-xs text-gray-600">
-                  {((stats.total_paid / stats.total_revenue) * 100).toFixed(1)}% collection rate
+                  {stats.total_revenue > 0 
+                    ? `${((stats.total_paid / stats.total_revenue) * 100).toFixed(1)}% collection rate`
+                    : '0.0% collection rate'
+                  }
                 </p>
               </CardContent>
             </Card>
@@ -754,12 +757,15 @@ export default function FinancialDashboard() {
                         <div className="flex justify-between">
                           <span>Collection Rate:</span>
                           <span className="font-semibold">
-                            {((stats.total_paid / stats.total_revenue) * 100).toFixed(1)}%
+                            {stats.total_revenue > 0 
+                              ? `${((stats.total_paid / stats.total_revenue) * 100).toFixed(1)}%`
+                              : '0.0%'
+                            }
                           </span>
                         </div>
                         <div className="flex justify-between">
                           <span>Average Payment Time:</span>
-                          <span className="font-semibold">{stats.average_payment_time} days</span>
+                          <span className="font-semibold">{stats.average_payment_time || 0} days</span>
                         </div>
                         <div className="flex justify-between">
                           <span>Payments Today:</span>

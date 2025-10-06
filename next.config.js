@@ -14,6 +14,12 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  // Webpack configuration to fix caching issues on Windows/OneDrive
+  webpack: (config) => {
+    // Disable webpack caching to avoid ENOENT errors on Windows with OneDrive
+    config.cache = false;
+    return config;
+  },
 }
 
 module.exports = nextConfig

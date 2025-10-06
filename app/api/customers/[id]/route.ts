@@ -52,6 +52,12 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const updateData = await request.json();
     const CustomerModel = Customer as Model<ICustomer>;
 
+    // Convert empty email to undefined to work with sparse index
+    if (updateData.email === '' || updateData.email === null) {
+      console.log('Converting empty email to undefined for customer:', params.id);
+      updateData.email = undefined;
+    }
+
     // Check if customer exists
     const existingCustomer = await CustomerModel.findById(params.id);
     if (!existingCustomer) {
@@ -72,27 +78,70 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    // If email is being updated, check for conflicts (email is now optional)
-    if (updateData.email && updateData.email !== existingCustomer.email) {
-      const emailConflict = await CustomerModel.findOne({ 
-        email: updateData.email,
-        _id: { $ne: params.id }
-      });
-      
-      if (emailConflict) {
-        return NextResponse.json(
-          { error: 'Customer with this email already exists' },
-          { status: 400 }
-        );
+    // Handle email update carefully due to sparse unique index
+    // If email is being cleared (set to undefined), first unset it to avoid null conflicts
+    if (updateData.email === undefined && existingCustomer.email) {
+      // Remove the email field entirely from this customer first
+      await CustomerModel.findByIdAndUpdate(
+        params.id,
+        { $unset: { email: '' } }
+      );
+    }
+    
+    // If email is being updated to a non-empty value, check for conflicts
+    if (updateData.email && updateData.email !== undefined) {
+      // Only check for conflicts if email is actually changing
+      const existingEmail = existingCustomer.email || undefined;
+      if (updateData.email !== existingEmail) {
+        const emailConflict = await CustomerModel.findOne({ 
+          email: updateData.email,
+          _id: { $ne: params.id }
+        });
+        
+        if (emailConflict) {
+          return NextResponse.json(
+            { error: 'Customer with this email already exists' },
+            { status: 400 }
+          );
+        }
       }
     }
 
     // Update customer
-    const updatedCustomer = await CustomerModel.findByIdAndUpdate(
-      params.id,
-      updateData,
-      { new: true, runValidators: true }
-    );
+    // Separate fields into $set and $unset operations
+    const updateOperation: Record<string, unknown> = {};
+    const unsetOperation: Record<string, string> = {};
+    
+    for (const [key, value] of Object.entries(updateData)) {
+      if (value === undefined) {
+        unsetOperation[key] = '';
+      } else {
+        updateOperation[key] = value;
+      }
+    }
+    
+    const updateQuery: Record<string, unknown> = {};
+    if (Object.keys(updateOperation).length > 0) {
+      updateQuery.$set = updateOperation;
+    }
+    if (Object.keys(unsetOperation).length > 0) {
+      updateQuery.$unset = unsetOperation;
+    }
+    
+    // Only run the update if there's something to update
+    let updatedCustomer;
+    if (Object.keys(updateQuery).length > 0) {
+      updatedCustomer = await CustomerModel.findByIdAndUpdate(
+        params.id,
+        updateQuery,
+        { new: true, runValidators: true }
+      );
+    } else {
+      // If nothing to update (email was already unset), just fetch the current customer
+      updatedCustomer = await CustomerModel.findById(params.id);
+    }
+
+    console.log('Customer updated successfully:', params.id, 'Email:', updatedCustomer?.email);
 
     return NextResponse.json({
       success: true,

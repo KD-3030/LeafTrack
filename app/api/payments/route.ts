@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import Payment from '@/models/Payment';
 import Invoice from '@/models/Invoice';
-import { requireUserAuth, DecodedToken } from '@/lib/authMiddleware';
+import { requireUserAuth } from '@/lib/authMiddleware';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,8 +13,6 @@ export async function GET(request: NextRequest) {
     if (authResult instanceof NextResponse) {
       return authResult;
     }
-
-    const decoded = authResult as DecodedToken;
 
     await connectDB();
 
@@ -29,7 +27,16 @@ export async function GET(request: NextRequest) {
     const dateTo = searchParams.get('dateTo');
 
     // Build filter
-    const filter: any = {};
+    interface PaymentFilter {
+      status?: string;
+      payment_method?: string;
+      reconciled?: boolean;
+      payment_date?: {
+        $gte?: Date;
+        $lte?: Date;
+      };
+    }
+    const filter: PaymentFilter = {};
     
     if (status) {
       filter.status = status;
@@ -161,7 +168,6 @@ export async function POST(request: NextRequest) {
       return authResult;
     }
 
-    const decoded = authResult as DecodedToken;
     await connectDB();
 
     const body = await request.json();
@@ -219,7 +225,24 @@ export async function POST(request: NextRequest) {
     }
 
     // Create payment record
-    const paymentData: any = {
+    interface PaymentData {
+      invoice_id: string;
+      customer_id: string;
+      amount_paid: number;
+      payment_method: string;
+      payment_date: Date;
+      status: string;
+      reconciled: boolean;
+      created_by: string;
+      notes?: string;
+      transaction_id?: string;
+      reference_number?: string;
+      bank_reference?: string;
+      cheque_number?: string;
+      cheque_date?: Date;
+      bank_name?: string;
+    }
+    const paymentData: PaymentData = {
       invoice_id,
       customer_id: customer_id || invoice.customer_id, // Use the actual ObjectId, not customer_details
       amount_paid: parseFloat(amount_paid),
@@ -227,7 +250,7 @@ export async function POST(request: NextRequest) {
       payment_date: new Date(),
       status: 'Pending', // Start as pending for review
       reconciled: false,
-      created_by: decoded.userId,
+      created_by: authResult.userId,
       notes
     };
 
@@ -273,7 +296,7 @@ export async function POST(request: NextRequest) {
 }
 
 function getSortObject(sortBy: string) {
-  const sortMap: { [key: string]: any } = {
+  const sortMap: Record<string, { [key: string]: 1 | -1 }> = {
     '-payment_date': { payment_date: -1 },
     'payment_date': { payment_date: 1 },
     '-amount_paid': { amount_paid: -1 },

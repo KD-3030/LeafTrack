@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import Payment from '@/models/Payment';
-import jwt from 'jsonwebtoken';
+import jwt, { JwtPayload } from 'jsonwebtoken';
 
 export const dynamic = 'force-dynamic';
+
+interface DecodedToken extends JwtPayload {
+  userId: string;
+  role: string;
+}
 
 export async function GET(
   request: NextRequest,
@@ -19,7 +24,7 @@ export async function GET(
       );
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as DecodedToken;
     if (!decoded) {
       return NextResponse.json(
         { error: 'Unauthorized - Invalid token' },
@@ -68,7 +73,7 @@ export async function PUT(
       );
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as DecodedToken;
     if (!decoded) {
       return NextResponse.json(
         { error: 'Unauthorized - Invalid token' },
@@ -104,8 +109,26 @@ export async function PUT(
     }
 
     // Update fields
-    const updateData: any = {
-      updated_by: decoded.userId || decoded.id,
+    interface UpdateData {
+      updated_by: string;
+      updated_at: Date;
+      amount_paid?: number;
+      payment_method?: string;
+      payment_date?: Date;
+      status?: string;
+      reconciled?: boolean;
+      reconciled_date?: Date;
+      reconciled_by?: string;
+      transaction_id?: string;
+      bank_reference?: string;
+      cheque_number?: string;
+      cheque_date?: Date | null;
+      bank_name?: string;
+      notes?: string;
+      reconciliation_notes?: string;
+    }
+    const updateData: UpdateData = {
+      updated_by: decoded.userId,
       updated_at: new Date()
     };
 
@@ -202,7 +225,7 @@ export async function DELETE(
       );
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as DecodedToken;
     if (!decoded) {
       return NextResponse.json(
         { error: 'Unauthorized - Invalid token' },
