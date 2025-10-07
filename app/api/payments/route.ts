@@ -8,6 +8,50 @@ import { requireUserAuth } from '@/lib/authMiddleware';
 
 export const dynamic = 'force-dynamic';
 
+// Helper function to recalculate invoice balance based on all confirmed payments
+async function recalculateInvoiceBalance(invoiceId: string) {
+  const invoice = await Invoice.findById(invoiceId).lean();
+  if (!invoice) {
+    throw new Error('Invoice not found');
+  }
+
+  // Get all confirmed payments for this invoice
+  const confirmedPayments = await Payment.find({
+    invoice_id: invoiceId,
+    status: { $in: ['Confirmed', 'Pending'] } // Include pending as they're recorded
+  }).lean();
+
+  // Calculate total paid amount
+  const totalPaid = confirmedPayments.reduce((sum, payment) => sum + (payment.amount_paid || 0), 0);
+  const balanceDue = invoice.grand_total - totalPaid;
+
+  // Determine payment status
+  let paymentStatus: 'Pending' | 'Partial' | 'Paid' = 'Pending';
+  if (balanceDue <= 0) {
+    paymentStatus = 'Paid';
+  } else if (totalPaid > 0) {
+    paymentStatus = 'Partial';
+  }
+
+  // Update invoice
+  await Invoice.findByIdAndUpdate(invoiceId, {
+    $set: {
+      paid_amount: totalPaid,
+      balance_due: Math.max(0, balanceDue),
+      payment_status: paymentStatus,
+    }
+  });
+
+  console.log('Invoice balance recalculated:', {
+    invoiceId,
+    totalPaid,
+    balanceDue: Math.max(0, balanceDue),
+    paymentStatus
+  });
+
+  return { totalPaid, balanceDue: Math.max(0, balanceDue), paymentStatus };
+}
+
 export async function GET(request: NextRequest) {
   try {
     // Use standardized authentication
@@ -293,6 +337,9 @@ export async function POST(request: NextRequest) {
 
     const payment = new Payment(paymentData);
     await payment.save();
+
+    // UPDATE INVOICE: Recalculate invoice balance based on all payments
+    await recalculateInvoiceBalance(invoice_id);
 
     // Debug: Check if customer exists
     const Customer = (await import('@/models/Customer')).default;

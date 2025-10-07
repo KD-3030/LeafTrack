@@ -1,10 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import Payment from '@/models/Payment';
-import Customer from '@/models/Customer'; // Import Customer model for populate
+import Invoice from '@/models/Invoice';
 import jwt, { JwtPayload } from 'jsonwebtoken';
 
 export const dynamic = 'force-dynamic';
+
+// Helper function to recalculate invoice balance based on all confirmed payments
+async function recalculateInvoiceBalance(invoiceId: string) {
+  const invoice = await Invoice.findById(invoiceId).lean();
+  if (!invoice) {
+    throw new Error('Invoice not found');
+  }
+
+  // Get all confirmed/pending payments for this invoice (excluding cancelled)
+  const confirmedPayments = await Payment.find({
+    invoice_id: invoiceId,
+    status: { $in: ['Confirmed', 'Pending'] }
+  }).lean();
+
+  // Calculate total paid amount
+  const totalPaid = confirmedPayments.reduce((sum, payment) => sum + (payment.amount_paid || 0), 0);
+  const balanceDue = invoice.grand_total - totalPaid;
+
+  // Determine payment status
+  let paymentStatus: 'Pending' | 'Partial' | 'Paid' = 'Pending';
+  if (balanceDue <= 0) {
+    paymentStatus = 'Paid';
+  } else if (totalPaid > 0) {
+    paymentStatus = 'Partial';
+  }
+
+  // Update invoice
+  await Invoice.findByIdAndUpdate(invoiceId, {
+    $set: {
+      paid_amount: totalPaid,
+      balance_due: Math.max(0, balanceDue),
+      payment_status: paymentStatus,
+    }
+  });
+
+  console.log('Invoice balance recalculated:', {
+    invoiceId,
+    totalPaid,
+    balanceDue: Math.max(0, balanceDue),
+    paymentStatus
+  });
+
+  return { totalPaid, balanceDue: Math.max(0, balanceDue), paymentStatus };
+}
 
 interface DecodedToken extends JwtPayload {
   userId: string;
@@ -198,6 +242,11 @@ export async function PUT(
       .populate('customer_id', 'name email phone')
       .lean();
 
+    // Recalculate invoice balance if payment amount or status changed
+    if (payment.invoice_id && (amount_paid !== undefined || status !== undefined)) {
+      await recalculateInvoiceBalance(payment.invoice_id.toString());
+    }
+
     return NextResponse.json({
       success: true,
       message: 'Payment updated successfully',
@@ -259,7 +308,13 @@ export async function DELETE(
 
     // If force delete is requested, permanently delete the payment
     if (forceDelete) {
+      const invoiceId = payment.invoice_id;
       await Payment.findByIdAndDelete(params.id);
+      
+      // Recalculate invoice balance after deleting payment
+      if (invoiceId) {
+        await recalculateInvoiceBalance(invoiceId.toString());
+      }
       
       return NextResponse.json({
         success: true,
@@ -287,6 +342,11 @@ export async function DELETE(
       },
       { new: true }
     );
+
+    // Recalculate invoice balance after cancelling payment
+    if (payment.invoice_id) {
+      await recalculateInvoiceBalance(payment.invoice_id.toString());
+    }
 
     return NextResponse.json({
       success: true,

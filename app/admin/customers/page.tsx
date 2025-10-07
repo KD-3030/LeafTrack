@@ -22,7 +22,12 @@ import {
   Phone,
   Mail,
   MapPin,
-  CreditCard
+  CreditCard,
+  Receipt,
+  IndianRupee,
+  Calendar,
+  TrendingUp,
+  AlertCircle
 } from 'lucide-react';
 // import { useAuth } from '@/contexts/AuthContext'; // Removed unused import
 import { toast } from 'sonner';
@@ -45,7 +50,54 @@ interface Customer {
   status: 'Active' | 'Inactive';
   tags?: string[];
   notes?: string;
+  outstanding_balance?: number; // Outstanding amount to be collected
   createdAt: string;
+}
+
+interface CustomerTransaction {
+  summary: {
+    total_invoices: number;
+    total_invoice_amount: number;
+    total_paid_amount: number;
+    total_payment_records: number; // Actual sum from payment records
+    total_due_amount: number;
+    paid_invoices: number;
+    pending_invoices: number;
+    partial_invoices: number;
+    overdue_invoices: number;
+    payment_count: number; // Number of payment records
+  };
+  transactions: {
+    invoices: Array<{
+      _id: string;
+      invoice_number: string;
+      invoice_date: string;
+      grand_total: number;
+      paid_amount: number;
+      balance_due: number;
+      payment_status: 'Pending' | 'Partial' | 'Paid';
+      status: string;
+      items: Array<{
+        product_name: string;
+        quantity: number;
+        unit_price: number;
+        total_amount: number;
+      }>;
+      taxable_amount: number;
+      total_tax: number;
+    }>;
+    payments: Array<{
+      _id: string;
+      payment_date: string;
+      amount: number;
+      payment_method: string;
+      reference_number?: string;
+      invoice_id?: {
+        invoice_number: string;
+      };
+      notes?: string;
+    }>;
+  };
 }
 
 interface CustomerFormData {
@@ -94,8 +146,22 @@ export default function CustomersPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [customerTransactions, setCustomerTransactions] = useState<CustomerTransaction | null>(null);
+  const [isLoadingTransactions, setIsLoadingTransactions] = useState(false);
   const [formData, setFormData] = useState<CustomerFormData>(initialFormData);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  
+  // Invoice filtering and sorting state
+  const [invoiceSearchTerm, setInvoiceSearchTerm] = useState('');
+  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState('all');
+  const [invoiceSortBy, setInvoiceSortBy] = useState<'date' | 'amount' | 'invoice_number'>('date');
+  const [invoiceSortOrder, setInvoiceSortOrder] = useState<'asc' | 'desc'>('desc');
+  
+  // Payment filtering and sorting state
+  const [paymentSearchTerm, setPaymentSearchTerm] = useState('');
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
+  const [paymentSortBy, setPaymentSortBy] = useState<'date' | 'amount'>('date');
+  const [paymentSortOrder, setPaymentSortOrder] = useState<'asc' | 'desc'>('desc');
 
   useEffect(() => {
     loadCustomers();
@@ -122,6 +188,31 @@ export default function CustomersPage() {
       toast.error('Failed to load customers');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const loadCustomerTransactions = async (customerId: string) => {
+    try {
+      setIsLoadingTransactions(true);
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch(`/api/customers/${customerId}/transactions`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setCustomerTransactions(data);
+      } else {
+        toast.error('Failed to load customer transactions');
+        console.error('Transaction load error:', data);
+      }
+    } catch (error) {
+      console.error('Error loading customer transactions:', error);
+      toast.error('Failed to load customer transactions');
+    } finally {
+      setIsLoadingTransactions(false);
     }
   };
 
@@ -175,6 +266,76 @@ export default function CustomersPage() {
       console.error('Error updating customer:', error);
       toast.error('Failed to update customer');
     }
+  };
+
+  // Filter and sort invoices
+  const getFilteredAndSortedInvoices = () => {
+    if (!customerTransactions?.transactions?.invoices) return [];
+    
+    const filtered = [...customerTransactions.transactions.invoices].filter((invoice) => {
+      const matchesSearch = invoiceSearchTerm === '' || 
+        invoice.invoice_number.toLowerCase().includes(invoiceSearchTerm.toLowerCase());
+      
+      const matchesStatus = invoiceStatusFilter === 'all' || 
+        invoice.payment_status === invoiceStatusFilter;
+      
+      return matchesSearch && matchesStatus;
+    });
+
+    // Sort invoices
+    filtered.sort((a, b) => {
+      let comparison = 0;
+      
+      switch (invoiceSortBy) {
+        case 'date':
+          comparison = new Date(a.invoice_date).getTime() - new Date(b.invoice_date).getTime();
+          break;
+        case 'amount':
+          comparison = (a.grand_total || 0) - (b.grand_total || 0);
+          break;
+        case 'invoice_number':
+          comparison = a.invoice_number.localeCompare(b.invoice_number);
+          break;
+      }
+      
+      return invoiceSortOrder === 'asc' ? comparison : -comparison;
+    });
+
+    return filtered;
+  };
+
+  // Filter and sort payments
+  const getFilteredAndSortedPayments = () => {
+    if (!customerTransactions?.transactions?.payments) return [];
+    
+    const filtered = [...customerTransactions.transactions.payments].filter((payment) => {
+      const matchesSearch = paymentSearchTerm === '' || 
+        payment.invoice_id?.invoice_number?.toLowerCase().includes(paymentSearchTerm.toLowerCase()) ||
+        payment.reference_number?.toLowerCase().includes(paymentSearchTerm.toLowerCase());
+      
+      const matchesMethod = paymentMethodFilter === 'all' || 
+        payment.payment_method === paymentMethodFilter;
+      
+      return matchesSearch && matchesMethod;
+    });
+
+    // Sort payments
+    filtered.sort((a, b) => {
+      let comparison = 0;
+      
+      switch (paymentSortBy) {
+        case 'date':
+          comparison = new Date(a.payment_date).getTime() - new Date(b.payment_date).getTime();
+          break;
+        case 'amount':
+          comparison = (a.amount || 0) - (b.amount || 0);
+          break;
+      }
+      
+      return paymentSortOrder === 'asc' ? comparison : -comparison;
+    });
+
+    return filtered;
   };
 
   const getStatusBadge = (status: string) => {
@@ -394,6 +555,7 @@ export default function CustomersPage() {
                     <TableHead>Location</TableHead>
                     <TableHead>GST Info</TableHead>
                     <TableHead>Credit</TableHead>
+                    <TableHead className="text-right">Outstanding</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -459,6 +621,26 @@ export default function CustomersPage() {
                           <div className="text-gray-600">{customer.credit_days} days</div>
                         </div>
                       </TableCell>
+                      <TableCell className="text-right">
+                        <div className="text-sm">
+                          {customer.outstanding_balance !== undefined ? (
+                            <>
+                              <div className={`font-semibold ${
+                                customer.outstanding_balance > 0 
+                                  ? 'text-orange-600' 
+                                  : 'text-green-600'
+                              }`}>
+                                ₹{customer.outstanding_balance.toLocaleString()}
+                              </div>
+                              {customer.outstanding_balance > customer.credit_limit && (
+                                <div className="text-xs text-red-600">Over limit!</div>
+                              )}
+                            </>
+                          ) : (
+                            <div className="text-gray-400">-</div>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell>
                         {getStatusBadge(customer.status)}
                       </TableCell>
@@ -469,7 +651,18 @@ export default function CustomersPage() {
                             variant="outline"
                             onClick={() => {
                               setSelectedCustomer(customer);
+                              setCustomerTransactions(null);
+                              // Reset all filters when opening dialog
+                              setInvoiceSearchTerm('');
+                              setInvoiceStatusFilter('all');
+                              setInvoiceSortBy('date');
+                              setInvoiceSortOrder('desc');
+                              setPaymentSearchTerm('');
+                              setPaymentMethodFilter('all');
+                              setPaymentSortBy('date');
+                              setPaymentSortOrder('desc');
                               setIsViewDialogOpen(true);
+                              loadCustomerTransactions(customer._id);
                             }}
                           >
                             <Eye className="h-4 w-4" />
@@ -711,13 +904,17 @@ export default function CustomersPage() {
 
         {/* View Customer Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="max-w-3xl">
+          <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Customer Details</DialogTitle>
+              <DialogTitle>Customer Details & Transaction History</DialogTitle>
+              <DialogDescription>
+                Complete customer information and all transaction details
+              </DialogDescription>
             </DialogHeader>
             
             {selectedCustomer && (
               <div className="space-y-6">
+                {/* Customer Basic Info */}
                 <div className="grid grid-cols-2 gap-6">
                   <div>
                     <h3 className="font-semibold text-lg mb-3">Basic Information</h3>
@@ -769,6 +966,338 @@ export default function CustomersPage() {
                     <h3 className="font-semibold text-lg mb-3">Notes</h3>
                     <p className="text-gray-700">{selectedCustomer.notes}</p>
                   </div>
+                )}
+
+                {/* Outstanding Balance Highlight */}
+                {customerTransactions && (
+                  <div className="border-2 border-orange-300 bg-orange-50 rounded-lg p-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-700 mb-1">Outstanding Balance</h3>
+                        <p className="text-sm text-gray-600">Total amount pending payment</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-4xl font-bold text-orange-600">
+                          ₹{(customerTransactions.summary.total_due_amount || 0).toLocaleString()}
+                        </p>
+                        <p className="text-sm text-gray-600 mt-1">
+                          From {customerTransactions.summary.total_invoices} invoice(s)
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-orange-200">
+                      <div>
+                        <p className="text-xs text-gray-600 mb-1">Total Billed</p>
+                        <p className="text-lg font-semibold text-gray-700">
+                          ₹{(customerTransactions.summary.total_invoice_amount || 0).toLocaleString()}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-600 mb-1">
+                          Total Paid ({customerTransactions.summary.payment_count || 0} payment{(customerTransactions.summary.payment_count || 0) !== 1 ? 's' : ''})
+                        </p>
+                        <p className="text-lg font-semibold text-green-600">
+                          ₹{(customerTransactions.summary.total_paid_amount || 0).toLocaleString()}
+                        </p>
+                        {customerTransactions.summary.total_payment_records !== undefined && 
+                         Math.abs((customerTransactions.summary.total_paid_amount || 0) - (customerTransactions.summary.total_payment_records || 0)) > 0.01 && (
+                          <p className="text-xs text-orange-600 mt-1">
+                            ⚠️ Mismatch with records
+                          </p>
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-600 mb-1">Payment Rate</p>
+                        <p className="text-lg font-semibold text-blue-600">
+                          {customerTransactions.summary.total_invoice_amount > 0 
+                            ? Math.round((customerTransactions.summary.total_paid_amount / customerTransactions.summary.total_invoice_amount) * 100)
+                            : 0}%
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Transaction Summary */}
+                {isLoadingTransactions ? (
+                  <div className="flex items-center justify-center py-8">
+                    <RefreshCw className="h-6 w-6 animate-spin text-gray-400 mr-2" />
+                    <span className="text-gray-600">Loading transaction history...</span>
+                  </div>
+                ) : customerTransactions && (
+                  <>
+                    <div className="border-t pt-6">
+                      <h3 className="font-semibold text-lg mb-4 flex items-center">
+                        <Receipt className="h-5 w-5 mr-2" />
+                        Transaction Summary
+                      </h3>
+                      <div className="grid grid-cols-4 gap-4 mb-6">
+                        <Card>
+                          <CardContent className="pt-4">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-sm text-gray-600">Total Invoices</p>
+                                <p className="text-2xl font-bold">{customerTransactions.summary.total_invoices}</p>
+                              </div>
+                              <Receipt className="h-8 w-8 text-blue-500" />
+                            </div>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="pt-4">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-sm text-gray-600">Total Amount</p>
+                                <p className="text-2xl font-bold text-blue-600">₹{(customerTransactions.summary.total_invoice_amount || 0).toLocaleString()}</p>
+                              </div>
+                              <IndianRupee className="h-8 w-8 text-blue-500" />
+                            </div>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="pt-4">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-sm text-gray-600">Paid Amount</p>
+                                <p className="text-2xl font-bold text-green-600">₹{(customerTransactions.summary.total_paid_amount || 0).toLocaleString()}</p>
+                              </div>
+                              <TrendingUp className="h-8 w-8 text-green-500" />
+                            </div>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="pt-4">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-sm text-gray-600">Due Amount</p>
+                                <p className="text-2xl font-bold text-red-600">₹{(customerTransactions.summary.total_due_amount || 0).toLocaleString()}</p>
+                              </div>
+                              <AlertCircle className="h-8 w-8 text-red-500" />
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
+
+                      {/* Payment Status Breakdown */}
+                      <div className="grid grid-cols-4 gap-4 mb-6">
+                        <div className="bg-green-50 p-3 rounded-lg">
+                          <p className="text-sm text-gray-600">Paid Invoices</p>
+                          <p className="text-xl font-semibold text-green-700">{customerTransactions.summary.paid_invoices}</p>
+                        </div>
+                        <div className="bg-yellow-50 p-3 rounded-lg">
+                          <p className="text-sm text-gray-600">Partial Payment</p>
+                          <p className="text-xl font-semibold text-yellow-700">{customerTransactions.summary.partial_invoices}</p>
+                        </div>
+                        <div className="bg-orange-50 p-3 rounded-lg">
+                          <p className="text-sm text-gray-600">Pending</p>
+                          <p className="text-xl font-semibold text-orange-700">{customerTransactions.summary.pending_invoices}</p>
+                        </div>
+                        <div className="bg-red-50 p-3 rounded-lg">
+                          <p className="text-sm text-gray-600">Overdue</p>
+                          <p className="text-xl font-semibold text-red-700">{customerTransactions.summary.overdue_invoices}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Invoices Table */}
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-semibold text-lg">Invoice History</h3>
+                        <div className="flex gap-2">
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                            <Input
+                              placeholder="Search invoice..."
+                              value={invoiceSearchTerm}
+                              onChange={(e) => setInvoiceSearchTerm(e.target.value)}
+                              className="pl-10 w-48"
+                            />
+                          </div>
+                          <Select value={invoiceStatusFilter} onValueChange={setInvoiceStatusFilter}>
+                            <SelectTrigger className="w-32">
+                              <SelectValue placeholder="Status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Status</SelectItem>
+                              <SelectItem value="Paid">Paid</SelectItem>
+                              <SelectItem value="Partial">Partial</SelectItem>
+                              <SelectItem value="Pending">Pending</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Select value={invoiceSortBy} onValueChange={(value) => setInvoiceSortBy(value as 'date' | 'amount' | 'invoice_number')}>
+                            <SelectTrigger className="w-32">
+                              <SelectValue placeholder="Sort by" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="date">Date</SelectItem>
+                              <SelectItem value="amount">Amount</SelectItem>
+                              <SelectItem value="invoice_number">Invoice #</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => setInvoiceSortOrder(invoiceSortOrder === 'asc' ? 'desc' : 'asc')}
+                            title={invoiceSortOrder === 'asc' ? 'Ascending' : 'Descending'}
+                          >
+                            {invoiceSortOrder === 'asc' ? '↑' : '↓'}
+                          </Button>
+                        </div>
+                      </div>
+                      {getFilteredAndSortedInvoices().length > 0 ? (
+                        <div className="border rounded-lg overflow-hidden">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-gray-50">
+                                <TableHead>Invoice #</TableHead>
+                                <TableHead>Date</TableHead>
+                                <TableHead>Items</TableHead>
+                                <TableHead className="text-right">Amount</TableHead>
+                                <TableHead className="text-right">Paid</TableHead>
+                                <TableHead className="text-right">Due</TableHead>
+                                <TableHead>Status</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {getFilteredAndSortedInvoices().map((invoice) => (
+                                <TableRow key={invoice._id}>
+                                  <TableCell className="font-medium">{invoice.invoice_number}</TableCell>
+                                  <TableCell>
+                                    <div className="flex items-center">
+                                      <Calendar className="h-4 w-4 mr-1 text-gray-400" />
+                                      {new Date(invoice.invoice_date).toLocaleDateString('en-IN')}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="text-sm">
+                                      {(invoice.items || []).slice(0, 2).map((item, idx) => (
+                                        <div key={idx} className="text-gray-600">
+                                          {item.product_name} ({item.quantity})
+                                        </div>
+                                      ))}
+                                      {(invoice.items || []).length > 2 && (
+                                        <div className="text-xs text-gray-400">
+                                          +{invoice.items.length - 2} more
+                                        </div>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-right font-semibold">₹{(invoice.grand_total || 0).toLocaleString()}</TableCell>
+                                  <TableCell className="text-right text-green-600">₹{(invoice.paid_amount || 0).toLocaleString()}</TableCell>
+                                  <TableCell className="text-right text-red-600">₹{(invoice.balance_due || 0).toLocaleString()}</TableCell>
+                                  <TableCell>
+                                    <Badge
+                                      variant={
+                                        invoice.payment_status === 'Paid' ? 'default' :
+                                        invoice.payment_status === 'Partial' ? 'secondary' : 'destructive'
+                                      }
+                                    >
+                                      {invoice.payment_status}
+                                    </Badge>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      ) : (
+                        <p className="text-center text-gray-500 py-8">No invoices found for this customer</p>
+                      )}
+                    </div>
+
+                    {/* Payments Table */}
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-semibold text-lg">Payment History ({customerTransactions.summary.payment_count || 0} payments)</h3>
+                        <div className="flex gap-2">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                          <Input
+                            placeholder="Search payment..."
+                            value={paymentSearchTerm}
+                            onChange={(e) => setPaymentSearchTerm(e.target.value)}
+                            className="pl-10 w-48"
+                          />
+                        </div>
+                          <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
+                            <SelectTrigger className="w-32">
+                              <SelectValue placeholder="Method" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Methods</SelectItem>
+                              <SelectItem value="Cash">Cash</SelectItem>
+                              <SelectItem value="Card">Card</SelectItem>
+                              <SelectItem value="UPI">UPI</SelectItem>
+                              <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                              <SelectItem value="Cheque">Cheque</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Select value={paymentSortBy} onValueChange={(value) => setPaymentSortBy(value as 'date' | 'amount')}>
+                            <SelectTrigger className="w-32">
+                              <SelectValue placeholder="Sort by" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="date">Date</SelectItem>
+                              <SelectItem value="amount">Amount</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => setPaymentSortOrder(paymentSortOrder === 'asc' ? 'desc' : 'asc')}
+                            title={paymentSortOrder === 'asc' ? 'Ascending' : 'Descending'}
+                          >
+                            {paymentSortOrder === 'asc' ? '↑' : '↓'}
+                          </Button>
+                        </div>
+                      </div>
+                      {getFilteredAndSortedPayments().length > 0 ? (
+                        <div className="border rounded-lg overflow-hidden">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-gray-50">
+                                <TableHead>Date</TableHead>
+                                <TableHead>Invoice #</TableHead>
+                                <TableHead>Method</TableHead>
+                                <TableHead>Reference</TableHead>
+                                <TableHead className="text-right">Amount</TableHead>
+                                <TableHead>Notes</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {getFilteredAndSortedPayments().map((payment) => (
+                                <TableRow key={payment._id}>
+                                  <TableCell>
+                                    <div className="flex items-center">
+                                      <Calendar className="h-4 w-4 mr-1 text-gray-400" />
+                                      {new Date(payment.payment_date).toLocaleDateString('en-IN')}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="font-medium">
+                                    {payment.invoice_id?.invoice_number || '-'}
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge variant="outline">{payment.payment_method}</Badge>
+                                  </TableCell>
+                                  <TableCell className="text-sm text-gray-600">
+                                    {payment.reference_number || '-'}
+                                  </TableCell>
+                                  <TableCell className="text-right font-semibold text-green-600">
+                                    ₹{(payment.amount || 0).toLocaleString()}
+                                  </TableCell>
+                                  <TableCell className="text-sm text-gray-600">
+                                    {payment.notes || '-'}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      ) : (
+                        <p className="text-center text-gray-500 py-8">No payments found</p>
+                      )}
+                    </div>
+                  </>
                 )}
 
                 <div className="text-sm text-gray-500 border-t pt-4">

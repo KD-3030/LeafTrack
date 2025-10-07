@@ -59,11 +59,32 @@ export async function GET(request: NextRequest) {
     const customers = await CustomerModel.find(filter)
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
-      .limit(limit);
+      .limit(limit)
+      .lean();
+
+    // Import Invoice model to get outstanding balance
+    const Invoice = (await import('@/models/Invoice')).default;
+    
+    // Calculate outstanding balance for each customer
+    const customersWithBalance = await Promise.all(
+      customers.map(async (customer) => {
+        const invoices = await Invoice.find({
+          customer_id: customer._id,
+          status: { $ne: 'Cancelled' }
+        }).select('balance_due').lean();
+        
+        const outstanding_balance = invoices.reduce((sum, inv) => sum + (inv.balance_due || 0), 0);
+        
+        return {
+          ...customer,
+          outstanding_balance,
+        };
+      })
+    );
 
     return NextResponse.json({
       success: true,
-      customers,
+      customers: customersWithBalance,
       pagination: {
         currentPage: page,
         totalPages: Math.ceil(total / limit),
