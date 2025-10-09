@@ -27,8 +27,8 @@ export async function GET(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
-    // If salesman, only allow viewing their own orders
-    if (decoded.role === 'salesman' && order.salesman_id.toString() !== decoded.userId) {
+    // If salesman, only allow viewing their own orders (case-insensitive)
+    if (decoded.role?.toLowerCase() === 'salesman' && order.salesman_id.toString() !== decoded.userId) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
@@ -63,6 +63,8 @@ export async function PUT(
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
+    console.log('PUT /api/orders/[id] - User:', decoded.userId, 'Role:', decoded.role);
+
     const order = await Order.findById(params.id);
 
     if (!order) {
@@ -70,9 +72,10 @@ export async function PUT(
     }
 
     const body = await request.json();
+    console.log('PUT /api/orders/[id] - Body:', JSON.stringify(body));
 
-    // Admin actions: approve/reject/modify
-    if (decoded.role === 'admin') {
+    // Admin actions: approve/reject/modify (case-insensitive)
+    if (decoded.role?.toLowerCase() === 'admin') {
       // Update status if provided
       if (body.status) {
         if (!['pending', 'approved', 'rejected'].includes(body.status)) {
@@ -112,8 +115,8 @@ export async function PUT(
       if (body.payment_terms) order.payment_terms = body.payment_terms;
 
     } 
-    // Salesman actions: only edit their own pending orders
-    else if (decoded.role === 'salesman') {
+    // Salesman actions: only edit their own pending orders (case-insensitive)
+    else if (decoded.role?.toLowerCase() === 'salesman') {
       if (order.salesman_id.toString() !== decoded.userId) {
         return NextResponse.json({ error: 'Access denied' }, { status: 403 });
       }
@@ -142,17 +145,22 @@ export async function PUT(
 
     await order.save();
 
+    console.log('PUT /api/orders/[id] - Order updated successfully:', order._id, 'Status:', order.status);
+
     return NextResponse.json({
       success: true,
-      message: decoded.role === 'admin' 
+      message: decoded.role?.toLowerCase() === 'admin' 
         ? `Order ${body.status || 'updated'} successfully` 
         : 'Order updated successfully',
       order,
     });
   } catch (error) {
     console.error('Error updating order:', error);
+    if (error instanceof Error) {
+      console.error('Error details:', error.message, error.stack);
+    }
     return NextResponse.json(
-      { error: 'Failed to update order' },
+      { error: 'Failed to update order', details: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
@@ -182,8 +190,8 @@ export async function DELETE(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
-    // Salesman can only delete their own pending orders
-    if (decoded.role === 'salesman') {
+    // Salesman can only delete their own pending orders (case-insensitive)
+    if (decoded.role?.toLowerCase() === 'salesman') {
       if (order.salesman_id.toString() !== decoded.userId) {
         return NextResponse.json({ error: 'Access denied' }, { status: 403 });
       }

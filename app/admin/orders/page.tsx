@@ -115,9 +115,23 @@ export default function AdminOrdersPage() {
 
   const fetchOrders = async () => {
     try {
+      setLoading(true);
       const token = localStorage.getItem('leaftrack_token');
-      const params = new URLSearchParams();
       
+      // Fetch all orders for summary (without status filter)
+      const summaryResponse = await fetch('/api/orders?status=all', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      
+      const summaryData = await summaryResponse.json();
+      if (summaryData.success) {
+        setSummary(summaryData.summary);
+      }
+      
+      // Fetch filtered orders for display
+      const params = new URLSearchParams();
       if (statusFilter && statusFilter !== 'all') {
         params.append('status', statusFilter);
       }
@@ -131,8 +145,8 @@ export default function AdminOrdersPage() {
       const data = await response.json();
 
       if (data.success) {
+        console.log(`Fetched ${data.orders.length} orders with status filter: ${statusFilter}`);
         setOrders(data.orders);
-        setSummary(data.summary);
       } else {
         toast.error(data.error || 'Failed to fetch orders');
       }
@@ -222,10 +236,13 @@ export default function AdminOrdersPage() {
       const data = await response.json();
 
       if (data.success) {
+        console.log('Order approved successfully:', data);
         toast.success(hasModifications ? 'Order approved with modifications' : 'Order approved successfully');
         setIsApprovalDialogOpen(false);
-        fetchOrders();
+        setSelectedOrder(null);
+        await fetchOrders(); // Wait for refresh to complete
       } else {
+        console.error('Failed to approve order:', data);
         toast.error(data.error || 'Failed to approve order');
       }
     } catch (error) {
@@ -260,10 +277,14 @@ export default function AdminOrdersPage() {
       const data = await response.json();
 
       if (data.success) {
+        console.log('Order rejected successfully:', data);
         toast.success('Order rejected');
         setIsApprovalDialogOpen(false);
-        fetchOrders();
+        setSelectedOrder(null);
+        setRejectionReason('');
+        await fetchOrders(); // Wait for refresh to complete
       } else {
+        console.error('Failed to reject order:', data);
         toast.error(data.error || 'Failed to reject order');
       }
     } catch (error) {
@@ -313,12 +334,15 @@ export default function AdminOrdersPage() {
     }
   };
 
-  const filteredOrders = orders.filter(order =>
-    order.order_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    order.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    order.salesman_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    order.customer_contact.includes(searchTerm)
-  );
+  // Backend already filters by status, so we only apply search filter here
+  const filteredOrders = orders.filter(order => {
+    if (!searchTerm) return true;
+    
+    return order.order_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.salesman_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.customer_contact.includes(searchTerm);
+  });
 
   const { subtotal: modSubtotal, tax: modTax, discount: modDiscount, total: modTotal } = calculateModifiedTotals();
 

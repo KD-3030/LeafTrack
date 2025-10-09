@@ -35,8 +35,8 @@ export async function GET(request: NextRequest) {
     }
     const query: QueryType = {};
 
-    // If salesman, only show their orders
-    if (decoded.role === 'salesman') {
+    // If salesman, only show their orders (case-insensitive)
+    if (decoded.role?.toLowerCase() === 'salesman') {
       query.salesman_id = decoded.userId;
     }
 
