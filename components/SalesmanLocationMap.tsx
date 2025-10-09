@@ -73,7 +73,7 @@ export default function SalesmanLocationMap() {
   }, []);
 
   const loadCurrentLocation = useCallback(async () => {
-    if (!user || user.role !== 'Salesman') return;
+    if (!user || user.role?.toLowerCase() !== 'salesman') return;
 
     try {
       setIsLoading(true);
@@ -186,7 +186,7 @@ export default function SalesmanLocationMap() {
   };
 
   // Don't render for non-salesman users
-  if (!user || user.role !== 'Salesman') {
+  if (!user || user.role?.toLowerCase() !== 'salesman') {
     return null;
   }
 

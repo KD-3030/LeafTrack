@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
     const query: Record<string, unknown> = { timestamp: { $gte: timeFilter } };
 
     // If salesman, only show own locations
-    if (decoded.role === 'Salesman') {
+    if (decoded.role?.toLowerCase() === 'salesman') {
       query.salesman_id = decoded.userId;
     } else if (salesmanId) {
       // Admin can filter by specific salesman
@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
     const token = authHeader.substring(7);
     const decoded = verifyToken(token);
     
-    if (!decoded || decoded.role !== 'Salesman') {
+    if (!decoded || decoded.role?.toLowerCase() !== 'salesman') {
       return NextResponse.json(
         { error: 'Only salesmen can submit locations' },
         { status: 403 }
@@ -164,7 +164,7 @@ export async function DELETE(request: NextRequest) {
     const token = authHeader.substring(7);
     const decoded = verifyToken(token);
     
-    if (!decoded || decoded.role !== 'Admin') {
+    if (!decoded || decoded.role?.toLowerCase() !== 'admin') {
       return NextResponse.json(
         { error: 'Admin access required' },
         { status: 403 }

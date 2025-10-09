@@ -2,53 +2,64 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Assignment } from '@/types';
-import { stockManager } from '@/lib/stockManager';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Package, TrendingUp, ShoppingCart, AlertCircle, RefreshCw } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Package, TrendingUp, ShoppingCart, AlertCircle, RefreshCw, CheckCircle, XCircle, Clock, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import LocationTrackingWidget from '@/components/LocationTrackingWidget';
 import SalesmanLocationMap from '@/components/SalesmanLocationMap';
 
+interface Order {
+  _id: string;
+  order_number: string;
+  order_date: string;
+  customer_name: string;
+  total_amount: number;
+  status: 'pending' | 'approved' | 'rejected';
+  items: Array<{
+    product_name: string;
+    quantity: number;
+    unit: string;
+    price_per_unit: number;
+    total_price: number;
+  }>;
+  admin_modified: boolean;
+  rejection_reason?: string;
+}
+
+interface OrderSummary {
+  total_orders: number;
+  pending_count: number;
+  approved_count: number;
+  rejected_count: number;
+  total_value: number;
+  pending_value: number;
+  approved_value: number;
+}
+
 export default function SalesmanDashboard() {
   const { user } = useAuth();
-  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const router = useRouter();
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [summary, setSummary] = useState<OrderSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
-  const [saleQuantity, setSaleQuantity] = useState('');
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
-      loadAssignments();
+      loadOrders();
     }
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
-  useEffect(() => {
-    // Subscribe to stock updates to refresh data
-    const unsubscribe = stockManager.subscribe(() => {
-      // Refresh assignments when stock updates occur
-      if (user) {
-        loadAssignments();
-      }
-    });
-
-    return unsubscribe;
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const loadAssignments = async () => {
+  const loadOrders = async () => {
     if (!user) return;
 
     try {
       setIsLoading(true);
       
-      // Get JWT token from localStorage
       const token = localStorage.getItem('leaftrack_token');
       if (!token) {
         setError('No authentication token found. Please log in again.');
@@ -56,8 +67,7 @@ export default function SalesmanDashboard() {
         return;
       }
 
-      // Fetch assignments from API
-      const response = await fetch('/api/assignments', {
+      const response = await fetch('/api/orders', {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -66,62 +76,15 @@ export default function SalesmanDashboard() {
       const data = await response.json();
 
       if (!data.success) {
-        throw new Error(data.error || 'Failed to fetch assignments');
-      }
-
-      if (!data.assignments || data.assignments.length === 0) {
-        setAssignments([]);
-        setError('No assignments found. Contact your admin for stock allocation.');
-        return;
+        throw new Error(data.error || 'Failed to fetch orders');
       }
       
-      // API should now filter assignments for current salesman automatically
-      const userAssignments = data.assignments || [];
-      
-      // Transform the data to match our interface
-      interface RawAssignment {
-        _id: string;
-        salesman_id: { _id: string };
-        productId: { 
-          _id: string; 
-          name: string; 
-          price: number; 
-          hsn_code?: string;
-          manufacturingCost?: number;
-          totalStock?: number;
-          gst_rate?: number;
-        };
-        quantity: number;
-        sellingPricePerUnit?: number;
-        createdAt: string;
-      }
-      
-      const transformedAssignments = userAssignments.map((assignment: RawAssignment) => ({
-        id: assignment._id,
-        _id: assignment._id,
-        salesman_id: assignment.salesman_id._id,
-        productId: assignment.productId._id, // Use productId from API
-        quantity: assignment.quantity,
-        sellingPricePerUnit: assignment.sellingPricePerUnit || 0, // Add selling price
-        created_at: assignment.createdAt,
-        product: {
-          id: assignment.productId._id,
-          _id: assignment.productId._id,
-          name: assignment.productId.name,
-          manufacturingCost: assignment.productId.manufacturingCost || 0,
-          totalStock: assignment.productId.totalStock || 0, // Use product's actual stock
-          hsn_code: assignment.productId.hsn_code || '',
-          gst_rate: assignment.productId.gst_rate || 0,
-          created_at: assignment.createdAt,
-        }
-      }));
-      
-      setAssignments(transformedAssignments);
+      setOrders(data.orders || []);
+      setSummary(data.summary || null);
       setError(null);
-      toast.success('Assignments loaded successfully');
     } catch (error) {
-      console.error('Error loading assignments:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to load your assigned stock';
+      console.error('Error loading orders:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load your orders';
       setError(errorMessage);
       toast.error(errorMessage);
     } finally {
@@ -129,76 +92,26 @@ export default function SalesmanDashboard() {
     }
   };
 
-  const handleSellStock = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!selectedAssignment || !saleQuantity || !user) {
-      toast.error('Please fill in all fields');
-      return;
-    }
-
-    const assignmentId = selectedAssignment.id || selectedAssignment._id;
-    if (!assignmentId) {
-      toast.error('Invalid assignment data');
-      return;
-    }
-
-    const quantityToSell = parseInt(saleQuantity);
-    const totalSold = stockManager.getTotalSoldForAssignment(assignmentId);
-    const remainingStock = selectedAssignment.quantity - totalSold;
-
-    if (quantityToSell <= 0) {
-      toast.error('Quantity must be greater than 0');
-      return;
-    }
-
-    if (quantityToSell > remainingStock) {
-      toast.error(`Cannot sell ${quantityToSell} units. Only ${remainingStock} units remaining.`);
-      return;
-    }
-
-    try {
-      // Record the sale
-      const productId = typeof selectedAssignment.productId === 'string' 
-        ? selectedAssignment.productId 
-        : selectedAssignment.productId.id;      stockManager.addStockUpdate({
-        assignmentId: assignmentId,
-        quantitySold: quantityToSell,
-        timestamp: new Date().toISOString(),
-        salesmanId: user.id || user._id || '',
-        productId: productId
-      });
-
-      toast.success(`Successfully sold ${quantityToSell} units of ${selectedAssignment.product?.name}`);
-      setSaleQuantity('');
-      setSelectedAssignment(null);
-      setIsDialogOpen(false);
-      
-      // Refresh the assignments to show updated stock
-      loadAssignments();
-    } catch (err) {
-      console.error('Error recording sale:', err);
-      toast.error('Failed to record sale');
-    }
+  const handleCreateOrder = () => {
+    router.push('/salesman/orders/new');
   };
 
-  const getRemainingStock = (assignment: Assignment) => {
-    const assignmentId = assignment.id || assignment._id;
-    if (!assignmentId) return assignment.quantity;
-    const totalSold = stockManager.getTotalSoldForAssignment(assignmentId);
-    return assignment.quantity - totalSold;
+  const handleViewOrders = () => {
+    router.push('/salesman/orders');
   };
 
-  const getTotalSold = (assignment: Assignment) => {
-    const assignmentId = assignment.id || assignment._id;
-    if (!assignmentId) return 0;
-    return stockManager.getTotalSoldForAssignment(assignmentId);
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-300"><Clock className="mr-1 h-3 w-3" />Pending</Badge>;
+      case 'approved':
+        return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300"><CheckCircle className="mr-1 h-3 w-3" />Approved</Badge>;
+      case 'rejected':
+        return <Badge variant="outline" className="bg-red-50 text-red-700 border-red-300"><XCircle className="mr-1 h-3 w-3" />Rejected</Badge>;
+      default:
+        return <Badge>{status}</Badge>;
+    }
   };
-
-  const totalAssignedItems = assignments.reduce((sum, assignment) => sum + assignment.quantity, 0);
-  const totalSoldItems = assignments.reduce((sum, assignment) => sum + getTotalSold(assignment), 0);
-  const totalRemainingItems = totalAssignedItems - totalSoldItems;
-  const uniqueProducts = new Set(assignments.map(a => a.productId)).size;
 
   if (isLoading) {
     return (
@@ -211,16 +124,16 @@ export default function SalesmanDashboard() {
     );
   }
 
-  if (error && assignments.length === 0) {
+  if (error && !summary) {
     return (
-      <div className="min-h-screen bg-[#F5F5DC] flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <CardTitle className="text-red-600">Error Loading Data</CardTitle>
           </CardHeader>
           <CardContent className="text-center">
             <p className="text-gray-600 mb-4">{error}</p>
-            <Button onClick={loadAssignments} className="bg-green-600 hover:bg-green-700">
+            <Button onClick={loadOrders} className="bg-orange-600 hover:bg-orange-700">
               Try Again
             </Button>
           </CardContent>
@@ -231,11 +144,17 @@ export default function SalesmanDashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">
-          Welcome, {user?.name}
-        </h1>
-        <p className="text-gray-600 mt-2">Your assigned tea leaf inventory</p>
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">
+            Welcome, {user?.name}
+          </h1>
+          <p className="text-gray-600 mt-2">Your order management dashboard</p>
+        </div>
+        <Button onClick={handleCreateOrder} className="bg-orange-600 hover:bg-orange-700">
+          <Plus className="mr-2 h-4 w-4" />
+          Create New Order
+        </Button>
       </div>
 
       {/* Error Alert */}
@@ -248,7 +167,7 @@ export default function SalesmanDashboard() {
           <Button
             variant="outline"
             size="sm"
-            onClick={loadAssignments}
+            onClick={loadOrders}
             className="flex items-center space-x-1"
           >
             <RefreshCw className="h-4 w-4" />
@@ -258,40 +177,59 @@ export default function SalesmanDashboard() {
       )}
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Assigned</CardTitle>
-            <Package className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totalAssignedItems}</div>
-            <p className="text-xs text-gray-600">Total assigned inventory</p>
-          </CardContent>
-        </Card>
+      {summary && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
+              <Package className="h-4 w-4 text-gray-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{summary.total_orders}</div>
+              <p className="text-xs text-gray-600">
+                ₹{summary.total_value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              </p>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Items Sold</CardTitle>
-            <ShoppingCart className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totalSoldItems}</div>
-            <p className="text-xs text-gray-600">Total items sold</p>
-          </CardContent>
-        </Card>
+          <Card className="border-yellow-200 bg-yellow-50">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-yellow-700">Pending</CardTitle>
+              <Clock className="h-4 w-4 text-yellow-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-yellow-700">{summary.pending_count}</div>
+              <p className="text-xs text-yellow-600">
+                ₹{summary.pending_value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              </p>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Remaining Stock</CardTitle>
-            <TrendingUp className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totalRemainingItems}</div>
-            <p className="text-xs text-gray-600">Items available to sell</p>
-          </CardContent>
-        </Card>
-      </div>
+          <Card className="border-green-200 bg-green-50">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-green-700">Approved</CardTitle>
+              <CheckCircle className="h-4 w-4 text-green-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-700">{summary.approved_count}</div>
+              <p className="text-xs text-green-600">
+                ₹{summary.approved_value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-red-200 bg-red-50">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-red-700">Rejected</CardTitle>
+              <XCircle className="h-4 w-4 text-red-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-red-700">{summary.rejected_count}</div>
+              <p className="text-xs text-red-600">Orders declined</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Location Tracking Widget and Map */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -299,102 +237,112 @@ export default function SalesmanDashboard() {
         <SalesmanLocationMap />
       </div>
 
-      {/* Performance Summary */}
+      {/* Quick Actions */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Today&apos;s Summary</CardTitle>
-          <CardDescription>Your performance overview</CardDescription>
+          <CardTitle className="text-lg">Quick Actions</CardTitle>
+          <CardDescription>Manage your orders efficiently</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-blue-600">{uniqueProducts}</div>
-              <div className="text-sm text-gray-600">Products Assigned</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-gray-900">{totalAssignedItems}</div>
-              <div className="text-sm text-gray-600">Total Units</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-green-600">{totalSoldItems}</div>
-              <div className="text-sm text-gray-600">Units Sold</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-blue-600">{totalRemainingItems}</div>
-              <div className="text-sm text-gray-600">Remaining</div>
-            </div>
-          </div>
-          <div className="pt-4 border-t">
-            <div className="flex justify-between items-center">
-              <span className="text-sm font-medium">Sales Progress</span>
-              <span className="text-sm font-bold">
-                {totalAssignedItems > 0 ? Math.round((totalSoldItems / totalAssignedItems) * 100) : 0}%
-              </span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
-              <div 
-                className="bg-green-600 h-2 rounded-full transition-all duration-300" 
-                style={{ 
-                  width: `${totalAssignedItems > 0 ? (totalSoldItems / totalAssignedItems) * 100 : 0}%` 
-                }}
-              ></div>
-            </div>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Button 
+              onClick={handleCreateOrder}
+              className="h-20 bg-orange-600 hover:bg-orange-700 text-lg"
+            >
+              <Plus className="mr-2 h-6 w-6" />
+              Create New Order
+            </Button>
+            <Button 
+              onClick={handleViewOrders}
+              variant="outline"
+              className="h-20 text-lg"
+            >
+              <ShoppingCart className="mr-2 h-6 w-6" />
+              View All Orders
+            </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Recent Assignments Section */}
+      {/* Recent Orders */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <ShoppingCart className="h-5 w-5 text-blue-600" />
-            <span>Recent Assignments</span>
-          </CardTitle>
-          <CardDescription>
-            Your latest stock assignments from the admin
-          </CardDescription>
+          <div className="flex justify-between items-center">
+            <div>
+              <CardTitle className="flex items-center space-x-2">
+                <ShoppingCart className="h-5 w-5 text-orange-600" />
+                <span>Recent Orders</span>
+              </CardTitle>
+              <CardDescription>
+                Your latest order submissions
+              </CardDescription>
+            </div>
+            <Button variant="outline" onClick={handleViewOrders}>
+              View All
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
-          {assignments.length === 0 ? (
-            <div className="text-center py-8">
-              <ShoppingCart className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-              <h3 className="text-md font-medium text-gray-900 mb-1">No Recent Assignments</h3>
-              <p className="text-sm text-gray-600">
-                No new assignments found. Check back later or contact your admin.
+          {orders.length === 0 ? (
+            <div className="text-center py-12">
+              <ShoppingCart className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No Orders Yet</h3>
+              <p className="text-gray-600 mb-4">
+                You haven&apos;t created any orders yet. Start by creating your first order!
               </p>
+              <Button onClick={handleCreateOrder} className="bg-orange-600 hover:bg-orange-700">
+                <Plus className="mr-2 h-4 w-4" />
+                Create Your First Order
+              </Button>
             </div>
           ) : (
             <div className="space-y-3">
-              {assignments.slice(0, 3).map((assignment) => (
-                <div key={assignment.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                  <div className="flex items-center space-x-3">
+              {orders.slice(0, 5).map((order) => (
+                <div 
+                  key={order._id} 
+                  className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                >
+                  <div className="flex items-center space-x-3 flex-1">
                     <div className="flex-shrink-0">
-                      <Package className="h-8 w-8 text-green-600" />
+                      <Package className="h-8 w-8 text-orange-600" />
                     </div>
-                    <div>
-                      <h4 className="text-sm font-medium text-gray-900">
-                        {assignment.product?.name}
-                      </h4>
-                      <p className="text-sm text-gray-600">
-                        Assigned: {assignment.quantity} units
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center space-x-2">
+                        <h4 className="text-sm font-medium text-gray-900">
+                          {order.order_number}
+                        </h4>
+                        {getStatusBadge(order.status)}
+                        {order.admin_modified && (
+                          <Badge variant="outline" className="bg-blue-50 text-blue-700 text-xs">
+                            Modified
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-600 mt-1">
+                        {order.customer_name} • {order.items.length} item(s)
                       </p>
+                      {order.rejection_reason && (
+                        <p className="text-xs text-red-600 mt-1">
+                          Reason: {order.rejection_reason}
+                        </p>
+                      )}
                     </div>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right ml-4">
                     <p className="text-sm font-medium text-gray-900">
-                      ₹{(assignment.sellingPricePerUnit || 0).toFixed(2)}/unit
+                      ₹{order.total_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     </p>
                     <p className="text-xs text-gray-600">
-                      {new Date(assignment.created_at).toLocaleDateString()}
+                      {new Date(order.order_date).toLocaleDateString('en-IN')}
                     </p>
                   </div>
                 </div>
               ))}
-              {assignments.length > 3 && (
+              {orders.length > 5 && (
                 <div className="text-center pt-2">
-                  <p className="text-sm text-gray-600">
-                    +{assignments.length - 3} more assignments
-                  </p>
+                  <Button variant="link" onClick={handleViewOrders}>
+                    View all {orders.length} orders →
+                  </Button>
                 </div>
               )}
             </div>
@@ -402,133 +350,53 @@ export default function SalesmanDashboard() {
         </CardContent>
       </Card>
 
-      {/* Assigned Stock Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <Package className="h-5 w-5 text-green-600" />
-            <span>My Assigned Stock</span>
-          </CardTitle>
-          <CardDescription>
-            Tea leaf inventory assigned to you by the admin
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {assignments.length === 0 ? (
-            <div className="text-center py-12">
-              <Package className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No Stock Assigned</h3>
-              <p className="text-gray-600">
-                You don&apos;t have any assigned inventory yet. Contact your admin for stock allocation.
-              </p>
+      {/* Performance Insights */}
+      {summary && summary.total_orders > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Performance Insights</CardTitle>
+            <CardDescription>Your order performance metrics</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-gray-900">{summary.total_orders}</div>
+                <div className="text-sm text-gray-600">Total Orders</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-green-600">
+                  {summary.total_orders > 0 
+                    ? Math.round((summary.approved_count / summary.total_orders) * 100) 
+                    : 0}%
+                </div>
+                <div className="text-sm text-gray-600">Approval Rate</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-orange-600">
+                  ₹{(summary.approved_value / (summary.approved_count || 1)).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                </div>
+                <div className="text-sm text-gray-600">Avg Order Value</div>
+              </div>
             </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Product Name</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Assigned</TableHead>
-                  <TableHead>Sold</TableHead>
-                  <TableHead>Remaining</TableHead>
-                  <TableHead>Price per Unit</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {assignments.map((assignment) => (
-                  <TableRow key={assignment.id}>
-                    <TableCell className="font-medium">
-                      {assignment.product?.name}
-                    </TableCell>
-                    <TableCell>
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                        Tea Leaf
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                        {assignment.quantity}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                        {getTotalSold(assignment)}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                        {getRemainingStock(assignment)}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center">
-                        <span className="text-lg">₹</span>
-                        <span className="ml-1">{(assignment.sellingPricePerUnit || 0).toFixed(2)}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Dialog open={isDialogOpen && (selectedAssignment?.id === assignment.id || selectedAssignment?._id === assignment._id)} onOpenChange={(open) => {
-                        setIsDialogOpen(open);
-                        if (!open) {
-                          setSelectedAssignment(null);
-                          setSaleQuantity('');
-                        }
-                      }}>
-                        <DialogTrigger asChild>
-                          <Button
-                            size="sm"
-                            onClick={() => {
-                              setSelectedAssignment(assignment);
-                              setIsDialogOpen(true);
-                            }}
-                            disabled={getRemainingStock(assignment) === 0}
-                            className="bg-green-600 hover:bg-green-700"
-                          >
-                            <ShoppingCart className="h-4 w-4 mr-1" />
-                            Sell
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                          <DialogHeader>
-                            <DialogTitle>Sell Stock - {assignment.product?.name}</DialogTitle>
-                            <DialogDescription>
-                              Record a sale for this product. Remaining stock: {getRemainingStock(assignment)} units
-                            </DialogDescription>
-                          </DialogHeader>
-                          <form onSubmit={handleSellStock} className="space-y-4">
-                            <div className="space-y-2">
-                              <Label htmlFor="saleQuantity">Quantity to Sell</Label>
-                              <Input
-                                id="saleQuantity"
-                                type="number"
-                                min="1"
-                                max={getRemainingStock(assignment)}
-                                value={saleQuantity}
-                                onChange={(e) => setSaleQuantity(e.target.value)}
-                                placeholder="Enter quantity"
-                                required
-                              />
-                              <p className="text-sm text-gray-600">
-                                Available: {getRemainingStock(assignment)} units | 
-                                Price: ₹{assignment.sellingPricePerUnit?.toFixed(2) || '0.00'} per unit
-                              </p>
-                            </div>
-                            
-                            <Button type="submit" className="w-full bg-green-600 hover:bg-green-700">
-                              Record Sale
-                            </Button>
-                          </form>
-                        </DialogContent>
-                      </Dialog>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+            <div className="pt-4 border-t">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-sm font-medium">Approval Progress</span>
+                <span className="text-sm font-bold">
+                  {summary.approved_count} / {summary.total_orders} approved
+                </span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div 
+                  className="bg-green-600 h-2 rounded-full transition-all duration-300" 
+                  style={{ 
+                    width: `${summary.total_orders > 0 ? (summary.approved_count / summary.total_orders) * 100 : 0}%` 
+                  }}
+                ></div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

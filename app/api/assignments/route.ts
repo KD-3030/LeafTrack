@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     let userFilter = {};
     
     // If user is a salesman, filter assignments for that salesman only
-    if (decoded.role === 'Salesman') {
+    if (decoded.role?.toLowerCase() === 'salesman') {
       userFilter = { salesman_id: decoded.userId };
     }
     // Admin can see all assignments (no filter)

@@ -146,7 +146,7 @@ export function useLocationTracking(options: UseLocationTrackingOptions = {}) {
   };
 
   const startTracking = () => {
-    if (!enabled || !user || user.role !== 'Salesman') {
+    if (!enabled || !user || user.role?.toLowerCase() !== 'salesman') {
       return;
     }
 
@@ -192,7 +192,7 @@ export function useLocationTracking(options: UseLocationTrackingOptions = {}) {
 
   // Auto-start tracking when user logs in as salesman
   useEffect(() => {
-    if (user && user.role === 'Salesman' && enabled) {
+    if (user && user.role?.toLowerCase() === 'salesman' && enabled) {
       // Small delay to ensure user is fully authenticated
       const timer = setTimeout(() => {
         startTracking();

@@ -136,7 +136,7 @@ export default function LocationTrackingPage() {
   };
 
   useEffect(() => {
-    if (user && user.role === 'Admin') {
+    if (user && user.role?.toLowerCase() === 'admin') {
       fetchLocations();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -170,7 +170,7 @@ export default function LocationTrackingPage() {
     return <Badge variant="outline">Stale</Badge>;
   };
 
-  if (!user || user.role !== 'Admin') {
+  if (!user || user.role?.toLowerCase() !== 'admin') {
     return (
       <div className="text-center py-12">
         <h3 className="text-lg font-medium text-gray-900 mb-2">Access Denied</h3>

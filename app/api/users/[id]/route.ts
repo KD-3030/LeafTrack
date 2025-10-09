@@ -36,7 +36,7 @@ export async function PUT(
     // Check if user is admin
     const UserModel = User as Model<IUser>;
     const adminUser = await UserModel.findById(decoded.userId);
-    if (!adminUser || adminUser.role !== 'Admin') {
+    if (!adminUser || adminUser.role?.toLowerCase() !== 'admin') {
       return NextResponse.json(
         { error: 'Admin access required' },
         { status: 403 }
@@ -135,7 +135,7 @@ export async function DELETE(
     // Check if user is admin
     const UserModel = User as Model<IUser>;
     const adminUser = await UserModel.findById(decoded.userId);
-    if (!adminUser || adminUser.role !== 'Admin') {
+    if (!adminUser || adminUser.role?.toLowerCase() !== 'admin') {
       return NextResponse.json(
         { error: 'Admin access required' },
         { status: 403 }

@@ -1,0 +1,383 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
+import {
+  Plus,
+  Search,
+  Eye,
+  Edit,
+  Trash2,
+  Clock,
+  CheckCircle,
+  XCircle,
+  IndianRupee,
+  Package,
+  Calendar,
+} from 'lucide-react';
+
+interface OrderItem {
+  product_name: string;
+  quantity: number;
+  unit: string;
+  price_per_unit: number;
+  total_price: number;
+}
+
+interface Order {
+  _id: string;
+  order_number: string;
+  order_date: string;
+  customer_name: string;
+  customer_contact: string;
+  items: OrderItem[];
+  subtotal: number;
+  tax_amount: number;
+  discount_amount: number;
+  total_amount: number;
+  status: 'pending' | 'approved' | 'rejected';
+  submitted_at: string;
+  reviewed_at?: string;
+  reviewer_name?: string;
+  admin_modified: boolean;
+  admin_notes?: string;
+  rejection_reason?: string;
+  notes?: string;
+}
+
+interface OrderSummary {
+  total_orders: number;
+  pending_count: number;
+  approved_count: number;
+  rejected_count: number;
+  total_value: number;
+  pending_value: number;
+  approved_value: number;
+}
+
+export default function SalesmanOrdersPage() {
+  const router = useRouter();
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [summary, setSummary] = useState<OrderSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+
+  useEffect(() => {
+    fetchOrders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter]);
+
+  const fetchOrders = async () => {
+    try {
+      const token = localStorage.getItem('leaftrack_token');
+      const params = new URLSearchParams();
+      
+      if (statusFilter && statusFilter !== 'all') {
+        params.append('status', statusFilter);
+      }
+
+      const response = await fetch(`/api/orders?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setOrders(data.orders);
+        setSummary(data.summary);
+      } else {
+        toast.error(data.error || 'Failed to fetch orders');
+      }
+    } catch (error) {
+      console.error('Error fetching orders:', error);
+      toast.error('Failed to fetch orders');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this order?')) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch(`/api/orders/${id}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast.success(data.message);
+        fetchOrders();
+      } else {
+        toast.error(data.error || 'Failed to delete order');
+      }
+    } catch (error) {
+      console.error('Error deleting order:', error);
+      toast.error('Failed to delete order');
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-300"><Clock className="mr-1 h-3 w-3" />Pending</Badge>;
+      case 'approved':
+        return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300"><CheckCircle className="mr-1 h-3 w-3" />Approved</Badge>;
+      case 'rejected':
+        return <Badge variant="outline" className="bg-red-50 text-red-700 border-red-300"><XCircle className="mr-1 h-3 w-3" />Rejected</Badge>;
+      default:
+        return <Badge>{status}</Badge>;
+    }
+  };
+
+  const filteredOrders = orders.filter(order =>
+    order.order_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    order.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    order.customer_contact.includes(searchTerm)
+  );
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading orders...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="container mx-auto p-6 space-y-6">
+      {/* Header */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">My Orders</h1>
+          <p className="text-gray-500 mt-1">Create and manage customer orders</p>
+        </div>
+        <Button onClick={() => router.push('/salesman/orders/new')} size="lg">
+          <Plus className="mr-2 h-5 w-5" />
+          New Order
+        </Button>
+      </div>
+
+      {/* Summary Cards */}
+      {summary && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardDescription>Total Orders</CardDescription>
+              <CardTitle className="text-3xl">{summary.total_orders}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-500">
+                <IndianRupee className="inline h-4 w-4" />
+                {summary.total_value.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-yellow-200 bg-yellow-50">
+            <CardHeader className="pb-2">
+              <CardDescription className="text-yellow-700">Pending Approval</CardDescription>
+              <CardTitle className="text-3xl text-yellow-700">{summary.pending_count}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-yellow-600">
+                <IndianRupee className="inline h-4 w-4" />
+                {summary.pending_value.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-green-200 bg-green-50">
+            <CardHeader className="pb-2">
+              <CardDescription className="text-green-700">Approved</CardDescription>
+              <CardTitle className="text-3xl text-green-700">{summary.approved_count}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-green-600">
+                <IndianRupee className="inline h-4 w-4" />
+                {summary.approved_value.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-red-200 bg-red-50">
+            <CardHeader className="pb-2">
+              <CardDescription className="text-red-700">Rejected</CardDescription>
+              <CardTitle className="text-3xl text-red-700">{summary.rejected_count}</CardTitle>
+            </CardHeader>
+          </Card>
+        </div>
+      )}
+
+      {/* Filters and Search */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex-1">
+              <div className="relative">
+                <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                <Input
+                  placeholder="Search by order number, customer name, or contact..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant={statusFilter === 'all' ? 'default' : 'outline'}
+                onClick={() => setStatusFilter('all')}
+              >
+                All
+              </Button>
+              <Button
+                variant={statusFilter === 'pending' ? 'default' : 'outline'}
+                onClick={() => setStatusFilter('pending')}
+              >
+                Pending
+              </Button>
+              <Button
+                variant={statusFilter === 'approved' ? 'default' : 'outline'}
+                onClick={() => setStatusFilter('approved')}
+              >
+                Approved
+              </Button>
+              <Button
+                variant={statusFilter === 'rejected' ? 'default' : 'outline'}
+                onClick={() => setStatusFilter('rejected')}
+              >
+                Rejected
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Orders Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Orders List</CardTitle>
+          <CardDescription>
+            View and manage your submitted orders
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {filteredOrders.length === 0 ? (
+            <div className="text-center py-12">
+              <Package className="mx-auto h-12 w-12 text-gray-400" />
+              <h3 className="mt-4 text-lg font-medium text-gray-900">No orders found</h3>
+              <p className="mt-2 text-gray-500">
+                {searchTerm ? 'Try adjusting your search' : 'Get started by creating your first order'}
+              </p>
+              {!searchTerm && (
+                <Button className="mt-4" onClick={() => router.push('/salesman/orders/new')}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Create Order
+                </Button>
+              )}
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Order Number</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Customer</TableHead>
+                  <TableHead>Items</TableHead>
+                  <TableHead>Total Amount</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredOrders.map((order) => (
+                  <TableRow key={order._id}>
+                    <TableCell className="font-medium">{order.order_number}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center text-sm">
+                        <Calendar className="mr-1 h-4 w-4 text-gray-400" />
+                        {new Date(order.order_date).toLocaleDateString('en-IN')}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div>
+                        <div className="font-medium">{order.customer_name}</div>
+                        <div className="text-sm text-gray-500">{order.customer_contact}</div>
+                      </div>
+                    </TableCell>
+                    <TableCell>{order.items.length} item(s)</TableCell>
+                    <TableCell>
+                      <div className="font-medium">
+                        ₹{order.total_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </div>
+                      {order.admin_modified && (
+                        <div className="text-xs text-blue-600">Modified by admin</div>
+                      )}
+                    </TableCell>
+                    <TableCell>{getStatusBadge(order.status)}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => router.push(`/salesman/orders/${order._id}`)}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        {order.status === 'pending' && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => router.push(`/salesman/orders/${order._id}/edit`)}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDelete(order._id)}
+                            >
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

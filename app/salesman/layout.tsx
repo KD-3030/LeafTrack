@@ -7,7 +7,7 @@ export default function SalesmanLayout({
   children: React.ReactNode;
 }) {
   return (
-    <ProtectedRoute allowedRoles={['Salesman']}>
+    <ProtectedRoute allowedRoles={['salesman']}>
       <div className="min-h-screen bg-[#F5F5DC]">
         <Navigation />
         <main className="max-w-7xl mx-auto p-6">

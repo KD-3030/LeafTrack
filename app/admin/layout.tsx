@@ -9,7 +9,7 @@ export default function AdminLayout({
   children: React.ReactNode;
 }) {
   return (
-    <ProtectedRoute allowedRoles={['Admin']}>
+    <ProtectedRoute allowedRoles={['admin']}>
       <div className="min-h-screen bg-[#F5F5DC]">
         <Navigation />
         <div className="flex">

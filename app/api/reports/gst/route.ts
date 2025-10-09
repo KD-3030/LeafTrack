@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
     const token = authHeader.substring(7);
     const decoded = verifyToken(token);
     
-    if (!decoded || decoded.role !== 'Admin') {
+    if (!decoded || decoded.role?.toLowerCase() !== 'admin') {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 

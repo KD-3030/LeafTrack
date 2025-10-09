@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     const token = authHeader.substring(7);
     const decoded = verifyToken(token);
     
-    if (!decoded || decoded.role !== 'Admin') {
+    if (!decoded || decoded.role?.toLowerCase() !== 'admin') {
       return NextResponse.json(
         { error: 'Admin access required' },
         { status: 403 }
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
 
     // Check if test salesmen already exist
     const existingSalesmen = await (User as mongoose.Model<IUser>).find({ 
-      role: 'Salesman',
+      role: 'salesman',
       email: { $in: ['john.smith@leaftrack.com', 'sarah.johnson@leaftrack.com', 'mike.wilson@leaftrack.com'] }
     });
 
@@ -51,19 +51,19 @@ export async function POST(request: NextRequest) {
         name: 'John Smith',
         email: 'john.smith@leaftrack.com',
         password: await bcrypt.hash('sales123', 10),
-        role: 'Salesman',
+        role: 'salesman',
       },
       {
         name: 'Sarah Johnson',
         email: 'sarah.johnson@leaftrack.com',
         password: await bcrypt.hash('sales123', 10),
-        role: 'Salesman',
+        role: 'salesman',
       },
       {
         name: 'Mike Wilson',
         email: 'mike.wilson@leaftrack.com',
         password: await bcrypt.hash('sales123', 10),
-        role: 'Salesman',
+        role: 'salesman',
       },
     ];
 

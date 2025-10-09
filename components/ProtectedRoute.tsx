@@ -20,7 +20,11 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
         return;
       }
       
-      if (!allowedRoles.includes(user.role)) {
+      // Case-insensitive role check
+      const normalizedUserRole = user.role?.toLowerCase();
+      const normalizedAllowedRoles = allowedRoles.map(r => r.toLowerCase());
+      
+      if (!normalizedAllowedRoles.includes(normalizedUserRole)) {
         router.push('/');
         return;
       }
@@ -35,7 +39,11 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
     );
   }
 
-  if (!user || !allowedRoles.includes(user.role)) {
+  // Case-insensitive role check
+  const normalizedUserRole = user?.role?.toLowerCase();
+  const normalizedAllowedRoles = allowedRoles.map(r => r.toLowerCase());
+  
+  if (!user || !normalizedAllowedRoles.includes(normalizedUserRole || '')) {
     return null;
   }
 

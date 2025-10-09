@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     const token = authHeader.substring(7);
     const decoded = verifyToken(token);
     
-    if (!decoded || decoded.role !== 'Admin') {
+    if (!decoded || decoded.role?.toLowerCase() !== 'admin') {
       return NextResponse.json(
         { error: 'Admin access required' },
         { status: 403 }
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get all salesmen
-    const salesmen = await (User as mongoose.Model<IUser>).find({ role: 'Salesman' });
+    const salesmen = await (User as mongoose.Model<IUser>).find({ role: 'salesman' });
 
     if (salesmen.length === 0) {
       return NextResponse.json(

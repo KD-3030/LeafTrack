@@ -93,7 +93,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
     
-    if (decoded.role !== 'Admin') {
+    if (decoded.role?.toLowerCase() !== 'admin') {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -208,7 +208,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
     
-    if (decoded.role !== 'Admin') {
+    if (decoded.role?.toLowerCase() !== 'admin') {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 

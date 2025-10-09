@@ -1,14 +1,12 @@
 {
-  "/api/auth/login/route": "app/api/auth/login/route.js",
-  "/page": "app/page.js",
-  "/api/users/route": "app/api/users/route.js",
   "/login/page": "app/login/page.js",
+  "/api/users/route": "app/api/users/route.js",
+  "/api/orders/route": "app/api/orders/route.js",
   "/api/locations/route": "app/api/locations/route.js",
+  "/api/test-locations/route": "app/api/test-locations/route.js",
   "/api/products/route": "app/api/products/route.js",
-  "/api/purchases/route": "app/api/purchases/route.js",
-  "/api/assignments/route": "app/api/assignments/route.js",
-  "/api/purchase-returns/route": "app/api/purchase-returns/route.js",
+  "/api/test-users/route": "app/api/test-users/route.js",
   "/admin/dashboard/page": "app/admin/dashboard/page.js",
-  "/admin/purchases/page": "app/admin/purchases/page.js",
-  "/admin/purchase-returns/page": "app/admin/purchase-returns/page.js"
+  "/admin/salesmen/page": "app/admin/salesmen/page.js",
+  "/admin/locations/page": "app/admin/locations/page.js"
 }

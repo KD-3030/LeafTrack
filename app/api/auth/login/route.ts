@@ -27,9 +27,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Find user
+    // Find user (case-insensitive role check)
     const UserModel = User as Model<IUser>;
-    const user = await UserModel.findOne({ email, role });
+    const user = await UserModel.findOne({ 
+      email, 
+      role: role.toLowerCase() 
+    });
     if (!user) {
       return NextResponse.json(
         { error: 'Invalid credentials or role mismatch' },
@@ -46,8 +49,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Generate token
-    const token = generateToken((user._id as string).toString(), user.role);
+    // Generate token with user name
+    const token = generateToken((user._id as string).toString(), user.role, user.name);
 
     // Return user data (without password)
     const userData = {

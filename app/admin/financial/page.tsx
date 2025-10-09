@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { DollarSign, TrendingUp, TrendingDown, Receipt, RefreshCw, Plus, Check, X, AlertCircle, BarChart3, Clock, Trash2 } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Receipt, RefreshCw, Plus, Check, X, AlertCircle, BarChart3, Clock, Trash2, Search, Download, Filter, User } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface Payment {
@@ -78,6 +78,16 @@ export default function FinancialDashboard() {
     bank_name: '',
     notes: '',
   });
+
+  // Search and filter states for payments
+  const [paymentSearchTerm, setPaymentSearchTerm] = useState('');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState('all');
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
+  const [paymentReconciledFilter, setPaymentReconciledFilter] = useState('all');
+
+  // Search and filter states for invoices
+  const [invoiceSearchTerm, setInvoiceSearchTerm] = useState('');
+  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState('all');
 
   // Edit payment state
   const [isEditPaymentDialogOpen, setIsEditPaymentDialogOpen] = useState(false);
@@ -430,6 +440,221 @@ export default function FinancialDashboard() {
     setIsPaymentDialogOpen(true);
   };
 
+  // Filter payments based on search and filters
+  const filteredPayments = payments.filter(payment => {
+    // Search filter
+    const matchesSearch = 
+      payment.invoice_id?.invoice_number?.toLowerCase().includes(paymentSearchTerm.toLowerCase()) ||
+      payment.customer_id?.name?.toLowerCase().includes(paymentSearchTerm.toLowerCase()) ||
+      payment.customer_id?.email?.toLowerCase().includes(paymentSearchTerm.toLowerCase()) ||
+      payment.transaction_id?.toLowerCase().includes(paymentSearchTerm.toLowerCase());
+
+    // Status filter
+    const matchesStatus = paymentStatusFilter === 'all' || payment.status === paymentStatusFilter;
+
+    // Method filter
+    const matchesMethod = paymentMethodFilter === 'all' || payment.payment_method === paymentMethodFilter;
+
+    // Reconciled filter
+    const matchesReconciled = 
+      paymentReconciledFilter === 'all' || 
+      (paymentReconciledFilter === 'yes' && payment.reconciled) ||
+      (paymentReconciledFilter === 'no' && !payment.reconciled);
+
+    return matchesSearch && matchesStatus && matchesMethod && matchesReconciled;
+  });
+
+  // Filter invoices based on search and filters
+  const filteredInvoices = outstandingInvoices.filter(invoice => {
+    // Search filter
+    const matchesSearch = 
+      invoice.invoice_number?.toLowerCase().includes(invoiceSearchTerm.toLowerCase()) ||
+      invoice.customer_details?.name?.toLowerCase().includes(invoiceSearchTerm.toLowerCase()) ||
+      invoice.customer_details?.email?.toLowerCase().includes(invoiceSearchTerm.toLowerCase());
+
+    // Status filter (overdue or pending)
+    const matchesStatus = 
+      invoiceStatusFilter === 'all' ||
+      (invoiceStatusFilter === 'overdue' && invoice.days_overdue > 0) ||
+      (invoiceStatusFilter === 'pending' && invoice.days_overdue <= 0);
+
+    return matchesSearch && matchesStatus;
+  });
+
+  // Group payments by customer for individual downloads
+  interface CustomerPaymentGroup {
+    customer_id: string;
+    customer_name: string;
+    customer_email: string;
+    total_amount: number;
+    payment_count: number;
+    confirmed_amount: number;
+    pending_amount: number;
+    payments: Payment[];
+  }
+
+  const groupPaymentsByCustomer = (): CustomerPaymentGroup[] => {
+    const customerMap = new Map<string, CustomerPaymentGroup>();
+
+    filteredPayments.forEach(payment => {
+      const customerId = payment.customer_id?.name || 'Unknown';
+      const existing = customerMap.get(customerId);
+      
+      if (existing) {
+        existing.payments.push(payment);
+        existing.payment_count++;
+        existing.total_amount += payment.amount_paid;
+        if (payment.status === 'Confirmed') {
+          existing.confirmed_amount += payment.amount_paid;
+        } else if (payment.status === 'Pending') {
+          existing.pending_amount += payment.amount_paid;
+        }
+      } else {
+        customerMap.set(customerId, {
+          customer_id: customerId,
+          customer_name: payment.customer_id?.name || 'Unknown',
+          customer_email: payment.customer_id?.email || 'N/A',
+          total_amount: payment.amount_paid,
+          payment_count: 1,
+          confirmed_amount: payment.status === 'Confirmed' ? payment.amount_paid : 0,
+          pending_amount: payment.status === 'Pending' ? payment.amount_paid : 0,
+          payments: [payment],
+        });
+      }
+    });
+
+    return Array.from(customerMap.values()).sort((a, b) => b.total_amount - a.total_amount);
+  };
+
+  // Group outstanding invoices by customer
+  interface CustomerInvoiceGroup {
+    customer_id: string;
+    customer_name: string;
+    customer_email: string;
+    total_outstanding: number;
+    invoice_count: number;
+    overdue_amount: number;
+    invoices: OutstandingInvoice[];
+  }
+
+  const groupInvoicesByCustomer = (): CustomerInvoiceGroup[] => {
+    const customerMap = new Map<string, CustomerInvoiceGroup>();
+
+    filteredInvoices.forEach(invoice => {
+      const customerId = invoice.customer_details?.name || 'Unknown';
+      const existing = customerMap.get(customerId);
+      
+      if (existing) {
+        existing.invoices.push(invoice);
+        existing.invoice_count++;
+        existing.total_outstanding += invoice.balance_due;
+        if (invoice.days_overdue > 0) {
+          existing.overdue_amount += invoice.balance_due;
+        }
+      } else {
+        customerMap.set(customerId, {
+          customer_id: customerId,
+          customer_name: invoice.customer_details?.name || 'Unknown',
+          customer_email: invoice.customer_details?.email || 'N/A',
+          total_outstanding: invoice.balance_due,
+          invoice_count: 1,
+          overdue_amount: invoice.days_overdue > 0 ? invoice.balance_due : 0,
+          invoices: [invoice],
+        });
+      }
+    });
+
+    return Array.from(customerMap.values()).sort((a, b) => b.total_outstanding - a.total_outstanding);
+  };
+
+  // Download individual customer payment report
+  const downloadCustomerPaymentReport = (customerGroup: CustomerPaymentGroup) => {
+    let csv = `Customer Payment Report\n\n`;
+    csv += `Customer Information\n`;
+    csv += `Name,${customerGroup.customer_name}\n`;
+    csv += `Email,${customerGroup.customer_email}\n`;
+    csv += `\n`;
+    
+    csv += `Payment Summary\n`;
+    csv += `Total Payments,${customerGroup.payment_count}\n`;
+    csv += `Total Amount,₹${customerGroup.total_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n`;
+    csv += `Confirmed Amount,₹${customerGroup.confirmed_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n`;
+    csv += `Pending Amount,₹${customerGroup.pending_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n`;
+    csv += `\n`;
+
+    csv += `Payment Details\n`;
+    csv += `Date,Invoice Number,Amount,Payment Method,Transaction ID,Status,Reconciled,Notes\n`;
+    
+    customerGroup.payments.forEach(payment => {
+      const date = new Date(payment.payment_date).toLocaleDateString('en-IN');
+      const invoice = payment.invoice_id?.invoice_number || 'N/A';
+      const amount = payment.amount_paid.toFixed(2);
+      const method = payment.payment_method;
+      const transactionId = payment.transaction_id || 'N/A';
+      const status = payment.status;
+      const reconciled = payment.reconciled ? 'Yes' : 'No';
+      const notes = payment.notes ? `"${payment.notes.replace(/"/g, '""')}"` : 'N/A';
+      
+      csv += `${date},${invoice},${amount},${method},${transactionId},${status},${reconciled},${notes}\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${customerGroup.customer_name.replace(/\s+/g, '_')}_payment_report_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    window.URL.revokeObjectURL(url);
+    
+    toast({
+      title: "Success",
+      description: `Payment report downloaded for ${customerGroup.customer_name}`,
+    });
+  };
+
+  // Download individual customer invoice report
+  const downloadCustomerInvoiceReport = (customerGroup: CustomerInvoiceGroup) => {
+    let csv = `Customer Outstanding Invoice Report\n\n`;
+    csv += `Customer Information\n`;
+    csv += `Name,${customerGroup.customer_name}\n`;
+    csv += `Email,${customerGroup.customer_email}\n`;
+    csv += `\n`;
+    
+    csv += `Outstanding Summary\n`;
+    csv += `Total Invoices,${customerGroup.invoice_count}\n`;
+    csv += `Total Outstanding,₹${customerGroup.total_outstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n`;
+    csv += `Overdue Amount,₹${customerGroup.overdue_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n`;
+    csv += `\n`;
+
+    csv += `Invoice Details\n`;
+    csv += `Invoice Number,Total Amount,Paid Amount,Balance Due,Due Date,Days Overdue,Status\n`;
+    
+    customerGroup.invoices.forEach(invoice => {
+      const invoiceNumber = invoice.invoice_number || 'N/A';
+      const total = invoice.grand_total.toFixed(2);
+      const paid = invoice.paid_amount.toFixed(2);
+      const balance = invoice.balance_due.toFixed(2);
+      const dueDate = new Date(invoice.due_date).toLocaleDateString('en-IN');
+      const daysOverdue = invoice.days_overdue;
+      const status = invoice.days_overdue > 0 ? 'Overdue' : 'Pending';
+      
+      csv += `${invoiceNumber},${total},${paid},${balance},${dueDate},${daysOverdue},${status}\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${customerGroup.customer_name.replace(/\s+/g, '_')}_invoice_report_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    window.URL.revokeObjectURL(url);
+    
+    toast({
+      title: "Success",
+      description: `Invoice report downloaded for ${customerGroup.customer_name}`,
+    });
+  };
+
   const getStatusBadge = (status: string) => {
     const styles = {
       Pending: 'bg-yellow-100 text-yellow-800',
@@ -542,6 +767,91 @@ export default function FinancialDashboard() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
+                {/* Search and Filters for Payments */}
+                <div className="mb-6 space-y-4">
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <Input
+                          placeholder="Search by invoice, customer, email, or transaction ID..."
+                          value={paymentSearchTerm}
+                          onChange={(e) => setPaymentSearchTerm(e.target.value)}
+                          className="pl-10"
+                        />
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setPaymentSearchTerm('');
+                        setPaymentStatusFilter('all');
+                        setPaymentMethodFilter('all');
+                        setPaymentReconciledFilter('all');
+                      }}
+                      className="whitespace-nowrap"
+                    >
+                      <X className="h-4 w-4 mr-2" />
+                      Clear Filters
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="payment-status-filter" className="text-sm font-medium">Status</Label>
+                      <Select value={paymentStatusFilter} onValueChange={setPaymentStatusFilter}>
+                        <SelectTrigger id="payment-status-filter">
+                          <SelectValue placeholder="All Statuses" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Statuses</SelectItem>
+                          <SelectItem value="Pending">Pending</SelectItem>
+                          <SelectItem value="Confirmed">Confirmed</SelectItem>
+                          <SelectItem value="Failed">Failed</SelectItem>
+                          <SelectItem value="Cancelled">Cancelled</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="payment-method-filter" className="text-sm font-medium">Payment Method</Label>
+                      <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
+                        <SelectTrigger id="payment-method-filter">
+                          <SelectValue placeholder="All Methods" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Methods</SelectItem>
+                          <SelectItem value="Cash">Cash</SelectItem>
+                          <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                          <SelectItem value="UPI">UPI</SelectItem>
+                          <SelectItem value="Cheque">Cheque</SelectItem>
+                          <SelectItem value="Credit Card">Credit Card</SelectItem>
+                          <SelectItem value="Debit Card">Debit Card</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="payment-reconciled-filter" className="text-sm font-medium">Reconciled</Label>
+                      <Select value={paymentReconciledFilter} onValueChange={setPaymentReconciledFilter}>
+                        <SelectTrigger id="payment-reconciled-filter">
+                          <SelectValue placeholder="All" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All</SelectItem>
+                          <SelectItem value="yes">Reconciled</SelectItem>
+                          <SelectItem value="no">Not Reconciled</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t">
+                    <p className="text-sm text-gray-600">
+                      Showing {filteredPayments.length} of {payments.length} payments
+                    </p>
+                  </div>
+                </div>
                 {isLoading ? (
                   <div className="text-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
@@ -562,14 +872,16 @@ export default function FinancialDashboard() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {payments.length === 0 ? (
+                      {filteredPayments.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={8} className="text-center py-8 text-gray-500">
-                            No recent payments found
+                            {paymentSearchTerm || paymentStatusFilter !== 'all' || paymentMethodFilter !== 'all' || paymentReconciledFilter !== 'all'
+                              ? 'No payments found matching your filters'
+                              : 'No recent payments found'}
                           </TableCell>
                         </TableRow>
                       ) : (
-                        payments.map((payment) => (
+                        filteredPayments.map((payment) => (
                           <TableRow key={payment._id}>
                             <TableCell className="font-medium">
                               {payment.invoice_id?.invoice_number || 'No Invoice'}
@@ -678,6 +990,58 @@ export default function FinancialDashboard() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
+                {/* Search and Filters for Outstanding Invoices */}
+                <div className="mb-6 space-y-4">
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <Input
+                          placeholder="Search by invoice number, customer name, or email..."
+                          value={invoiceSearchTerm}
+                          onChange={(e) => setInvoiceSearchTerm(e.target.value)}
+                          className="pl-10"
+                        />
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setInvoiceSearchTerm('');
+                        setInvoiceStatusFilter('all');
+                      }}
+                      className="whitespace-nowrap"
+                    >
+                      <X className="h-4 w-4 mr-2" />
+                      Clear Filters
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="invoice-status-filter" className="text-sm font-medium">Status</Label>
+                      <Select value={invoiceStatusFilter} onValueChange={setInvoiceStatusFilter}>
+                        <SelectTrigger id="invoice-status-filter">
+                          <SelectValue placeholder="All Invoices" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Invoices</SelectItem>
+                          <SelectItem value="overdue">Overdue Only</SelectItem>
+                          <SelectItem value="pending">Pending (Not Overdue)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex items-end">
+                      <div className="flex-1">
+                        <p className="text-sm text-gray-600">
+                          Showing {filteredInvoices.length} of {outstandingInvoices.length} invoices
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -691,8 +1055,17 @@ export default function FinancialDashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {outstandingInvoices.map((invoice) => (
-                      <TableRow key={invoice._id}>
+                    {filteredInvoices.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center py-8 text-gray-500">
+                          {invoiceSearchTerm || invoiceStatusFilter !== 'all'
+                            ? 'No invoices found matching your filters'
+                            : 'No outstanding invoices found'}
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredInvoices.map((invoice) => (
+                        <TableRow key={invoice._id}>
                         <TableCell className="font-medium">
                           {invoice.invoice_number || 'N/A'}
                         </TableCell>
@@ -740,7 +1113,8 @@ export default function FinancialDashboard() {
                           </Button>
                         </TableCell>
                       </TableRow>
-                    ))}
+                      ))
+                    )}
                   </TableBody>
                 </Table>
               </CardContent>

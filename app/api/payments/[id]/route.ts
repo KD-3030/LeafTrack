@@ -284,7 +284,7 @@ export async function DELETE(
     }
 
     // Check if user is admin
-    if (decoded.role !== 'Admin') {
+    if (decoded.role?.toLowerCase() !== 'admin') {
       return NextResponse.json(
         { error: 'Only administrators can delete payments' },
         { status: 403 }

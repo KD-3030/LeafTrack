@@ -152,7 +152,7 @@ export async function GET(
     const query = { _id: id };
     
     // If user is a salesman, they can only see their own assignments
-    if (decoded.role === 'Salesman') {
+    if (decoded.role?.toLowerCase() === 'salesman') {
       Object.assign(query, { salesman_id: decoded.userId });
     }
 

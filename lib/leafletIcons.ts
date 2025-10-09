@@ -76,7 +76,7 @@ export const createPersonalizedIcon = async (salesmanId: string, role: 'Admin' |
   const L = await initializeLeaflet();
   if (!L) return null;
 
-  const isAdmin = role === 'Admin';
+  const isAdmin = role?.toLowerCase() === 'admin';
   const baseColor = isAdmin ? ADMIN_COLOR : getSalesmanColor(salesmanId);
   
   // Determine opacity based on timestamp (if provided)

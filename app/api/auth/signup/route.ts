@@ -33,16 +33,16 @@ export async function POST(request: NextRequest) {
     // Hash password
     const hashedPassword = await hashPassword(password);
 
-    // Create user
+    // Create user (store role in lowercase)
     const user = await UserModel.create({
       name,
       email,
       password: hashedPassword,
-      role,
+      role: role.toLowerCase(),
     });
 
-    // Generate token
-    const token = generateToken((user._id as string).toString(), user.role);
+    // Generate token with user name
+    const token = generateToken((user._id as string).toString(), user.role, user.name);
 
     // Return user data (without password)
     const userData = {

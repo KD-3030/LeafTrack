@@ -108,7 +108,7 @@ export async function GET(request: NextRequest) {
     }
 
     // If user is a salesman, filter by their ID
-    if (decoded.role === 'Salesman') {
+    if (decoded.role?.toLowerCase() === 'salesman') {
       filter.salesman_id = new mongoose.Types.ObjectId(decoded.id);
     }
     

@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
     }
 
     // If user is a salesman, filter by their ID
-    if (decoded.role === 'Salesman') {
+    if (decoded.role?.toLowerCase() === 'salesman') {
       filter.salesman_id = decoded.userId;
     }
     
@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user has permission to create sale for this assignment
-    if (decoded.role === 'Salesman' && assignment.salesman_id._id.toString() !== decoded.userId) {
+    if (decoded.role?.toLowerCase() === 'salesman' && assignment.salesman_id._id.toString() !== decoded.userId) {
       return NextResponse.json({ error: 'Unauthorized to create sale for this assignment' }, { status: 403 });
     }
 

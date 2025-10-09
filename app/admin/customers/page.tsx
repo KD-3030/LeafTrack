@@ -27,10 +27,12 @@ import {
   IndianRupee,
   Calendar,
   TrendingUp,
-  AlertCircle
+  AlertCircle,
+  Download
 } from 'lucide-react';
 // import { useAuth } from '@/contexts/AuthContext'; // Removed unused import
 import { toast } from 'sonner';
+import * as XLSX from 'xlsx';
 
 interface Customer {
   _id: string;
@@ -266,6 +268,186 @@ export default function CustomersPage() {
       console.error('Error updating customer:', error);
       toast.error('Failed to update customer');
     }
+  };
+
+  // Download individual customer report with all transactions as Excel
+  const downloadCustomerReport = () => {
+    if (!selectedCustomer || !customerTransactions) {
+      toast.error('No customer data available to download');
+      return;
+    }
+
+    const customer = selectedCustomer;
+    const summary = customerTransactions.summary;
+    const transactions = customerTransactions.transactions;
+
+    // Create a new workbook
+    const workbook = XLSX.utils.book_new();
+
+    // Sheet 1: Customer Information & Summary
+    const customerInfoData: (string | number)[][] = [
+      ['CUSTOMER TRANSACTION REPORT'],
+      ['Generated on:', new Date().toLocaleString('en-IN')],
+      [],
+      ['CUSTOMER INFORMATION'],
+      ['Name:', customer.name],
+      ['Phone:', customer.phone],
+    ];
+
+    if (customer.email) customerInfoData.push(['Email:', customer.email]);
+    if (customer.business_name) customerInfoData.push(['Business Name:', customer.business_name]);
+    customerInfoData.push(['Business Type:', customer.business_type]);
+    if (customer.address) customerInfoData.push(['Address:', customer.address]);
+    if (customer.city && customer.state) {
+      customerInfoData.push(['City:', customer.city]);
+      customerInfoData.push(['State:', customer.state]);
+      customerInfoData.push(['Pincode:', customer.pincode || '']);
+    }
+    if (customer.gstin) customerInfoData.push(['GSTIN:', customer.gstin]);
+    if (customer.pan) customerInfoData.push(['PAN:', customer.pan]);
+    customerInfoData.push(['Credit Limit:', `₹${customer.credit_limit.toLocaleString('en-IN')}`]);
+    customerInfoData.push(['Credit Days:', `${customer.credit_days} days`]);
+    customerInfoData.push(['Status:', customer.status]);
+    
+    customerInfoData.push([]);
+    customerInfoData.push(['TRANSACTION SUMMARY']);
+    customerInfoData.push(['Total Invoices:', summary.total_invoices]);
+    customerInfoData.push(['Total Invoice Amount:', `₹${summary.total_invoice_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`]);
+    customerInfoData.push(['Total Paid Amount:', `₹${summary.total_paid_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`]);
+    customerInfoData.push(['Total Outstanding/Due:', `₹${summary.total_due_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`]);
+    customerInfoData.push(['Payment Count:', summary.payment_count]);
+    customerInfoData.push(['Paid Invoices:', summary.paid_invoices]);
+    customerInfoData.push(['Pending Invoices:', summary.pending_invoices]);
+    customerInfoData.push(['Partial Invoices:', summary.partial_invoices]);
+    customerInfoData.push(['Overdue Invoices:', summary.overdue_invoices]);
+
+    const customerInfoSheet = XLSX.utils.aoa_to_sheet(customerInfoData);
+    
+    // Set column widths for better readability
+    customerInfoSheet['!cols'] = [
+      { wch: 25 },
+      { wch: 40 }
+    ];
+
+    XLSX.utils.book_append_sheet(workbook, customerInfoSheet, 'Customer Info');
+
+    // Sheet 2: Invoices
+    if (transactions.invoices && transactions.invoices.length > 0) {
+      const invoiceData: (string | number)[][] = [
+        ['INVOICE DETAILS'],
+        [],
+        ['Invoice Number', 'Invoice Date', 'Total Amount', 'Paid Amount', 'Balance Due', 'Payment Status', 'Status']
+      ];
+
+      transactions.invoices.forEach(invoice => {
+        invoiceData.push([
+          invoice.invoice_number,
+          new Date(invoice.invoice_date).toLocaleDateString('en-IN'),
+          invoice.grand_total,
+          invoice.paid_amount,
+          invoice.balance_due,
+          invoice.payment_status,
+          invoice.status
+        ]);
+      });
+
+      const invoiceSheet = XLSX.utils.aoa_to_sheet(invoiceData);
+      
+      // Set column widths
+      invoiceSheet['!cols'] = [
+        { wch: 18 },
+        { wch: 15 },
+        { wch: 15 },
+        { wch: 15 },
+        { wch: 15 },
+        { wch: 18 },
+        { wch: 12 }
+      ];
+
+      XLSX.utils.book_append_sheet(workbook, invoiceSheet, 'Invoices');
+    }
+
+    // Sheet 3: Invoice Items Breakdown
+    if (transactions.invoices && transactions.invoices.length > 0) {
+      const invoiceItemsData: (string | number)[][] = [
+        ['INVOICE ITEMS BREAKDOWN'],
+        [],
+        ['Invoice Number', 'Product Name', 'Quantity', 'Unit Price', 'Total Amount']
+      ];
+
+      transactions.invoices.forEach(invoice => {
+        if (invoice.items && invoice.items.length > 0) {
+          invoice.items.forEach(item => {
+            invoiceItemsData.push([
+              invoice.invoice_number,
+              item.product_name,
+              item.quantity,
+              item.unit_price,
+              item.total_amount
+            ]);
+          });
+        }
+      });
+
+      const invoiceItemsSheet = XLSX.utils.aoa_to_sheet(invoiceItemsData);
+      
+      // Set column widths
+      invoiceItemsSheet['!cols'] = [
+        { wch: 18 },
+        { wch: 30 },
+        { wch: 12 },
+        { wch: 15 },
+        { wch: 15 }
+      ];
+
+      XLSX.utils.book_append_sheet(workbook, invoiceItemsSheet, 'Invoice Items');
+    }
+
+    // Sheet 4: Payments
+    if (transactions.payments && transactions.payments.length > 0) {
+      const paymentData: (string | number)[][] = [
+        ['PAYMENT DETAILS'],
+        [],
+        ['Payment Date', 'Amount Paid', 'Payment Method', 'Reference Number', 'Invoice Number', 'Notes']
+      ];
+
+      transactions.payments.forEach(payment => {
+        paymentData.push([
+          new Date(payment.payment_date).toLocaleDateString('en-IN'),
+          payment.amount,
+          payment.payment_method,
+          payment.reference_number || 'N/A',
+          payment.invoice_id?.invoice_number || 'N/A',
+          payment.notes || 'N/A'
+        ]);
+      });
+
+      const paymentSheet = XLSX.utils.aoa_to_sheet(paymentData);
+      
+      // Set column widths
+      paymentSheet['!cols'] = [
+        { wch: 15 },
+        { wch: 15 },
+        { wch: 18 },
+        { wch: 20 },
+        { wch: 18 },
+        { wch: 30 }
+      ];
+
+      XLSX.utils.book_append_sheet(workbook, paymentSheet, 'Payments');
+    }
+
+    // Generate Excel file and download
+    const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${customer.name.replace(/\s+/g, '_')}_transaction_report_${new Date().toISOString().split('T')[0]}.xlsx`;
+    link.click();
+    window.URL.revokeObjectURL(url);
+    
+    toast.success(`Transaction report downloaded for ${customer.name}`);
   };
 
   // Filter and sort invoices
@@ -906,10 +1088,24 @@ export default function CustomersPage() {
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
           <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Customer Details & Transaction History</DialogTitle>
-              <DialogDescription>
-                Complete customer information and all transaction details
-              </DialogDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <DialogTitle>Customer Details & Transaction History</DialogTitle>
+                  <DialogDescription>
+                    Complete customer information and all transaction details
+                  </DialogDescription>
+                </div>
+                {customerTransactions && (
+                  <Button
+                    onClick={downloadCustomerReport}
+                    variant="outline"
+                    className="bg-green-50 hover:bg-green-100 text-green-700 border-green-300"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Download Report (Excel)
+                  </Button>
+                )}
+              </div>
             </DialogHeader>
             
             {selectedCustomer && (

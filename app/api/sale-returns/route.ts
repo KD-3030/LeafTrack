@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     const filter: Record<string, string | object> = {};
     
     // If user is a salesman, only show their returns
-    if (decoded.role === 'Salesman') {
+    if (decoded.role?.toLowerCase() === 'salesman') {
       filter.salesman_id = decoded.userId;
     }
     

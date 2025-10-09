@@ -572,7 +572,7 @@ export default function SalesmanLocationMap() {
   };
 
   const trackAdminLocation = async () => {
-    if (!user || user.role !== 'Admin') return;
+    if (!user || user.role?.toLowerCase() !== 'admin') return;
 
     try {
       setIsTrackingAdmin(true);
@@ -763,13 +763,13 @@ export default function SalesmanLocationMap() {
 
   // Initial fetch and when time filter changes
   useEffect(() => {
-    if (user && user.role === 'Admin') {
+    if (user && user.role?.toLowerCase() === 'admin') {
       fetchLocations();
     }
   }, [user, timeFilter]);
 
   // Don't render for non-admin users
-  if (!user || user.role !== 'Admin') {
+  if (!user || user.role?.toLowerCase() !== 'admin') {
     return null;
   }
 

@@ -25,7 +25,7 @@ export async function PUT(
     const token = authHeader.substring(7);
     const decoded = verifyToken(token);
     
-    if (!decoded || decoded.role !== 'Admin') {
+    if (!decoded || decoded.role?.toLowerCase() !== 'admin') {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
@@ -88,7 +88,7 @@ export async function DELETE(
     const token = authHeader.substring(7);
     const decoded = verifyToken(token);
     
-    if (!decoded || decoded.role !== 'Admin') {
+    if (!decoded || decoded.role?.toLowerCase() !== 'admin') {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }

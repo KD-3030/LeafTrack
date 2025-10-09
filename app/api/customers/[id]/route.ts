@@ -174,7 +174,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     // Check if user has admin role for deletion
-    if (authResult.role !== 'Admin') {
+    if (authResult.role?.toLowerCase() !== 'admin') {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 

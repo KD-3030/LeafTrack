@@ -49,9 +49,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       setUser(data.user);
       
-      // Redirect based on role
+      // Redirect based on role (case-insensitive)
       setTimeout(() => {
-        if (role === 'Admin') {
+        if (data.user.role.toLowerCase() === 'admin') {
           router.push('/admin/dashboard');
         } else {
           router.push('/salesman/dashboard');

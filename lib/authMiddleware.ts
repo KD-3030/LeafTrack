@@ -44,13 +44,15 @@ export function authenticateRequest(request: NextRequest): DecodedToken | NextRe
 }
 
 /**
- * Check if user has required role
+ * Check if user has required role (case-insensitive)
  * @param userRole - Current user's role
  * @param requiredRoles - Array of allowed roles
  * @returns Boolean indicating if user has permission
  */
 export function hasPermission(userRole: string, requiredRoles: string[]): boolean {
-  return requiredRoles.includes(userRole);
+  const normalizedUserRole = userRole?.toLowerCase();
+  const normalizedRequiredRoles = requiredRoles.map(r => r.toLowerCase());
+  return normalizedRequiredRoles.includes(normalizedUserRole);
 }
 
 /**
@@ -82,21 +84,21 @@ export function requireAuth(request: NextRequest, allowedRoles?: string[]): Deco
  * Helper function for admin-only routes
  */
 export function requireAdminAuth(request: NextRequest): DecodedToken | NextResponse {
-  return requireAuth(request, ['Admin']);
+  return requireAuth(request, ['admin']);
 }
 
 /**
  * Helper function for salesman-only routes
  */
 export function requireSalesmanAuth(request: NextRequest): DecodedToken | NextResponse {
-  return requireAuth(request, ['Salesman']);
+  return requireAuth(request, ['salesman']);
 }
 
 /**
  * Helper function for routes accessible to both Admin and Salesman
  */
 export function requireUserAuth(request: NextRequest): DecodedToken | NextResponse {
-  return requireAuth(request, ['Admin', 'Salesman']);
+  return requireAuth(request, ['admin', 'salesman']);
 }
 
 /**
@@ -117,7 +119,7 @@ export function requireAuthWithUserFilter(
   const userFilter: Record<string, string> = {};
   
   // If user is a salesman, filter data to their own records
-  if (authResult.role === 'Salesman') {
+  if (authResult.role?.toLowerCase() === 'salesman') {
     userFilter.salesman_id = authResult.userId;
   }
   // Admins get no filter (can see all data)
