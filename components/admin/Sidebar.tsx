@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, BarChart3, UserCheck, Settings, DollarSign, Package, Users, FileText, MapPin } from 'lucide-react';
+import { LayoutDashboard, BarChart3, UserCheck, Settings, DollarSign, Package, Users, FileText, MapPin, ShoppingCart, PackageX } from 'lucide-react';
 
 const navigation = [
   {
@@ -15,6 +15,16 @@ const navigation = [
     name: 'Products',             //need to fix the pricing and stock feature
     href: '/admin/products',
     icon: Package,
+  },
+  {
+    name: 'Purchases',
+    href: '/admin/purchases',
+    icon: ShoppingCart,
+  },
+  {
+    name: 'Purchase Returns',
+    href: '/admin/purchase-returns',
+    icon: PackageX,
   },
   {
     name: 'Salesmen',

@@ -1,13 +1,14 @@
 {
+  "/api/auth/login/route": "app/api/auth/login/route.js",
+  "/page": "app/page.js",
+  "/api/users/route": "app/api/users/route.js",
   "/login/page": "app/login/page.js",
-  "/api/customers/[id]/transactions/route": "app/api/customers/[id]/transactions/route.js",
-  "/api/financial/stats/route": "app/api/financial/stats/route.js",
-  "/api/financial/outstanding/route": "app/api/financial/outstanding/route.js",
-  "/api/payments/route": "app/api/payments/route.js",
-  "/api/payments/[id]/route": "app/api/payments/[id]/route.js",
-  "/api/customers/route": "app/api/customers/route.js",
-  "/admin/customers/page": "app/admin/customers/page.js",
-  "/admin/reports/page": "app/admin/reports/page.js",
-  "/admin/financial/page": "app/admin/financial/page.js",
-  "/admin/invoicing/page": "app/admin/invoicing/page.js"
+  "/api/locations/route": "app/api/locations/route.js",
+  "/api/products/route": "app/api/products/route.js",
+  "/api/purchases/route": "app/api/purchases/route.js",
+  "/api/assignments/route": "app/api/assignments/route.js",
+  "/api/purchase-returns/route": "app/api/purchase-returns/route.js",
+  "/admin/dashboard/page": "app/admin/dashboard/page.js",
+  "/admin/purchases/page": "app/admin/purchases/page.js",
+  "/admin/purchase-returns/page": "app/admin/purchase-returns/page.js"
 }
