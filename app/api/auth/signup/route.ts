@@ -33,12 +33,15 @@ export async function POST(request: NextRequest) {
     // Hash password
     const hashedPassword = await hashPassword(password);
 
-    // Create user (store role in lowercase)
+    // Normalize role to match schema enum: 'Admin', 'Salesman', 'Customer'
+    const normalizedRole = role.charAt(0).toUpperCase() + role.slice(1).toLowerCase();
+
+    // Create user with normalized role
     const user = await UserModel.create({
       name,
       email,
       password: hashedPassword,
-      role: role.toLowerCase(),
+      role: normalizedRole,
     });
 
     // Generate token with user name

@@ -3,6 +3,9 @@ import connectDB from '@/lib/mongodb';
 import Purchase from '@/models/Purchase';
 import { verifyToken } from '@/lib/auth';
 
+// Force dynamic rendering for this route
+export const dynamic = 'force-dynamic';
+
 // GET /api/purchase-returns/purchases - Get all purchases for dropdown
 export async function GET(request: NextRequest) {
   try {

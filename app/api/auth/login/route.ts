@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
 
     // Validate input
     if (!email || !password || !role) {
+      console.log('❌ Missing required fields');
       return NextResponse.json(
         { error: 'All fields are required' },
         { status: 400 }
@@ -28,26 +29,43 @@ export async function POST(request: NextRequest) {
     }
 
     // Find user (case-insensitive role check)
+    // Capitalize first letter to match schema enum: 'Admin', 'Salesman', 'Customer'
+    const normalizedRole = role.charAt(0).toUpperCase() + role.slice(1).toLowerCase();
+    
+    console.log('🔐 Login attempt:', { email, role: normalizedRole, hasPassword: !!password });
+    
     const UserModel = User as Model<IUser>;
     const user = await UserModel.findOne({ 
       email, 
-      role: role.toLowerCase() 
+      role: normalizedRole 
     });
+    
     if (!user) {
+      console.log('❌ User not found or role mismatch:', { email, role: normalizedRole });
+      // Check if user exists with different role
+      const userWithEmail = await UserModel.findOne({ email });
+      if (userWithEmail) {
+        console.log('⚠️ User exists but with role:', userWithEmail.role);
+      }
       return NextResponse.json(
         { error: 'Invalid credentials or role mismatch' },
         { status: 401 }
       );
     }
 
+    console.log('✅ User found:', { email, role: user.role });
+
     // Verify password
     const isValidPassword = await comparePassword(password, user.password);
     if (!isValidPassword) {
+      console.log('❌ Invalid password for user:', email);
       return NextResponse.json(
         { error: 'Invalid credentials' },
         { status: 401 }
       );
     }
+
+    console.log('✅ Password verified for user:', email);
 
     // Generate token with user name
     const token = generateToken((user._id as string).toString(), user.role, user.name);

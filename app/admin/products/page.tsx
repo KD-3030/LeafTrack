@@ -42,14 +42,17 @@ export default function ProductsPage() {
       const response = await fetch('/api/products');
       const data = await response.json();
       
+      console.log('📦 Products API Response:', data);
+      
       if (data.success) {
+        console.log('✅ Products loaded:', data.products.length);
         setProducts(data.products);
-        toast.success('Products loaded successfully');
       } else {
+        console.error('❌ Failed to load products:', data.error);
         toast.error('Failed to load products');
       }
     } catch (error) {
-      console.error('Error loading products:', error);
+      console.error('❌ Error loading products:', error);
       toast.error('Error loading products');
     } finally {
       setIsLoading(false);
