@@ -36,7 +36,9 @@ import {
   Package,
   Edit,
   Trash2,
+  Download,
 } from 'lucide-react';
+import { generateOrderBillPDF } from '@/lib/pdfGenerator';
 
 interface OrderItem {
   product_id?: string;
@@ -161,6 +163,16 @@ export default function AdminOrdersPage() {
   const handleView = (order: Order) => {
     setSelectedOrder(order);
     setIsViewDialogOpen(true);
+  };
+
+  const handleDownloadPDF = async (order: Order) => {
+    try {
+      await generateOrderBillPDF(order);
+      toast.success('Order bill downloaded successfully!');
+    } catch (error) {
+      console.error('Error downloading order bill:', error);
+      toast.error('Failed to download order bill');
+    }
   };
 
   const handleOpenApproval = (order: Order) => {
@@ -528,14 +540,24 @@ export default function AdminOrdersPage() {
                           variant="ghost"
                           size="icon"
                           onClick={() => handleView(order)}
+                          title="View Details"
                         >
                           <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDownloadPDF(order)}
+                          title="Download Bill"
+                        >
+                          <Download className="h-4 w-4 text-blue-600" />
                         </Button>
                         {order.status === 'pending' && (
                           <Button
                             variant="ghost"
                             size="icon"
                             onClick={() => handleOpenApproval(order)}
+                            title="Approve/Edit"
                           >
                             <Edit className="h-4 w-4 text-green-600" />
                           </Button>
@@ -544,6 +566,7 @@ export default function AdminOrdersPage() {
                           variant="ghost"
                           size="icon"
                           onClick={() => handleDelete(order._id)}
+                          title="Delete Order"
                         >
                           <Trash2 className="h-4 w-4 text-red-500" />
                         </Button>

@@ -27,7 +27,9 @@ import {
   IndianRupee,
   Package,
   Calendar,
+  Download,
 } from 'lucide-react';
+import { generateOrderBillPDF } from '@/lib/pdfGenerator';
 
 interface OrderItem {
   product_name: string;
@@ -109,6 +111,29 @@ export default function SalesmanOrdersPage() {
       toast.error('Failed to fetch orders');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDownloadPDF = async (order: Order) => {
+    try {
+      // Add missing fields for PDF generation
+      const orderForPDF = {
+        ...order,
+        salesman_id: order._id, // Use order ID as fallback
+        salesman_name: 'Salesman', // Will be filled from actual data
+        tax_percentage: order.tax_amount > 0 ? (order.tax_amount / order.subtotal) * 100 : 0,
+        customer_address: '',
+        customer_gstin: '',
+        customer_email: '',
+        delivery_date: '',
+        payment_terms: '',
+      };
+      
+      await generateOrderBillPDF(orderForPDF as typeof order & { salesman_id: string; salesman_name: string; tax_percentage: number });
+      toast.success('Order bill downloaded successfully!');
+    } catch (error) {
+      console.error('Error downloading order bill:', error);
+      toast.error('Failed to download order bill');
     }
   };
 
@@ -348,8 +373,17 @@ export default function SalesmanOrdersPage() {
                           variant="ghost"
                           size="icon"
                           onClick={() => router.push(`/salesman/orders/${order._id}`)}
+                          title="View Details"
                         >
                           <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDownloadPDF(order)}
+                          title="Download Bill"
+                        >
+                          <Download className="h-4 w-4 text-blue-600" />
                         </Button>
                         {order.status === 'pending' && (
                           <>
@@ -357,6 +391,7 @@ export default function SalesmanOrdersPage() {
                               variant="ghost"
                               size="icon"
                               onClick={() => router.push(`/salesman/orders/${order._id}/edit`)}
+                              title="Edit Order"
                             >
                               <Edit className="h-4 w-4" />
                             </Button>
@@ -364,6 +399,7 @@ export default function SalesmanOrdersPage() {
                               variant="ghost"
                               size="icon"
                               onClick={() => handleDelete(order._id)}
+                              title="Delete Order"
                             >
                               <Trash2 className="h-4 w-4 text-red-500" />
                             </Button>

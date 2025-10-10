@@ -29,15 +29,15 @@ export async function GET(request: NextRequest) {
     // Create default settings if none exist
     if (!settings) {
       settings = await CompanySettingsModel.create({
-        company_name: 'LeafTrack Tea Distribution',
-        address: '123 Tea Garden Road',
-        city: 'Darjeeling',
+        company_name: 'Sohagtea Trading Company',
+        address: 'Tea Estate Road, Bagdogra',
+        city: 'Siliguri',
         state: 'West Bengal',
-        pincode: '734101',
-        phone: '+91-9876543210',
-        email: 'info@leaftrack.com',
-        gstin: '19AAAAA0000A1Z5',
-        pan: 'AAAAA0000A',
+        pincode: '734421',
+        phone: '+91 98765 43210',
+        email: 'info@sohagtea.com',
+        gstin: '19ABCDE1234F1Z5',
+        pan: 'ABCDE1234F',
       });
     }
 

@@ -1264,7 +1264,7 @@ export default function InvoicingPage() {
                               
                               const data = await response.json();
                               if (data.success && data.invoice) {
-                                const success = generateInvoicePDF(data.invoice);
+                                const success = await generateInvoicePDF(data.invoice);
                                 if (success) {
                                   toast({
                                     title: "Success",

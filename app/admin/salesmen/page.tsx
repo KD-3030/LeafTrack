@@ -661,7 +661,7 @@ export default function SalesmenPage() {
                         </TableCell>
                         <TableCell>
                           <div className="text-sm">
-                            {order.products.map((p, idx) => (
+                            {(order.products || []).map((p, idx) => (
                               <div key={idx} className="text-gray-600">
                                 {p.product_name} x {p.quantity}
                               </div>
