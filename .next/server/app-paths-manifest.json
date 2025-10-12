@@ -1,8 +1,12 @@
 {
+  "/login/page": "app/login/page.js",
+  "/api/products/route": "app/api/products/route.js",
+  "/api/users/route": "app/api/users/route.js",
+  "/api/locations/route": "app/api/locations/route.js",
+  "/api/orders/route": "app/api/orders/route.js",
   "/api/settings/company/route": "app/api/settings/company/route.js",
-  "/admin/settings/page": "app/admin/settings/page.js",
-  "/admin/reports/orders/page": "app/admin/reports/orders/page.js",
+  "/admin/dashboard/page": "app/admin/dashboard/page.js",
+  "/admin/salesmen/page": "app/admin/salesmen/page.js",
   "/admin/orders/page": "app/admin/orders/page.js",
-  "/admin/invoicing/page": "app/admin/invoicing/page.js",
-  "/admin/dashboard/page": "app/admin/dashboard/page.js"
+  "/admin/reports/orders/page": "app/admin/reports/orders/page.js"
 }

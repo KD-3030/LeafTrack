@@ -148,16 +148,16 @@ export async function generateInvoicePDF(invoice: Invoice) {
       }
     }
 
-    // Company Name
+    // Company Name - Always from database settings
     pdf.setTextColor(255, 255, 255);
-    pdf.setFontSize(22);
-    pdf.setFont('helvetica', 'bold');
-    const companyName = companySettings?.company_name || invoice.company_details?.name || 'Sohagtea Trading Company';
+    pdf.setFontSize(20);
+    pdf.setFont('times', 'bold');
+    const companyName = companySettings?.company_name || 'Sohagtea Company';
     pdf.text(companyName, 15, 18);
 
     // Company Details
-    pdf.setFontSize(8);
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(9);
+    pdf.setFont('times', 'normal');
     const companyInfo = [];
     
     // Use company settings from database if available
@@ -166,24 +166,28 @@ export async function generateInvoicePDF(invoice: Invoice) {
       invoice.company_details?.address;
     const phone = companySettings?.phone || invoice.company_details?.phone;
     const email = companySettings?.email || invoice.company_details?.email;
-    const gstin = companySettings?.gstin || invoice.company_details?.gstin;
+    const companyGstin = companySettings?.gstin || invoice.company_details?.gstin;
     
     if (address) companyInfo.push(address);
     if (phone) companyInfo.push(`Tel: ${phone}`);
     if (email) companyInfo.push(email);
-    if (gstin) companyInfo.push(`GSTIN: ${gstin}`);
+    if (companyGstin) companyInfo.push(`GSTIN: ${companyGstin}`);
     
     if (companyInfo.length > 0) {
-      pdf.text(companyInfo[0], 15, 25);
+      pdf.text(companyInfo[0], 15, 26);
       if (companyInfo.length > 1) {
-        const line2 = companyInfo.slice(1).join(' • ');
-        pdf.text(line2, 15, 29);
+        const line2 = companyInfo.slice(1).join(' | ');
+        pdf.text(line2, 15, 31);
+      }
+      if (companyInfo.length > 2) {
+        const line3 = companyInfo.slice(2).join(' | ');
+        pdf.text(line3, 15, 35);
       }
     }
 
     // INVOICE Title
-    pdf.setFontSize(26);
-    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(24);
+    pdf.setFont('times', 'bold');
     pdf.text('INVOICE', pageWidth - 15, 28, { align: 'right' });
 
     // ==================== STATUS & DETAILS SECTION ====================
@@ -202,7 +206,7 @@ export async function generateInvoicePDF(invoice: Invoice) {
     pdf.roundedRect(badgeX, yPosition, badgeWidth, 9, 2, 2, 'F');
     pdf.setTextColor(255, 255, 255);
     pdf.setFontSize(9);
-    pdf.setFont('helvetica', 'bold');
+    pdf.setFont('times', 'bold');
     pdf.text(paymentStatusText, badgeX + badgeWidth / 2, yPosition + 6, { align: 'center' });
 
     // ==================== INFO BOXES ====================
@@ -222,24 +226,24 @@ export async function generateInvoicePDF(invoice: Invoice) {
     
     pdf.setTextColor(255, 255, 255);
     pdf.setFontSize(9);
-    pdf.setFont('helvetica', 'bold');
+    pdf.setFont('times', 'bold');
     pdf.text('INVOICE INFORMATION', 20, yPosition + 5.5);
     
     // Content
     yPosition += 14;
     pdf.setFontSize(8);
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFont('times', 'normal');
     pdf.setTextColor(...textLight);
     
     pdf.text('Invoice No.', 20, yPosition);
     pdf.setTextColor(...textDark);
-    pdf.setFont('helvetica', 'bold');
+    pdf.setFont('times', 'bold');
     pdf.setFontSize(9);
     pdf.text(invoice.invoice_number, 50, yPosition);
     
     yPosition += 6;
     pdf.setFontSize(8);
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFont('times', 'normal');
     pdf.setTextColor(...textLight);
     pdf.text('Issue Date', 20, yPosition);
     pdf.setTextColor(...textDark);
@@ -275,25 +279,29 @@ export async function generateInvoicePDF(invoice: Invoice) {
     
     pdf.setTextColor(255, 255, 255);
     pdf.setFontSize(9);
-    pdf.setFont('helvetica', 'bold');
+    pdf.setFont('times', 'bold');
     pdf.text('BILL TO', 113, yPosition + 5.5);
     
     // Content
     yPosition += 14;
     pdf.setTextColor(...textDark);
     pdf.setFontSize(10);
-    pdf.setFont('helvetica', 'bold');
+    pdf.setFont('times', 'bold');
     const customerName = invoice.customer_details.name.length > 25 ? 
       invoice.customer_details.name.substring(0, 22) + '...' : invoice.customer_details.name;
     pdf.text(customerName, 113, yPosition);
     
     yPosition += 6;
     pdf.setFontSize(8);
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFont('times', 'normal');
     pdf.setTextColor(...textMedium);
+    if (invoice.customer_details.gstin) {
+      pdf.text(`GSTIN: ${invoice.customer_details.gstin}`, 113, yPosition);
+      yPosition += 4;
+    }
     if (invoice.customer_details.phone) {
-      pdf.text(`Phone: ${invoice.customer_details.phone}`, 113, yPosition);
-      yPosition += 5;
+      pdf.text(`Ph: ${invoice.customer_details.phone}`, 113, yPosition);
+      yPosition += 4;
     }
     if (invoice.customer_details.email) {
       const email = invoice.customer_details.email.length > 30 ? 
@@ -310,7 +318,7 @@ export async function generateInvoicePDF(invoice: Invoice) {
     
     pdf.setTextColor(255, 255, 255);
     pdf.setFontSize(9);
-    pdf.setFont('helvetica', 'bold');
+    pdf.setFont('times', 'bold');
     pdf.text('DESCRIPTION', 20, yPosition + 6);
     pdf.text('QTY', 130, yPosition + 6, { align: 'center' });
     pdf.text('RATE', 163, yPosition + 6, { align: 'right' });
@@ -319,7 +327,7 @@ export async function generateInvoicePDF(invoice: Invoice) {
     yPosition += 9;
 
     // Table Items
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFont('times', 'normal');
     pdf.setFontSize(9);
     let itemIndex = 0;
     const rowHeight = 9;
@@ -343,19 +351,19 @@ export async function generateInvoicePDF(invoice: Invoice) {
       const itemName = item.product_name.length > maxLength 
         ? item.product_name.substring(0, maxLength - 3) + '...' 
         : item.product_name;
-      pdf.setFont('helvetica', 'normal');
+      pdf.setFont('times', 'normal');
       pdf.text(itemName, 20, yPosition + 6);
       
       // Quantity
       pdf.text(item.quantity.toString(), 130, yPosition + 6, { align: 'center' });
       
       // Rate
-      pdf.text(`₹${item.unit_price.toFixed(2)}`, 163, yPosition + 6, { align: 'right' });
+      pdf.text(`Rs.${item.unit_price.toFixed(2)}`, 163, yPosition + 6, { align: 'right' });
       
       // Amount
-      pdf.setFont('helvetica', 'bold');
-      pdf.text(`₹${item.total_amount.toFixed(2)}`, pageWidth - 20, yPosition + 6, { align: 'right' });
-      pdf.setFont('helvetica', 'normal');
+      pdf.setFont('times', 'bold');
+      pdf.text(`Rs.${item.total_amount.toFixed(2)}`, pageWidth - 20, yPosition + 6, { align: 'right' });
+      pdf.setFont('times', 'normal');
       
       yPosition += rowHeight;
       itemIndex++;
@@ -371,31 +379,31 @@ export async function generateInvoicePDF(invoice: Invoice) {
     const totalsX = pageWidth - 75;
     
     pdf.setFontSize(9);
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFont('times', 'normal');
     
     // Subtotal
     pdf.setTextColor(...textMedium);
     pdf.text('Subtotal', totalsX, yPosition);
     pdf.setTextColor(...textDark);
-    pdf.setFont('helvetica', 'bold');
-    pdf.text(`₹${invoice.subtotal.toFixed(2)}`, pageWidth - 20, yPosition, { align: 'right' });
+    pdf.setFont('times', 'bold');
+    pdf.text(`Rs.${invoice.subtotal.toFixed(2)}`, pageWidth - 20, yPosition, { align: 'right' });
     yPosition += 6;
 
     // Paid Amount
     if (invoice.paid_amount > 0) {
-      pdf.setFont('helvetica', 'normal');
+      pdf.setFont('times', 'normal');
       pdf.setTextColor(39, 174, 96);
       pdf.text('Paid', totalsX, yPosition);
-      pdf.text(`-₹${invoice.paid_amount.toFixed(2)}`, pageWidth - 20, yPosition, { align: 'right' });
+      pdf.text(`-Rs.${invoice.paid_amount.toFixed(2)}`, pageWidth - 20, yPosition, { align: 'right' });
       yPosition += 6;
     }
 
     // Balance Due
     if (invoice.balance_due > 0) {
-      pdf.setFont('helvetica', 'normal');
+      pdf.setFont('times', 'normal');
       pdf.setTextColor(192, 57, 43);
       pdf.text('Balance Due', totalsX, yPosition);
-      pdf.text(`₹${invoice.balance_due.toFixed(2)}`, pageWidth - 20, yPosition, { align: 'right' });
+      pdf.text(`Rs.${invoice.balance_due.toFixed(2)}`, pageWidth - 20, yPosition, { align: 'right' });
       yPosition += 6;
     }
 
@@ -418,10 +426,10 @@ export async function generateInvoicePDF(invoice: Invoice) {
     
     pdf.setTextColor(255, 255, 255);
     pdf.setFontSize(10);
-    pdf.setFont('helvetica', 'bold');
+    pdf.setFont('times', 'bold');
     pdf.text('TOTAL', totalsX, yPosition + 2);
     pdf.setFontSize(12);
-    pdf.text(`₹${invoice.grand_total.toFixed(2)}`, pageWidth - 20, yPosition + 2, { align: 'right' });
+    pdf.text(`Rs.${invoice.grand_total.toFixed(2)}`, pageWidth - 20, yPosition + 2, { align: 'right' });
 
     // ==================== FOOTER ====================
     const footerY = pageHeight - 25;
@@ -433,7 +441,7 @@ export async function generateInvoicePDF(invoice: Invoice) {
     
     pdf.setFontSize(8);
     pdf.setTextColor(...textMedium);
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFont('times', 'normal');
     
     // Left - Generation info
     pdf.text(`Generated: ${new Date().toLocaleDateString('en-IN', { 
@@ -445,14 +453,14 @@ export async function generateInvoicePDF(invoice: Invoice) {
     })}`, 15, footerY + 7);
     
     // Center - Thank you
-    pdf.setFont('helvetica', 'italic');
+    pdf.setFont('times', 'italic');
     pdf.setTextColor(...accentColor);
     pdf.setFontSize(9);
     pdf.text('Thank you for your business!', pageWidth / 2, footerY + 7, { align: 'center' });
     
     // Right - Signature
     const sigX = pageWidth - 45;
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFont('times', 'normal');
     pdf.setFontSize(8);
     pdf.setTextColor(...textDark);
     pdf.text('____________________', sigX, footerY + 10, { align: 'center' });
@@ -523,16 +531,16 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
       }
     }
 
-    // Company Name - More prominent
+    // Company Name - Always from database settings
     pdf.setTextColor(255, 255, 255);
-    pdf.setFontSize(22);
-    pdf.setFont('helvetica', 'bold');
-    const companyName = companySettings?.company_name || companyDetails?.name || 'Sohagtea Trading Company';
+    pdf.setFontSize(20);
+    pdf.setFont('times', 'bold');
+    const companyName = companySettings?.company_name || 'Sohagtea Company';
     pdf.text(companyName, 15, 18);
 
     // Company Details - Better organized
-    pdf.setFontSize(8);
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(9);
+    pdf.setFont('times', 'normal');
     const companyInfo = [];
     
     // Use company settings from database if available
@@ -541,27 +549,31 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
       companyDetails?.address;
     const phone = companySettings?.phone || companyDetails?.phone;
     const email = companySettings?.email || companyDetails?.email;
-    const gstin = companySettings?.gstin || companyDetails?.gstin;
+    const companyGstin = companySettings?.gstin || companyDetails?.gstin;
     
     if (address) companyInfo.push(address);
     if (phone) companyInfo.push(`Tel: ${phone}`);
     if (email) companyInfo.push(email);
-    if (gstin) companyInfo.push(`GSTIN: ${gstin}`);
+    if (companyGstin) companyInfo.push(`GSTIN: ${companyGstin}`);
     
     if (companyInfo.length > 0) {
-      pdf.text(companyInfo[0], 15, 25);
+      pdf.text(companyInfo[0], 15, 26);
       if (companyInfo.length > 1) {
-        const line2 = companyInfo.slice(1).join(' • ');
-        pdf.text(line2, 15, 29);
+        const line2 = companyInfo.slice(1).join(' | ');
+        pdf.text(line2, 15, 31);
+      }
+      if (companyInfo.length > 2) {
+        const line3 = companyInfo.slice(2).join(' | ');
+        pdf.text(line3, 15, 35);
       }
     }
 
     // ORDER BILL Title - More elegant
-    pdf.setFontSize(26);
-    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(24);
+    pdf.setFont('times', 'bold');
     pdf.text('ORDER', pageWidth - 15, 20, { align: 'right' });
-    pdf.setFontSize(18);
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(16);
+    pdf.setFont('times', 'normal');
     pdf.text('BILL', pageWidth - 15, 28, { align: 'right' });
 
     // ==================== STATUS & DETAILS SECTION ====================
@@ -580,7 +592,7 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
     pdf.roundedRect(badgeX, yPosition, badgeWidth, 9, 2, 2, 'F');
     pdf.setTextColor(255, 255, 255);
     pdf.setFontSize(9);
-    pdf.setFont('helvetica', 'bold');
+    pdf.setFont('times', 'bold');
     pdf.text(statusText, badgeX + badgeWidth / 2, yPosition + 6, { align: 'center' });
 
     // ==================== INFO BOXES ====================
@@ -600,24 +612,24 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
     
     pdf.setTextColor(255, 255, 255);
     pdf.setFontSize(9);
-    pdf.setFont('helvetica', 'bold');
+    pdf.setFont('times', 'bold');
     pdf.text('ORDER INFORMATION', 20, yPosition + 5.5);
     
     // Order Details Content
     yPosition += 14;
     pdf.setFontSize(8);
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFont('times', 'normal');
     pdf.setTextColor(...textLight);
     
     pdf.text('Order No.', 20, yPosition);
     pdf.setTextColor(...textDark);
-    pdf.setFont('helvetica', 'bold');
+    pdf.setFont('times', 'bold');
     pdf.setFontSize(9);
     pdf.text(order.order_number, 48, yPosition);
     
     yPosition += 6;
     pdf.setFontSize(8);
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFont('times', 'normal');
     pdf.setTextColor(...textLight);
     pdf.text('Date', 20, yPosition);
     pdf.setTextColor(...textDark);
@@ -648,24 +660,28 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
     
     pdf.setTextColor(255, 255, 255);
     pdf.setFontSize(9);
-    pdf.setFont('helvetica', 'bold');
+    pdf.setFont('times', 'bold');
     pdf.text('CUSTOMER DETAILS', 113, yPosition + 5.5);
     
     // Customer Details Content
     yPosition += 14;
     pdf.setTextColor(...textDark);
     pdf.setFontSize(10);
-    pdf.setFont('helvetica', 'bold');
+    pdf.setFont('times', 'bold');
     const customerName = order.customer_name.length > 25 ? order.customer_name.substring(0, 22) + '...' : order.customer_name;
     pdf.text(customerName, 113, yPosition);
     
     yPosition += 6;
     pdf.setFontSize(8);
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFont('times', 'normal');
     pdf.setTextColor(...textMedium);
+    if (order.customer_gstin) {
+      pdf.text(`GSTIN: ${order.customer_gstin}`, 113, yPosition);
+      yPosition += 4;
+    }
     if (order.customer_contact) {
-      pdf.text(`Phone: ${order.customer_contact}`, 113, yPosition);
-      yPosition += 5;
+      pdf.text(`Ph: ${order.customer_contact}`, 113, yPosition);
+      yPosition += 4;
     }
     if (order.customer_email) {
       const email = order.customer_email.length > 30 ? order.customer_email.substring(0, 27) + '...' : order.customer_email;
@@ -681,7 +697,7 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
     
     pdf.setTextColor(255, 255, 255);
     pdf.setFontSize(9);
-    pdf.setFont('helvetica', 'bold');
+    pdf.setFont('times', 'bold');
     pdf.text('DESCRIPTION', 20, yPosition + 6);
     pdf.text('QTY', 115, yPosition + 6, { align: 'center' });
     pdf.text('UNIT', 138, yPosition + 6, { align: 'center' });
@@ -691,7 +707,7 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
     yPosition += 9;
 
     // Table Items - Enhanced styling
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFont('times', 'normal');
     pdf.setFontSize(9);
     let itemIndex = 0;
     const rowHeight = 9;
@@ -715,7 +731,7 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
       const itemName = item.product_name.length > maxLength 
         ? item.product_name.substring(0, maxLength - 3) + '...' 
         : item.product_name;
-      pdf.setFont('helvetica', 'normal');
+      pdf.setFont('times', 'normal');
       pdf.text(itemName, 20, yPosition + 6);
       
       // Quantity
@@ -729,12 +745,12 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
       // Rate
       pdf.setFontSize(9);
       pdf.setTextColor(...textDark);
-      pdf.text(`₹${item.price_per_unit.toFixed(2)}`, 163, yPosition + 6, { align: 'right' });
+      pdf.text(`Rs.${item.price_per_unit.toFixed(2)}`, 163, yPosition + 6, { align: 'right' });
       
       // Amount
-      pdf.setFont('helvetica', 'bold');
-      pdf.text(`₹${item.total_price.toFixed(2)}`, pageWidth - 20, yPosition + 6, { align: 'right' });
-      pdf.setFont('helvetica', 'normal');
+      pdf.setFont('times', 'bold');
+      pdf.text(`Rs.${item.total_price.toFixed(2)}`, pageWidth - 20, yPosition + 6, { align: 'right' });
+      pdf.setFont('times', 'normal');
       
       yPosition += rowHeight;
       itemIndex++;
@@ -751,32 +767,32 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
     const totalsBoxWidth = 60;
     
     pdf.setFontSize(9);
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFont('times', 'normal');
     
     // Subtotal
     pdf.setTextColor(...textMedium);
     pdf.text('Subtotal', totalsX, yPosition);
     pdf.setTextColor(...textDark);
-    pdf.setFont('helvetica', 'bold');
-    pdf.text(`₹${order.subtotal.toFixed(2)}`, pageWidth - 20, yPosition, { align: 'right' });
+    pdf.setFont('times', 'bold');
+    pdf.text(`Rs.${order.subtotal.toFixed(2)}`, pageWidth - 20, yPosition, { align: 'right' });
     yPosition += 6;
 
     // Tax
     if (order.tax_amount > 0) {
-      pdf.setFont('helvetica', 'normal');
+      pdf.setFont('times', 'normal');
       pdf.setTextColor(...textMedium);
       pdf.text(`Tax (${order.tax_percentage.toFixed(1)}%)`, totalsX, yPosition);
       pdf.setTextColor(...textDark);
-      pdf.text(`₹${order.tax_amount.toFixed(2)}`, pageWidth - 20, yPosition, { align: 'right' });
+      pdf.text(`Rs.${order.tax_amount.toFixed(2)}`, pageWidth - 20, yPosition, { align: 'right' });
       yPosition += 6;
     }
 
     // Discount
     if (order.discount_amount > 0) {
-      pdf.setFont('helvetica', 'normal');
+      pdf.setFont('times', 'normal');
       pdf.setTextColor(192, 57, 43);
       pdf.text('Discount', totalsX, yPosition);
-      pdf.text(`-₹${order.discount_amount.toFixed(2)}`, pageWidth - 20, yPosition, { align: 'right' });
+      pdf.text(`-Rs.${order.discount_amount.toFixed(2)}`, pageWidth - 20, yPosition, { align: 'right' });
       yPosition += 6;
     }
 
@@ -798,10 +814,10 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
     
     pdf.setTextColor(255, 255, 255);
     pdf.setFontSize(10);
-    pdf.setFont('helvetica', 'bold');
+    pdf.setFont('times', 'bold');
     pdf.text('TOTAL', totalsX, yPosition + 2);
     pdf.setFontSize(12);
-    pdf.text(`₹${order.total_amount.toFixed(2)}`, pageWidth - 20, yPosition + 2, { align: 'right' });
+    pdf.text(`Rs.${order.total_amount.toFixed(2)}`, pageWidth - 20, yPosition + 2, { align: 'right' });
 
     // ==================== ADDITIONAL INFORMATION ====================
     yPosition += 15;
@@ -819,17 +835,17 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
       
       pdf.setTextColor(...textDark);
       pdf.setFontSize(8);
-      pdf.setFont('helvetica', 'bold');
+      pdf.setFont('times', 'bold');
       pdf.text('ADDITIONAL INFORMATION', 20, yPosition + 5);
       
       let infoY = yPosition + 12;
       pdf.setFontSize(8);
       
       if (order.delivery_date) {
-        pdf.setFont('helvetica', 'bold');
+        pdf.setFont('times', 'bold');
         pdf.setTextColor(...textMedium);
         pdf.text('Delivery Date:', 20, infoY);
-        pdf.setFont('helvetica', 'normal');
+        pdf.setFont('times', 'normal');
         pdf.setTextColor(...textDark);
         pdf.text(new Date(order.delivery_date).toLocaleDateString('en-IN', { 
           day: '2-digit', 
@@ -840,10 +856,10 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
       }
       
       if (order.payment_terms) {
-        pdf.setFont('helvetica', 'bold');
+        pdf.setFont('times', 'bold');
         pdf.setTextColor(...textMedium);
         pdf.text('Payment Terms:', 20, infoY);
-        pdf.setFont('helvetica', 'normal');
+        pdf.setFont('times', 'normal');
         pdf.setTextColor(...textDark);
         const terms = order.payment_terms.length > 50 ? order.payment_terms.substring(0, 47) + '...' : order.payment_terms;
         pdf.text(terms, 52, infoY);
@@ -851,10 +867,10 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
       }
       
       if (order.notes) {
-        pdf.setFont('helvetica', 'bold');
+        pdf.setFont('times', 'bold');
         pdf.setTextColor(...textMedium);
         pdf.text('Notes:', 20, infoY);
-        pdf.setFont('helvetica', 'normal');
+        pdf.setFont('times', 'normal');
         pdf.setTextColor(...textDark);
         const notes = order.notes.length > 60 ? order.notes.substring(0, 57) + '...' : order.notes;
         pdf.text(notes, 52, infoY);
@@ -874,7 +890,7 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
     // Signature section
     pdf.setFontSize(8);
     pdf.setTextColor(...textMedium);
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFont('times', 'normal');
     
     // Left side - Generation info
     pdf.text(`Generated: ${new Date().toLocaleDateString('en-IN', { 
@@ -886,14 +902,14 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
     })}`, 15, footerY + 7);
     
     // Center - Thank you message
-    pdf.setFont('helvetica', 'italic');
+    pdf.setFont('times', 'italic');
     pdf.setTextColor(...accentColor);
     pdf.setFontSize(9);
     pdf.text('Thank you for your business!', pageWidth / 2, footerY + 7, { align: 'center' });
     
     // Right side - Signature
     const sigX = pageWidth - 45;
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFont('times', 'normal');
     pdf.setFontSize(8);
     pdf.setTextColor(...textDark);
     pdf.text('____________________', sigX, footerY + 10, { align: 'center' });
