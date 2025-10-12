@@ -26,20 +26,15 @@
       "static/chunks/main-app.js",
       "static/chunks/app/admin/layout.js"
     ],
-    "/admin/salesmen/page": [
+    "/admin/products/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/admin/salesmen/page.js"
+      "static/chunks/app/admin/products/page.js"
     ],
-    "/admin/reports/orders/page": [
+    "/admin/invoicing/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/admin/reports/orders/page.js"
-    ],
-    "/admin/orders/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/admin/orders/page.js"
+      "static/chunks/app/admin/invoicing/page.js"
     ]
   }
 }

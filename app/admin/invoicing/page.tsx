@@ -160,6 +160,12 @@ export default function InvoicingPage() {
   const [saleReturns, setSaleReturns] = useState<SaleReturn[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isManualInvoiceDialogOpen, setIsManualInvoiceDialogOpen] = useState(false);
@@ -213,18 +219,18 @@ export default function InvoicingPage() {
   });
 
   useEffect(() => {
-    loadInvoices();
+    loadInvoices(currentPage, itemsPerPage);
     loadSales();
     loadCustomers();
     loadProducts();
     loadSaleReturns();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [currentPage, itemsPerPage]);
 
-  const loadInvoices = async () => {
+  const loadInvoices = async (page = currentPage, limit = itemsPerPage) => {
     try {
       const token = localStorage.getItem('leaftrack_token');
-      const response = await fetch('/api/invoices', {
+      const response = await fetch(`/api/invoices?page=${page}&limit=${limit}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -233,6 +239,11 @@ export default function InvoicingPage() {
       const data = await response.json();
       if (data.success) {
         setInvoices(data.invoices);
+        if (data.pagination) {
+          setCurrentPage(data.pagination.currentPage);
+          setTotalPages(data.pagination.totalPages);
+          setTotalCount(data.pagination.totalCount);
+        }
       } else {
         toast({
           title: "Error",
@@ -1015,6 +1026,7 @@ export default function InvoicingPage() {
     return <Badge className={styles[status as keyof typeof styles]}>{status}</Badge>;
   };
 
+  // Show all invoices from the current page (filtering is done on client side for now)
   const filteredInvoices = invoices.filter(invoice => {
     const matchesSearch = 
       invoice.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1316,6 +1328,71 @@ export default function InvoicingPage() {
                 ))}
               </TableBody>
             </Table>
+            
+            {/* Pagination Controls */}
+            <div className="flex items-center justify-between mt-4 pt-4 border-t">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600">
+                  Showing {invoices.length > 0 ? ((currentPage - 1) * itemsPerPage) + 1 : 0} to {Math.min(currentPage * itemsPerPage, totalCount)} of {totalCount} invoices
+                </span>
+                <Select
+                  value={itemsPerPage.toString()}
+                  onValueChange={(value) => {
+                    setItemsPerPage(Number(value));
+                    setCurrentPage(1);
+                  }}
+                >
+                  <SelectTrigger className="w-[100px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="5">5 per page</SelectItem>
+                    <SelectItem value="10">10 per page</SelectItem>
+                    <SelectItem value="20">20 per page</SelectItem>
+                    <SelectItem value="50">50 per page</SelectItem>
+                    <SelectItem value="100">100 per page</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(1)}
+                  disabled={currentPage === 1}
+                >
+                  First
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                >
+                  Previous
+                </Button>
+                <span className="text-sm text-gray-600">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  Next
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={currentPage === totalPages}
+                >
+                  Last
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
 

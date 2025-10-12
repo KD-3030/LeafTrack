@@ -12,6 +12,7 @@ import { Package, Plus, Edit, Trash2, IndianRupee, Package2 } from 'lucide-react
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { PaginationControls } from '@/components/ui/pagination-controls';
 
 export default function ProductsPage() {
   const { } = useAuth();
@@ -27,10 +28,17 @@ export default function ProductsPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
 
   useEffect(() => {
     loadProducts();
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, itemsPerPage]);
 
   const getAuthToken = () => {
     return localStorage.getItem('leaftrack_token');
@@ -39,7 +47,7 @@ export default function ProductsPage() {
   const loadProducts = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch('/api/products');
+      const response = await fetch(`/api/products?page=${currentPage}&limit=${itemsPerPage}`);
       const data = await response.json();
       
       console.log('📦 Products API Response:', data);
@@ -47,6 +55,11 @@ export default function ProductsPage() {
       if (data.success) {
         console.log('✅ Products loaded:', data.products.length);
         setProducts(data.products);
+        if (data.pagination) {
+          setCurrentPage(data.pagination.currentPage);
+          setTotalPages(data.pagination.totalPages);
+          setTotalCount(data.pagination.totalCount);
+        }
       } else {
         console.error('❌ Failed to load products:', data.error);
         toast.error('Failed to load products');
@@ -368,7 +381,20 @@ export default function ProductsPage() {
                   </TableBody>
                 </Table>
                 
-                {products.length === 0 && (
+                {/* Pagination Controls */}
+                {!isLoading && products.length > 0 && (
+                  <PaginationControls
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalCount={totalCount}
+                    itemsPerPage={itemsPerPage}
+                    onPageChange={setCurrentPage}
+                    onItemsPerPageChange={setItemsPerPage}
+                    itemName="products"
+                  />
+                )}
+                
+                {products.length === 0 && !isLoading && (
                   <div className="text-center py-8">
                     <Package className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                     <h3 className="text-lg font-medium text-gray-900 mb-2">No products found</h3>
