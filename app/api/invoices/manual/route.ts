@@ -27,7 +27,9 @@ export async function POST(request: NextRequest) {
       due_date,
       payment_terms,
       notes,
-      items
+      items,
+      invoice_sequence,
+      custom_invoice_number
     } = await request.json();
 
     // Validate required fields
@@ -91,8 +93,39 @@ export async function POST(request: NextRequest) {
         const grandTotal = subtotal + totalTax;
 
         // Generate invoice number
-        const invoiceCount = await Invoice.countDocuments().session(session);
-        const invoiceNumber = `INV-${Date.now()}-${(invoiceCount + 1).toString().padStart(4, '0')}`;
+        let invoiceNumber: string;
+        
+        if (custom_invoice_number) {
+          // Use custom invoice number if provided
+          invoiceNumber = custom_invoice_number.trim();
+          
+          // Check if custom invoice number already exists
+          const existingInvoice = await Invoice.findOne({ invoice_number: invoiceNumber }).session(session);
+          if (existingInvoice) {
+            throw new Error(`Invoice number ${invoiceNumber} already exists. Please use a different number.`);
+          }
+        } else {
+          // Generate invoice number in format: INV-YYYYMMDD-XXXX
+          // Find the highest sequence number from existing invoices
+          const allInvoices = await Invoice.find({}).select('invoice_number').session(session);
+          let maxSequence = 0;
+          allInvoices.forEach(inv => {
+            const match = inv.invoice_number.match(/(\d{4})$/);
+            if (match) {
+              const seq = parseInt(match[1]);
+              if (seq > maxSequence) {
+                maxSequence = seq;
+              }
+            }
+          });
+          
+          // Allow custom sequence number or use next available
+          const customSequence = invoice_sequence ? parseInt(invoice_sequence.toString()) : null;
+          const sequenceNumber = customSequence || (maxSequence + 1);
+          
+          const dateStr = new Date(invoice_date).toISOString().split('T')[0].replace(/-/g, ''); // YYYYMMDD
+          invoiceNumber = `INV-${dateStr}-${sequenceNumber.toString().padStart(4, '0')}`;
+        }
 
         // Create manual invoice
         const invoice = new Invoice({

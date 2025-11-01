@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { FileText, Plus, Search, Edit, Download, RefreshCw, DollarSign, TrendingUp, AlertCircle, Calendar, Filter, Eye, ArrowLeft, Trash2 } from 'lucide-react';
+import { FileText, Plus, Search, Edit, Download, RefreshCw, DollarSign, TrendingUp, AlertCircle, Calendar, Filter, Eye, ArrowLeft, Trash2, Edit2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { generateInvoicePDF } from '@/lib/pdfGenerator';
 
@@ -106,6 +106,7 @@ interface ManualInvoiceForm {
   payment_terms: string;
   notes?: string;
   items: ManualInvoiceItem[];
+  invoice_sequence?: string; // Custom sequence number (last 4 digits)
 }
 
 interface SaleReturn {
@@ -185,6 +186,13 @@ export default function InvoicingPage() {
     notes: '',
     items: []
   });
+  const [previewInvoiceNumber, setPreviewInvoiceNumber] = useState<string>('');
+  const [invoiceSequence, setInvoiceSequence] = useState<string>(''); // Custom sequence number
+  const [maxSequenceNumber, setMaxSequenceNumber] = useState<number>(0);
+  const [customInvoiceNumber, setCustomInvoiceNumber] = useState<string>(''); // Full custom invoice number
+  const [isEditingFullInvoiceNumber, setIsEditingFullInvoiceNumber] = useState(false); // Toggle for editing mode
+  const [isEditingExistingInvoiceNumber, setIsEditingExistingInvoiceNumber] = useState(false); // For editing existing invoice
+  const [editedInvoiceNumber, setEditedInvoiceNumber] = useState<string>(''); // New invoice number for existing invoice
   const [selectedProduct, setSelectedProduct] = useState('');
   const [itemQuantity, setItemQuantity] = useState(1);
   const [itemUnitPrice, setItemUnitPrice] = useState(0);
@@ -226,6 +234,14 @@ export default function InvoicingPage() {
     loadSaleReturns();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, itemsPerPage]);
+
+  // Fetch preview invoice number when manual invoice dialog opens or date/sequence changes
+  useEffect(() => {
+    if (isManualInvoiceDialogOpen) {
+      fetchPreviewInvoiceNumber();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isManualInvoiceDialogOpen, manualInvoiceForm.invoice_date, invoiceSequence]);
 
   const loadInvoices = async (page = currentPage, limit = itemsPerPage) => {
     try {
@@ -374,6 +390,31 @@ export default function InvoicingPage() {
         description: "Failed to load sale returns",
         variant: "destructive",
       });
+    }
+  };
+
+  const fetchPreviewInvoiceNumber = async (date?: string, customSequence?: string) => {
+    try {
+      const invoiceDate = date || manualInvoiceForm.invoice_date;
+      const sequenceParam = customSequence || invoiceSequence;
+      const url = sequenceParam 
+        ? `/api/invoices/preview-number?date=${invoiceDate}&sequence=${sequenceParam}`
+        : `/api/invoices/preview-number?date=${invoiceDate}`;
+      
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      if (data.success) {
+        setPreviewInvoiceNumber(data.invoice_number);
+        setMaxSequenceNumber(data.max_sequence);
+        
+        // If no custom sequence is set, update it with the next available
+        if (!invoiceSequence) {
+          setInvoiceSequence(data.next_sequence.toString());
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching preview invoice number:', error);
     }
   };
 
@@ -757,6 +798,15 @@ export default function InvoicingPage() {
         return;
       }
 
+      if (isEditingFullInvoiceNumber && !customInvoiceNumber.trim()) {
+        toast({
+          title: "Error",
+          description: "Please enter a custom invoice number or switch back to sequence mode",
+          variant: "destructive",
+        });
+        return;
+      }
+
       const token = localStorage.getItem('leaftrack_token');
       const response = await fetch('/api/invoices/manual', {
         method: 'POST',
@@ -764,7 +814,11 @@ export default function InvoicingPage() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify(manualInvoiceForm),
+        body: JSON.stringify({
+          ...manualInvoiceForm,
+          invoice_sequence: !isEditingFullInvoiceNumber && invoiceSequence ? parseInt(invoiceSequence) : undefined,
+          custom_invoice_number: isEditingFullInvoiceNumber && customInvoiceNumber ? customInvoiceNumber : undefined
+        }),
       });
 
       const data = await response.json();
@@ -782,6 +836,10 @@ export default function InvoicingPage() {
           notes: '',
           items: []
         });
+        setInvoiceSequence(''); // Reset sequence number
+        setPreviewInvoiceNumber(''); // Reset preview
+        setCustomInvoiceNumber(''); // Reset custom invoice number
+        setIsEditingFullInvoiceNumber(false); // Reset editing mode
         loadInvoices();
       } else {
         toast({
@@ -1448,7 +1506,13 @@ export default function InvoicingPage() {
         </Dialog>
 
         {/* View Invoice Dialog */}
-        <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
+        <Dialog open={isViewDialogOpen} onOpenChange={(open) => {
+          setIsViewDialogOpen(open);
+          if (!open) {
+            setIsEditingExistingInvoiceNumber(false);
+            setEditedInvoiceNumber('');
+          }
+        }}>
           <DialogContent className="max-w-4xl">
             <DialogHeader>
               <DialogTitle>
@@ -1459,7 +1523,7 @@ export default function InvoicingPage() {
             {selectedInvoice && (
               <div className="space-y-6">
                 {/* Invoice Header */}
-                <div className="grid grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <h3 className="font-semibold text-lg mb-2">Customer Details</h3>
                     <div className="space-y-1">
@@ -1554,6 +1618,68 @@ export default function InvoicingPage() {
                 Create a custom invoice with selected customers and products
               </DialogDescription>
             </DialogHeader>
+
+            {/* Preview Invoice Number with Edit Options */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-5 w-5 text-blue-600" />
+                  <p className="text-sm font-medium text-blue-900">Invoice Number</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditingFullInvoiceNumber(!isEditingFullInvoiceNumber);
+                    if (!isEditingFullInvoiceNumber) {
+                      // Switching to full edit mode - populate with current preview
+                      setCustomInvoiceNumber(previewInvoiceNumber || '');
+                    }
+                  }}
+                  className="text-xs text-blue-600 hover:text-blue-800 underline"
+                >
+                  {isEditingFullInvoiceNumber ? 'Edit Sequence Only' : 'Edit Full Invoice Number'}
+                </button>
+              </div>
+              
+              {!isEditingFullInvoiceNumber ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <p className="text-lg font-bold text-blue-700">
+                      {previewInvoiceNumber ? previewInvoiceNumber.split('-').slice(0, 2).join('-') + '-' : 'INV-YYYYMMDD-'}
+                    </p>
+                    <input
+                      type="text"
+                      value={invoiceSequence}
+                      onChange={(e) => {
+                        const value = e.target.value.replace(/\D/g, '').slice(0, 4);
+                        setInvoiceSequence(value);
+                      }}
+                      placeholder="0000"
+                      maxLength={4}
+                      className="w-20 px-2 py-1 text-lg font-bold text-blue-700 border-2 border-blue-300 rounded focus:outline-none focus:border-blue-500 text-center"
+                    />
+                  </div>
+                  
+                  <p className="text-xs text-gray-600 mt-2">
+                    Next available: <span className="font-semibold">{(maxSequenceNumber + 1).toString().padStart(4, '0')}</span>
+                    {' '} | Highest used: <span className="font-semibold">{maxSequenceNumber.toString().padStart(4, '0')}</span>
+                  </p>
+                </>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    value={customInvoiceNumber}
+                    onChange={(e) => setCustomInvoiceNumber(e.target.value.toUpperCase())}
+                    placeholder="INV-YYYYMMDD-XXXX or custom format"
+                    className="w-full px-3 py-2 text-lg font-bold text-blue-700 border-2 border-blue-300 rounded focus:outline-none focus:border-blue-500"
+                  />
+                  <p className="text-xs text-amber-600 mt-2">
+                    ⚠️ Custom format: Enter any invoice number. Make sure it's unique!
+                  </p>
+                </>
+              )}
+            </div>
             
             <div className="space-y-6">
               {/* Customer and Invoice Details */}
@@ -2031,7 +2157,7 @@ export default function InvoicingPage() {
                     <CardTitle className="text-lg">Customer Information</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <Label htmlFor="customerName">Customer Name *</Label>
                         <Input
@@ -2218,7 +2344,7 @@ export default function InvoicingPage() {
                     <CardTitle className="text-lg">Return Details</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <Label htmlFor="returnReason">Return Reason *</Label>
                         <Textarea
@@ -2258,7 +2384,7 @@ export default function InvoicingPage() {
                     <CardTitle className="text-lg">Customer & Invoice Details</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <p><strong>Customer:</strong> {selectedReturnInvoice.customer_details.name}</p>
                         <p><strong>Email:</strong> {selectedReturnInvoice.customer_details.email}</p>
@@ -2416,10 +2542,94 @@ export default function InvoicingPage() {
                     <CardTitle className="text-sm">Invoice Information</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <Label className="text-sm text-gray-600">Invoice Number</Label>
-                        <p className="font-medium">{selectedInvoice.invoice_number}</p>
+                        {isEditingExistingInvoiceNumber ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={editedInvoiceNumber}
+                              onChange={(e) => setEditedInvoiceNumber(e.target.value.toUpperCase())}
+                              className="flex-1 px-2 py-1 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                              placeholder="Enter new invoice number"
+                            />
+                            <Button
+                              size="sm"
+                              onClick={async () => {
+                                if (!editedInvoiceNumber.trim()) {
+                                  toast({
+                                    title: "Error",
+                                    description: "Invoice number cannot be empty",
+                                    variant: "destructive"
+                                  });
+                                  return;
+                                }
+                                
+                                try {
+                                  const token = localStorage.getItem('leaftrack_token');
+                                  const response = await fetch(`/api/invoices/${selectedInvoice._id}/update-number`, {
+                                    method: 'PATCH',
+                                    headers: {
+                                      'Content-Type': 'application/json',
+                                      'Authorization': `Bearer ${token}`
+                                    },
+                                    body: JSON.stringify({ new_invoice_number: editedInvoiceNumber })
+                                  });
+                                  
+                                  const data = await response.json();
+                                  if (data.success) {
+                                    toast({
+                                      title: "Success",
+                                      description: "Invoice number updated successfully"
+                                    });
+                                    setIsEditingExistingInvoiceNumber(false);
+                                    loadInvoices();
+                                    setIsViewDialogOpen(false);
+                                  } else {
+                                    toast({
+                                      title: "Error",
+                                      description: data.error || "Failed to update invoice number",
+                                      variant: "destructive"
+                                    });
+                                  }
+                                } catch (error) {
+                                  toast({
+                                    title: "Error",
+                                    description: "Failed to update invoice number",
+                                    variant: "destructive"
+                                  });
+                                }
+                              }}
+                            >
+                              Save
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setIsEditingExistingInvoiceNumber(false);
+                                setEditedInvoiceNumber(selectedInvoice.invoice_number);
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium">{selectedInvoice.invoice_number}</p>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setIsEditingExistingInvoiceNumber(true);
+                                setEditedInvoiceNumber(selectedInvoice.invoice_number);
+                              }}
+                            >
+                              <Edit2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        )}
                       </div>
                       <div>
                         <Label className="text-sm text-gray-600">Customer</Label>

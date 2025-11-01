@@ -10,7 +10,7 @@ export default function SalesmanLayout({
     <ProtectedRoute allowedRoles={['salesman']}>
       <div className="min-h-screen bg-[#F5F5DC]">
         <Navigation />
-        <main className="max-w-7xl mx-auto p-6">
+        <main className="w-full mx-auto px-4 py-4 sm:px-6 sm:py-6 lg:px-8 lg:py-8 max-w-7xl overflow-x-hidden">
           {children}
         </main>
       </div>

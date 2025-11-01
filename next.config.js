@@ -14,6 +14,8 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  // Skip font optimization during build (useful for offline builds)
+  optimizeFonts: false,
   // Webpack configuration to fix caching issues on Windows/OneDrive
   webpack: (config) => {
     // Disable webpack caching to avoid ENOENT errors on Windows with OneDrive

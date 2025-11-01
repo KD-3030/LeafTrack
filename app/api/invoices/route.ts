@@ -274,9 +274,24 @@ export async function POST(request: NextRequest) {
       total_amount: totalAmount,
     };
 
-    // Generate invoice number
-    const invoiceCount = await Invoice.countDocuments();
-    const invoiceNumber = `INV${new Date().getFullYear()}${String(invoiceCount + 1).padStart(4, '0')}`;
+    // Generate invoice number in format: INV-YYYYMMDD-XXXX
+    // Find the highest sequence number from existing invoices
+    const allInvoices = await Invoice.find({}).select('invoice_number');
+    let maxSequence = 0;
+    allInvoices.forEach(inv => {
+      const match = inv.invoice_number.match(/(\d{4})$/);
+      if (match) {
+        const seq = parseInt(match[1]);
+        if (seq > maxSequence) {
+          maxSequence = seq;
+        }
+      }
+    });
+    
+    const nextSequence = maxSequence + 1;
+    const invoiceDate = new Date();
+    const dateStr = invoiceDate.toISOString().split('T')[0].replace(/-/g, ''); // YYYYMMDD
+    const invoiceNumber = `INV-${dateStr}-${String(nextSequence).padStart(4, '0')}`;
 
     // Create invoice
     const invoice = new Invoice({

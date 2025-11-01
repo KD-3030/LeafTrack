@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, BarChart3, UserCheck, Settings, DollarSign, Package, Users, FileText, MapPin, ShoppingCart, PackageX, Boxes, Layers } from 'lucide-react';
+import { LayoutDashboard, BarChart3, UserCheck, Settings, DollarSign, Package, Users, FileText, MapPin, ShoppingCart, PackageX, Boxes, Layers, Menu, X } from 'lucide-react';
+import { useState } from 'react';
 
 const navigation = [
   {
@@ -81,14 +82,40 @@ const financialNavigation = [
 
 export function AdminSidebar() {
   const pathname = usePathname();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const toggleMobileMenu = () => setIsMobileMenuOpen(!isMobileMenuOpen);
 
   return (
-    <div className="w-64 bg-white border-r border-gray-200 min-h-screen">
-      <div className="p-6">
-        <h2 className="text-lg font-semibold text-gray-900">SohagTea Admin</h2>
-      </div>
-      
-      <nav className="mt-6">
+    <>
+      {/* Mobile Menu Button */}
+      <button
+        onClick={toggleMobileMenu}
+        className="md:hidden fixed top-20 left-4 z-50 p-2 bg-white rounded-lg shadow-lg border border-gray-200"
+        aria-label="Toggle menu"
+      >
+        {isMobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+      </button>
+
+      {/* Overlay for mobile */}
+      {isMobileMenuOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black bg-opacity-50 z-30"
+          onClick={toggleMobileMenu}
+        />
+      )}
+
+      {/* Sidebar */}
+      <div className={cn(
+        "fixed md:relative md:translate-x-0 transition-transform duration-300 ease-in-out z-40",
+        "w-64 bg-white border-r border-gray-200 min-h-screen",
+        isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+      )}>
+        <div className="p-6">
+          <h2 className="text-lg font-semibold text-gray-900">SohagTea Admin</h2>
+        </div>
+        
+        <nav className="mt-6 pb-20 overflow-y-auto max-h-[calc(100vh-100px)]">
         <div className="px-3">
           {navigation.map((item) => {
             const isActive = pathname === item.href;
@@ -165,5 +192,6 @@ export function AdminSidebar() {
         </div>
       </nav>
     </div>
+    </>
   );
 }

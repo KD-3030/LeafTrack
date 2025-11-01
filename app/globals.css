@@ -166,3 +166,50 @@
   background: transparent !important;
   border: none !important;
 }
+
+/* Responsive utilities */
+@layer utilities {
+  /* Responsive table wrapper */
+  .table-responsive {
+    @apply w-full overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0;
+  }
+
+  /* Responsive cards on mobile */
+  .card-responsive {
+    @apply rounded-none sm:rounded-lg;
+  }
+
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Responsive text sizes */
+  .text-responsive-sm {
+    @apply text-xs sm:text-sm;
+  }
+  .text-responsive-base {
+    @apply text-sm sm:text-base;
+  }
+  .text-responsive-lg {
+    @apply text-base sm:text-lg;
+  }
+  .text-responsive-xl {
+    @apply text-lg sm:text-xl;
+  }
+
+  /* Responsive spacing */
+  .spacing-responsive {
+    @apply space-y-4 md:space-y-6;
+  }
+
+  /* Mobile-friendly buttons */
+  .btn-responsive {
+    @apply text-sm px-3 py-2 sm:text-base sm:px-4;
+  }
+}
+
