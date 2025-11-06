@@ -1,5 +1,6 @@
 // lib/pdfGenerator.ts
 import { jsPDF } from 'jspdf';
+import 'jspdf-autotable';
 
 // Helper function to fetch company settings
 async function fetchCompanySettings() {
@@ -374,48 +375,109 @@ export async function generateInvoicePDF(invoice: Invoice) {
     pdf.setLineWidth(0.5);
     pdf.line(15, yPosition, pageWidth - 15, yPosition);
 
-    // ==================== TOTALS SECTION ====================
+    // ==================== BALANCE & TOTALS SECTION ====================
     yPosition += 8;
+    
+    // Left side - Balance Due Box (if applicable)
+    if (invoice.balance_due > 0 || invoice.paid_amount > 0) {
+      const balanceBoxX = 15;
+      const balanceBoxWidth = 85;
+      const balanceBoxHeight = 35;
+      
+      // Balance box with accent color
+      pdf.setDrawColor(...borderColor);
+      pdf.setLineWidth(0.5);
+      pdf.setFillColor(255, 243, 205); // Light yellow/orange background
+      pdf.roundedRect(balanceBoxX, yPosition, balanceBoxWidth, balanceBoxHeight, 3, 3, 'FD');
+      
+      // Header
+      pdf.setFillColor(243, 156, 18); // Orange header
+      pdf.roundedRect(balanceBoxX, yPosition, balanceBoxWidth, 8, 3, 3, 'F');
+      pdf.rect(balanceBoxX, yPosition + 5, balanceBoxWidth, 3, 'F');
+      
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFontSize(9);
+      pdf.setFont('times', 'bold');
+      pdf.text('PAYMENT STATUS', balanceBoxX + 5, yPosition + 5.5);
+      
+      let balanceY = yPosition + 15;
+      pdf.setFontSize(8);
+      pdf.setFont('times', 'normal');
+      pdf.setTextColor(...textMedium);
+      
+      // Total Amount
+      pdf.text('Total Amount:', balanceBoxX + 5, balanceY);
+      pdf.setTextColor(...textDark);
+      pdf.setFont('times', 'bold');
+      pdf.text(`Rs.${invoice.grand_total.toFixed(2)}`, balanceBoxX + balanceBoxWidth - 5, balanceY, { align: 'right' });
+      balanceY += 6;
+      
+      // Paid Amount
+      pdf.setFont('times', 'normal');
+      pdf.setTextColor(39, 174, 96); // Green for paid
+      pdf.text('Paid:', balanceBoxX + 5, balanceY);
+      pdf.setFont('times', 'bold');
+      pdf.text(`Rs.${invoice.paid_amount.toFixed(2)}`, balanceBoxX + balanceBoxWidth - 5, balanceY, { align: 'right' });
+      balanceY += 6;
+      
+      // Separator line
+      pdf.setDrawColor(243, 156, 18);
+      pdf.setLineWidth(0.5);
+      pdf.line(balanceBoxX + 5, balanceY, balanceBoxX + balanceBoxWidth - 5, balanceY);
+      balanceY += 6;
+      
+      // Balance Due - Highlighted
+      pdf.setTextColor(192, 57, 43); // Red for balance
+      pdf.setFont('times', 'bold');
+      pdf.setFontSize(10);
+      pdf.text('Balance Due:', balanceBoxX + 5, balanceY);
+      pdf.setFontSize(11);
+      pdf.text(`Rs.${invoice.balance_due.toFixed(2)}`, balanceBoxX + balanceBoxWidth - 5, balanceY, { align: 'right' });
+    }
+    
+    // Right side - Totals Section
     const totalsX = pageWidth - 75;
+    const totalsY = yPosition;
     
     pdf.setFontSize(9);
     pdf.setFont('times', 'normal');
     
     // Subtotal
     pdf.setTextColor(...textMedium);
-    pdf.text('Subtotal', totalsX, yPosition);
+    pdf.text('Subtotal', totalsX, totalsY);
     pdf.setTextColor(...textDark);
     pdf.setFont('times', 'bold');
-    pdf.text(`Rs.${invoice.subtotal.toFixed(2)}`, pageWidth - 20, yPosition, { align: 'right' });
-    yPosition += 6;
-
-    // Paid Amount
-    if (invoice.paid_amount > 0) {
-      pdf.setFont('times', 'normal');
-      pdf.setTextColor(39, 174, 96);
-      pdf.text('Paid', totalsX, yPosition);
-      pdf.text(`-Rs.${invoice.paid_amount.toFixed(2)}`, pageWidth - 20, yPosition, { align: 'right' });
-      yPosition += 6;
-    }
-
-    // Balance Due
-    if (invoice.balance_due > 0) {
-      pdf.setFont('times', 'normal');
-      pdf.setTextColor(192, 57, 43);
-      pdf.text('Balance Due', totalsX, yPosition);
-      pdf.text(`Rs.${invoice.balance_due.toFixed(2)}`, pageWidth - 20, yPosition, { align: 'right' });
-      yPosition += 6;
-    }
+    pdf.text(`Rs.${invoice.subtotal.toFixed(2)}`, pageWidth - 20, totalsY, { align: 'right' });
+    
+    let taxY = totalsY + 6;
+    
+    // Tax breakdown - CGST and SGST
+    const taxAmount = invoice.grand_total - invoice.subtotal;
+    const cgst = taxAmount / 2; // 2.5%
+    const sgst = taxAmount / 2; // 2.5%
+    
+    pdf.setFont('times', 'normal');
+    pdf.setTextColor(...textMedium);
+    pdf.text('CGST @ 2.5%', totalsX, taxY);
+    pdf.setTextColor(...textDark);
+    pdf.text(`Rs.${cgst.toFixed(2)}`, pageWidth - 20, taxY, { align: 'right' });
+    taxY += 6;
+    
+    pdf.setTextColor(...textMedium);
+    pdf.text('SGST @ 2.5%', totalsX, taxY);
+    pdf.setTextColor(...textDark);
+    pdf.text(`Rs.${sgst.toFixed(2)}`, pageWidth - 20, taxY, { align: 'right' });
+    taxY += 6;
 
     // Separator line
-    yPosition += 2;
+    taxY += 2;
     pdf.setDrawColor(...primaryColor);
     pdf.setLineWidth(0.5);
-    pdf.line(totalsX - 2, yPosition, pageWidth - 18, yPosition);
-    yPosition += 7;
+    pdf.line(totalsX - 2, taxY, pageWidth - 18, taxY);
+    taxY += 7;
 
     // Grand Total
-    const totalBoxY = yPosition - 5;
+    const totalBoxY = taxY - 5;
     const totalsBoxWidth = 60;
     pdf.setFillColor(...primaryColor);
     pdf.roundedRect(totalsX - 5, totalBoxY, totalsBoxWidth + 5, 11, 2, 2, 'F');
@@ -427,9 +489,12 @@ export async function generateInvoicePDF(invoice: Invoice) {
     pdf.setTextColor(255, 255, 255);
     pdf.setFontSize(10);
     pdf.setFont('times', 'bold');
-    pdf.text('TOTAL', totalsX, yPosition + 2);
+    pdf.text('TOTAL', totalsX, taxY + 2);
     pdf.setFontSize(12);
-    pdf.text(`Rs.${invoice.grand_total.toFixed(2)}`, pageWidth - 20, yPosition + 2, { align: 'right' });
+    pdf.text(`Rs.${invoice.grand_total.toFixed(2)}`, pageWidth - 20, taxY + 2, { align: 'right' });
+    
+    yPosition = Math.max(yPosition + (invoice.balance_due > 0 || invoice.paid_amount > 0 ? 40 : 0), taxY + 10);
+
 
     // ==================== FOOTER ====================
     const footerY = pageHeight - 25;

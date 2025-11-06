@@ -50,6 +50,7 @@
     "input-otp": "^1.2.4",
     "jsonwebtoken": "^9.0.2",
     "jspdf": "^3.0.2",
+    "jspdf-autotable": "^5.0.2",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.400.0",
     "mongodb": "^6.19.0",
