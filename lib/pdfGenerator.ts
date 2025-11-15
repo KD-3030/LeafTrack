@@ -153,7 +153,7 @@ export async function generateInvoicePDF(invoice: Invoice) {
     pdf.setTextColor(255, 255, 255);
     pdf.setFontSize(20);
     pdf.setFont('times', 'bold');
-    const companyName = companySettings?.company_name || 'Sohagtea Company';
+    const companyName = 'Sohagtea';
     pdf.text(companyName, 15, 18);
 
     // Company Details
