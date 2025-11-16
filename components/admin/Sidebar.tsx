@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, BarChart3, UserCheck, Settings, DollarSign, Package, Users, FileText, MapPin, ShoppingCart, PackageX, Boxes, Layers, Menu, X } from 'lucide-react';
+import { LayoutDashboard, BarChart3, UserCheck, Settings, DollarSign, Package, Users, FileText, MapPin, ShoppingCart, PackageX, Boxes, Layers, Menu, X, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 
 const navigation = [
@@ -62,6 +62,11 @@ const financialNavigation = [
     name: 'Invoicing',
     href: '/admin/invoicing',
     icon: FileText,
+  },
+  {
+    name: 'Sales Returns',
+    href: '/admin/sales-returns',
+    icon: RotateCcw,
   },
   {
     name: 'Customers',               //need to add this functionality to the salesman section

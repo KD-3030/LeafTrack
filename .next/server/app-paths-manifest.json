@@ -1,8 +1,9 @@
 {
-  "/login/page": "app/login/page.js",
-  "/api/customers/route": "app/api/customers/route.js",
-  "/api/customers/[id]/transactions/route": "app/api/customers/[id]/transactions/route.js",
-  "/admin/dashboard/page": "app/admin/dashboard/page.js",
-  "/admin/customers/page": "app/admin/customers/page.js",
-  "/admin/invoicing/page": "app/admin/invoicing/page.js"
+  "/api/sale-returns/[id]/route": "app/api/sale-returns/[id]/route.js",
+  "/api/sale-returns/route": "app/api/sale-returns/route.js",
+  "/admin/invoicing/page": "app/admin/invoicing/page.js",
+  "/admin/purchases/page": "app/admin/purchases/page.js",
+  "/admin/purchase-returns/page": "app/admin/purchase-returns/page.js",
+  "/admin/products/page": "app/admin/products/page.js",
+  "/admin/sales-returns/page": "app/admin/sales-returns/page.js"
 }
