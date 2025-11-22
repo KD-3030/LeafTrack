@@ -296,6 +296,12 @@ export async function generateInvoicePDF(invoice: Invoice) {
     pdf.setFontSize(8);
     pdf.setFont('times', 'normal');
     pdf.setTextColor(...textMedium);
+    if (invoice.customer_details.address) {
+      const address = invoice.customer_details.address.length > 30 ? 
+        invoice.customer_details.address.substring(0, 27) + '...' : invoice.customer_details.address;
+      pdf.text(address, 113, yPosition);
+      yPosition += 4;
+    }
     if (invoice.customer_details.gstin) {
       pdf.text(`GSTIN: ${invoice.customer_details.gstin}`, 113, yPosition);
       yPosition += 4;
@@ -740,6 +746,12 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
     pdf.setFontSize(8);
     pdf.setFont('times', 'normal');
     pdf.setTextColor(...textMedium);
+    if (order.customer_address) {
+      const address = order.customer_address.length > 30 ? 
+        order.customer_address.substring(0, 27) + '...' : order.customer_address;
+      pdf.text(address, 113, yPosition);
+      yPosition += 4;
+    }
     if (order.customer_gstin) {
       pdf.text(`GSTIN: ${order.customer_gstin}`, 113, yPosition);
       yPosition += 4;
