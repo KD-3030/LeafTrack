@@ -1,52 +1,26 @@
 {
-  "components\\SalesmanLocationMap.tsx -> react-leaflet": {
-    "id": 79036,
-    "files": [
-      "static/chunks/d0deef33.0379166a4ec23470.js",
-      "static/chunks/9036.13e0faa5cb92cfd8.js"
-    ]
-  },
   "components\\admin\\SafeLeafletMap.tsx -> leaflet": {
-    "id": 60759,
+    "id": "components\\admin\\SafeLeafletMap.tsx -> leaflet",
     "files": [
-      "static/chunks/d0deef33.0379166a4ec23470.js"
+      "static/chunks/_app-pages-browser_node_modules_leaflet_dist_leaflet-src_js.js"
     ]
   },
   "components\\admin\\SalesmanLocationMap.tsx -> @/components/MapBoundsController": {
-    "id": 61841,
+    "id": "components\\admin\\SalesmanLocationMap.tsx -> @/components/MapBoundsController",
     "files": [
-      "static/chunks/d0deef33.0379166a4ec23470.js",
-      "static/chunks/1841.7fcd66a8b7a9ed71.js"
+      "static/chunks/_app-pages-browser_components_MapBoundsController_tsx.js"
     ]
   },
   "components\\admin\\SalesmanLocationMap.tsx -> react-leaflet": {
-    "id": 79036,
+    "id": "components\\admin\\SalesmanLocationMap.tsx -> react-leaflet",
     "files": [
-      "static/chunks/d0deef33.0379166a4ec23470.js",
-      "static/chunks/9036.13e0faa5cb92cfd8.js"
+      "static/chunks/_app-pages-browser_node_modules_react-leaflet_lib_index_js.js"
     ]
   },
   "lib\\leafletIcons.ts -> leaflet": {
-    "id": 60759,
-    "files": []
-  },
-  "node_modules\\jspdf\\dist\\jspdf.es.min.js -> canvg": {
-    "id": 12396,
+    "id": "lib\\leafletIcons.ts -> leaflet",
     "files": [
-      "static/chunks/bc98253f.5b0f4fe717c5b99c.js",
-      "static/chunks/3969.5280ba25bde29f29.js"
-    ]
-  },
-  "node_modules\\jspdf\\dist\\jspdf.es.min.js -> dompurify": {
-    "id": 18848,
-    "files": [
-      "static/chunks/8848.8d85baa2792181e8.js"
-    ]
-  },
-  "node_modules\\jspdf\\dist\\jspdf.es.min.js -> html2canvas": {
-    "id": 6807,
-    "files": [
-      "static/chunks/ad2866b8.df424f64adfa702a.js"
+      "static/chunks/_app-pages-browser_node_modules_leaflet_dist_leaflet-src_js.js"
     ]
   }
 }
