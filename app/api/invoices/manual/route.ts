@@ -70,12 +70,13 @@ export async function POST(request: NextRequest) {
             throw new Error(`Product ${item.product_name} not found`);
           }
 
-          // Validate and calculate amounts
-          const taxableAmount = item.quantity * item.unit_price;
-          const taxAmount = (taxableAmount * item.gst_rate) / 100;
+          // Use the pre-calculated values from the client (important for GST inclusive mode)
+          // The client already handles GST calculation correctly based on the mode
+          const taxableAmount = item.taxable_amount || (item.quantity * item.unit_price);
+          const taxAmount = item.tax_amount || ((taxableAmount * item.gst_rate) / 100);
           const cgstAmount = taxAmount / 2; // Split GST into CGST and SGST
           const sgstAmount = taxAmount / 2;
-          const totalAmount = taxableAmount + taxAmount;
+          const totalAmount = item.total_amount || (taxableAmount + taxAmount);
 
           subtotal += taxableAmount;
           totalTax += taxAmount;
