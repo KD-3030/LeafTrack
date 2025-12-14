@@ -99,6 +99,11 @@ interface Invoice {
     quantity: number;
     unit_price: number;
     total_amount: number;
+    gst_rate?: number;
+    taxable_amount?: number;
+    tax_amount?: number;
+    cgst_amount?: number;
+    sgst_amount?: number;
   }>;
   subtotal: number;
   grand_total: number;
@@ -106,6 +111,12 @@ interface Invoice {
   balance_due: number;
   status: string;
   payment_status: string;
+  // GST fields
+  total_cgst?: number;
+  total_sgst?: number;
+  total_igst?: number;
+  total_tax?: number;
+  taxable_amount?: number;
 }
 
 export async function generateInvoicePDF(invoice: Invoice) {
@@ -458,19 +469,59 @@ export async function generateInvoicePDF(invoice: Invoice) {
     let taxY = totalsY + 6;
     
     // Tax breakdown - CGST and SGST
-    const taxAmount = invoice.grand_total - invoice.subtotal;
-    const cgst = taxAmount / 2; // 2.5%
-    const sgst = taxAmount / 2; // 2.5%
+    // Use stored GST values if available, otherwise calculate from items or grand_total - subtotal
+    let cgst = 0;
+    let sgst = 0;
+    let gstRate = 5; // Default GST rate (2.5% CGST + 2.5% SGST)
+    
+    // Try to get GST values from invoice
+    if (invoice.total_cgst !== undefined && invoice.total_sgst !== undefined) {
+      cgst = invoice.total_cgst;
+      sgst = invoice.total_sgst;
+    } else if (invoice.total_tax !== undefined) {
+      cgst = invoice.total_tax / 2;
+      sgst = invoice.total_tax / 2;
+    } else if (invoice.items && invoice.items.length > 0) {
+      // Calculate from items
+      invoice.items.forEach(item => {
+        if (item.cgst_amount !== undefined && item.sgst_amount !== undefined) {
+          cgst += item.cgst_amount;
+          sgst += item.sgst_amount;
+        } else if (item.tax_amount !== undefined) {
+          cgst += item.tax_amount / 2;
+          sgst += item.tax_amount / 2;
+        } else if (item.taxable_amount !== undefined && item.gst_rate !== undefined) {
+          const itemTax = (item.taxable_amount * item.gst_rate) / 100;
+          cgst += itemTax / 2;
+          sgst += itemTax / 2;
+        }
+      });
+    }
+    
+    // If still no GST, calculate from grand_total - subtotal
+    if (cgst === 0 && sgst === 0) {
+      const totalTax = invoice.grand_total - invoice.subtotal;
+      cgst = totalTax / 2;
+      sgst = totalTax / 2;
+    }
+    
+    // Calculate actual GST rate percentage from the values
+    if (invoice.subtotal > 0 && (cgst + sgst) > 0) {
+      gstRate = ((cgst + sgst) / invoice.subtotal) * 100;
+    }
+    
+    // Get individual rate (half of total GST rate for CGST/SGST)
+    const individualRate = gstRate / 2;
     
     pdf.setFont('times', 'normal');
     pdf.setTextColor(...textMedium);
-    pdf.text('CGST @ 2.5%', totalsX, taxY);
+    pdf.text(`CGST @ ${individualRate.toFixed(1)}%`, totalsX, taxY);
     pdf.setTextColor(...textDark);
     pdf.text(`Rs.${cgst.toFixed(2)}`, pageWidth - 20, taxY, { align: 'right' });
     taxY += 6;
     
     pdf.setTextColor(...textMedium);
-    pdf.text('SGST @ 2.5%', totalsX, taxY);
+    pdf.text(`SGST @ ${individualRate.toFixed(1)}%`, totalsX, taxY);
     pdf.setTextColor(...textDark);
     pdf.text(`Rs.${sgst.toFixed(2)}`, pageWidth - 20, taxY, { align: 'right' });
     taxY += 6;

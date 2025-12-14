@@ -60,6 +60,8 @@ export async function POST(request: NextRequest) {
         // Validate all products exist and calculate totals
         let subtotal = 0;
         let totalTax = 0;
+        let totalCgst = 0;
+        let totalSgst = 0;
         const validatedItems = [];
 
         for (const item of items) {
@@ -71,10 +73,14 @@ export async function POST(request: NextRequest) {
           // Validate and calculate amounts
           const taxableAmount = item.quantity * item.unit_price;
           const taxAmount = (taxableAmount * item.gst_rate) / 100;
+          const cgstAmount = taxAmount / 2; // Split GST into CGST and SGST
+          const sgstAmount = taxAmount / 2;
           const totalAmount = taxableAmount + taxAmount;
 
           subtotal += taxableAmount;
           totalTax += taxAmount;
+          totalCgst += cgstAmount;
+          totalSgst += sgstAmount;
 
           validatedItems.push({
             product_id: product._id,
@@ -86,6 +92,9 @@ export async function POST(request: NextRequest) {
             taxable_amount: taxableAmount,
             gst_rate: item.gst_rate,
             tax_amount: taxAmount,
+            cgst_amount: cgstAmount,
+            sgst_amount: sgstAmount,
+            igst_amount: 0,
             total_amount: totalAmount
           });
         }
@@ -153,6 +162,9 @@ export async function POST(request: NextRequest) {
           items: validatedItems,
           subtotal: subtotal,
           taxable_amount: subtotal, // Required field - same as subtotal for now
+          total_cgst: totalCgst, // CGST amount
+          total_sgst: totalSgst, // SGST amount
+          total_igst: 0, // For inter-state (not implemented yet)
           total_tax: totalTax, // Required field - using totalTax
           tax_amount: totalTax, // Keep for compatibility
           grand_total: grandTotal,
