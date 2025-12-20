@@ -570,7 +570,15 @@ export default function InvoicingPage() {
       
       const data = await response.json();
       if (data.success && data.invoice) {
-        setSelectedInvoice(data.invoice);
+        // Ensure all items have taxable_amount calculated
+        const invoiceWithCalculatedItems = {
+          ...data.invoice,
+          items: data.invoice.items.map((item: Invoice['items'][0]) => ({
+            ...item,
+            taxable_amount: item.taxable_amount || (item.quantity * item.unit_price) || 0,
+          }))
+        };
+        setSelectedInvoice(invoiceWithCalculatedItems);
         setIsEditDialogOpen(true);
       } else {
         toast({
@@ -594,6 +602,20 @@ export default function InvoicingPage() {
 
     try {
       const token = localStorage.getItem('leaftrack_token');
+      
+      // Calculate subtotal and tax totals from items (with fallbacks for missing values)
+      const subtotal = selectedInvoice.items.reduce((sum, item) => {
+        const taxable = item.taxable_amount || (item.quantity * item.unit_price) || 0;
+        return sum + taxable;
+      }, 0);
+      const totalTax = selectedInvoice.items.reduce((sum, item) => {
+        const taxable = item.taxable_amount || (item.quantity * item.unit_price) || 0;
+        const tax = item.total_amount - taxable;
+        return sum + (tax > 0 ? tax : 0);
+      }, 0);
+      const totalCgst = totalTax / 2;
+      const totalSgst = totalTax / 2;
+      
       const response = await fetch(`/api/invoices/${selectedInvoice._id}`, {
         method: 'PUT',
         headers: {
@@ -605,7 +627,11 @@ export default function InvoicingPage() {
           due_date: selectedInvoice.due_date,
           notes: selectedInvoice.notes,
           items: selectedInvoice.items,
+          subtotal: subtotal,
           grand_total: selectedInvoice.grand_total,
+          total_cgst: totalCgst,
+          total_sgst: totalSgst,
+          total_tax: totalTax,
         }),
       });
 
@@ -1824,11 +1850,15 @@ export default function InvoicingPage() {
                       <div className="w-64 space-y-2">
                         <div className="flex justify-between text-sm">
                           <span>Subtotal:</span>
-                          <span>₹{selectedInvoice.items.reduce((sum, item) => sum + item.taxable_amount, 0).toFixed(2)}</span>
+                          <span>₹{selectedInvoice.items.reduce((sum, item) => sum + (item.taxable_amount || (item.quantity * item.unit_price) || 0), 0).toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between text-sm">
                           <span>Total Tax:</span>
-                          <span>₹{selectedInvoice.items.reduce((sum, item) => sum + (item.total_amount - item.taxable_amount), 0).toFixed(2)}</span>
+                          <span>₹{selectedInvoice.items.reduce((sum, item) => {
+                            const taxable = item.taxable_amount || (item.quantity * item.unit_price) || 0;
+                            const tax = item.total_amount - taxable;
+                            return sum + (tax > 0 ? tax : 0);
+                          }, 0).toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between font-bold text-lg border-t pt-2">
                           <span>Grand Total:</span>

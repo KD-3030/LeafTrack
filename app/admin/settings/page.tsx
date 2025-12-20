@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Image from 'next/image';
+// Image import removed - branding section removed
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -385,63 +385,6 @@ export default function CompanySettingsPage() {
                   placeholder="e.g., SBIN0001234"
                 />
               </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Branding */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2">
-              <Building className="h-5 w-5 text-indigo-600" />
-              <span>Branding & Logo</span>
-            </CardTitle>
-            <CardDescription>
-              Company logo and signature for PDF documents
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="logo_url">Logo URL</Label>
-                <Input
-                  id="logo_url"
-                  value={settings.logo_url}
-                  onChange={(e) => handleInputChange('logo_url', e.target.value)}
-                  placeholder="https://example.com/logo.png"
-                />
-                <p className="text-sm text-gray-500">
-                  Upload your logo to a hosting service (Cloudinary, ImgBB) and paste the direct image URL here.
-                  Recommended size: 200-400px wide, PNG format with transparent background.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="signature_url">Authorized Signature URL (Optional)</Label>
-                <Input
-                  id="signature_url"
-                  value={settings.signature_url}
-                  onChange={(e) => handleInputChange('signature_url', e.target.value)}
-                  placeholder="https://example.com/signature.png"
-                />
-                <p className="text-sm text-gray-500">
-                  Upload authorized signatory signature image. This will appear in the footer of PDF documents.
-                </p>
-              </div>
-              {settings.logo_url && (
-                <div className="space-y-2">
-                  <Label>Logo Preview</Label>
-                  <div className="border rounded-lg p-4 bg-gray-50 flex justify-center">
-                    <Image 
-                      src={settings.logo_url} 
-                      alt="Company Logo" 
-                      width={200}
-                      height={80}
-                      className="object-contain"
-                      unoptimized
-                    />
-                  </div>
-                </div>
-              )}
             </div>
           </CardContent>
         </Card>

@@ -330,23 +330,26 @@ export async function generateInvoicePDF(invoice: Invoice) {
     // ==================== ITEMS TABLE ====================
     yPosition = 90;
     
-    // Table Header
+    // Table Header - Updated with GST column
     pdf.setFillColor(...primaryColor);
     pdf.rect(15, yPosition, pageWidth - 30, 9, 'F');
     
     pdf.setTextColor(255, 255, 255);
-    pdf.setFontSize(9);
+    pdf.setFontSize(8);
     pdf.setFont('times', 'bold');
-    pdf.text('DESCRIPTION', 20, yPosition + 6);
-    pdf.text('QTY', 130, yPosition + 6, { align: 'center' });
-    pdf.text('RATE', 163, yPosition + 6, { align: 'right' });
-    pdf.text('AMOUNT', pageWidth - 20, yPosition + 6, { align: 'right' });
+    pdf.text('DESCRIPTION', 18, yPosition + 6);
+    pdf.text('QTY', 85, yPosition + 6, { align: 'center' });
+    pdf.text('RATE', 108, yPosition + 6, { align: 'right' });
+    pdf.text('TAXABLE', 135, yPosition + 6, { align: 'right' });
+    pdf.text('GST%', 152, yPosition + 6, { align: 'center' });
+    pdf.text('GST AMT', 172, yPosition + 6, { align: 'right' });
+    pdf.text('TOTAL', pageWidth - 18, yPosition + 6, { align: 'right' });
     
     yPosition += 9;
 
     // Table Items
     pdf.setFont('times', 'normal');
-    pdf.setFontSize(9);
+    pdf.setFontSize(8);
     let itemIndex = 0;
     const rowHeight = 9;
     
@@ -364,23 +367,37 @@ export async function generateInvoicePDF(invoice: Invoice) {
       
       pdf.setTextColor(...textDark);
       
+      // Calculate item breakdown
+      const itemTaxableAmount = item.taxable_amount || (item.quantity * item.unit_price);
+      const itemGstRate = item.gst_rate || 5;
+      const itemTaxAmount = item.tax_amount || ((itemTaxableAmount * itemGstRate) / 100);
+      
       // Item name
-      const maxLength = 45;
+      const maxLength = 28;
       const itemName = item.product_name.length > maxLength 
         ? item.product_name.substring(0, maxLength - 3) + '...' 
         : item.product_name;
       pdf.setFont('times', 'normal');
-      pdf.text(itemName, 20, yPosition + 6);
+      pdf.text(itemName, 18, yPosition + 6);
       
       // Quantity
-      pdf.text(item.quantity.toString(), 130, yPosition + 6, { align: 'center' });
+      pdf.text(item.quantity.toString(), 85, yPosition + 6, { align: 'center' });
       
-      // Rate
-      pdf.text(`Rs.${item.unit_price.toFixed(2)}`, 163, yPosition + 6, { align: 'right' });
+      // Unit Rate
+      pdf.text(`${item.unit_price.toFixed(2)}`, 108, yPosition + 6, { align: 'right' });
       
-      // Amount
+      // Taxable Amount (Qty × Rate)
+      pdf.text(`${itemTaxableAmount.toFixed(2)}`, 135, yPosition + 6, { align: 'right' });
+      
+      // GST Rate %
+      pdf.text(`${itemGstRate}%`, 152, yPosition + 6, { align: 'center' });
+      
+      // GST Amount
+      pdf.text(`${itemTaxAmount.toFixed(2)}`, 172, yPosition + 6, { align: 'right' });
+      
+      // Total Amount
       pdf.setFont('times', 'bold');
-      pdf.text(`Rs.${item.total_amount.toFixed(2)}`, pageWidth - 20, yPosition + 6, { align: 'right' });
+      pdf.text(`${item.total_amount.toFixed(2)}`, pageWidth - 18, yPosition + 6, { align: 'right' });
       pdf.setFont('times', 'normal');
       
       yPosition += rowHeight;
