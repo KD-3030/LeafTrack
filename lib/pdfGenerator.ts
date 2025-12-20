@@ -330,26 +330,28 @@ export async function generateInvoicePDF(invoice: Invoice) {
     // ==================== ITEMS TABLE ====================
     yPosition = 90;
     
-    // Table Header - Updated with GST column
+    // Table Header - Updated with CGST and SGST columns
     pdf.setFillColor(...primaryColor);
     pdf.rect(15, yPosition, pageWidth - 30, 9, 'F');
     
     pdf.setTextColor(255, 255, 255);
-    pdf.setFontSize(8);
+    pdf.setFontSize(7);
     pdf.setFont('times', 'bold');
-    pdf.text('DESCRIPTION', 18, yPosition + 6);
-    pdf.text('QTY', 85, yPosition + 6, { align: 'center' });
-    pdf.text('RATE', 108, yPosition + 6, { align: 'right' });
-    pdf.text('TAXABLE', 135, yPosition + 6, { align: 'right' });
-    pdf.text('GST%', 152, yPosition + 6, { align: 'center' });
-    pdf.text('GST AMT', 172, yPosition + 6, { align: 'right' });
+    pdf.text('DESCRIPTION', 17, yPosition + 6);
+    pdf.text('QTY', 68, yPosition + 6, { align: 'center' });
+    pdf.text('RATE', 88, yPosition + 6, { align: 'right' });
+    pdf.text('TAXABLE', 110, yPosition + 6, { align: 'right' });
+    pdf.text('CGST%', 125, yPosition + 6, { align: 'center' });
+    pdf.text('CGST', 142, yPosition + 6, { align: 'right' });
+    pdf.text('SGST%', 157, yPosition + 6, { align: 'center' });
+    pdf.text('SGST', 174, yPosition + 6, { align: 'right' });
     pdf.text('TOTAL', pageWidth - 18, yPosition + 6, { align: 'right' });
     
     yPosition += 9;
 
     // Table Items
     pdf.setFont('times', 'normal');
-    pdf.setFontSize(8);
+    pdf.setFontSize(7);
     let itemIndex = 0;
     const rowHeight = 9;
     
@@ -370,30 +372,39 @@ export async function generateInvoicePDF(invoice: Invoice) {
       // Calculate item breakdown
       const itemTaxableAmount = item.taxable_amount || (item.quantity * item.unit_price);
       const itemGstRate = item.gst_rate || 5;
+      const halfRate = itemGstRate / 2;
       const itemTaxAmount = item.tax_amount || ((itemTaxableAmount * itemGstRate) / 100);
+      const itemCgst = itemTaxAmount / 2;
+      const itemSgst = itemTaxAmount / 2;
       
       // Item name
-      const maxLength = 28;
+      const maxLength = 22;
       const itemName = item.product_name.length > maxLength 
         ? item.product_name.substring(0, maxLength - 3) + '...' 
         : item.product_name;
       pdf.setFont('times', 'normal');
-      pdf.text(itemName, 18, yPosition + 6);
+      pdf.text(itemName, 17, yPosition + 6);
       
       // Quantity
-      pdf.text(item.quantity.toString(), 85, yPosition + 6, { align: 'center' });
+      pdf.text(item.quantity.toString(), 68, yPosition + 6, { align: 'center' });
       
       // Unit Rate
-      pdf.text(`${item.unit_price.toFixed(2)}`, 108, yPosition + 6, { align: 'right' });
+      pdf.text(`${item.unit_price.toFixed(2)}`, 88, yPosition + 6, { align: 'right' });
       
       // Taxable Amount (Qty × Rate)
-      pdf.text(`${itemTaxableAmount.toFixed(2)}`, 135, yPosition + 6, { align: 'right' });
+      pdf.text(`${itemTaxableAmount.toFixed(2)}`, 110, yPosition + 6, { align: 'right' });
       
-      // GST Rate %
-      pdf.text(`${itemGstRate}%`, 152, yPosition + 6, { align: 'center' });
+      // CGST Rate %
+      pdf.text(`${halfRate}%`, 125, yPosition + 6, { align: 'center' });
       
-      // GST Amount
-      pdf.text(`${itemTaxAmount.toFixed(2)}`, 172, yPosition + 6, { align: 'right' });
+      // CGST Amount
+      pdf.text(`${itemCgst.toFixed(2)}`, 142, yPosition + 6, { align: 'right' });
+      
+      // SGST Rate %
+      pdf.text(`${halfRate}%`, 157, yPosition + 6, { align: 'center' });
+      
+      // SGST Amount
+      pdf.text(`${itemSgst.toFixed(2)}`, 174, yPosition + 6, { align: 'right' });
       
       // Total Amount
       pdf.setFont('times', 'bold');
@@ -485,132 +496,41 @@ export async function generateInvoicePDF(invoice: Invoice) {
     
     let taxY = totalsY + 6;
     
-    // Tax breakdown - CGST and SGST
-    // Group items by GST rate for proper breakdown
-    const gstBreakdown: { [rate: number]: { cgst: number; sgst: number; taxable: number } } = {};
-    let totalCgst = 0;
-    let totalSgst = 0;
+    // Calculate total GST
+    let totalGst = 0;
     
     // Try to get GST values from invoice first
-    if (invoice.total_cgst !== undefined && invoice.total_cgst > 0 && 
-        invoice.total_sgst !== undefined && invoice.total_sgst > 0) {
-      totalCgst = invoice.total_cgst;
-      totalSgst = invoice.total_sgst;
-      
-      // Try to determine the rate from items
-      if (invoice.items && invoice.items.length > 0) {
-        invoice.items.forEach(item => {
-          const rate = item.gst_rate || 5;
-          if (!gstBreakdown[rate]) {
-            gstBreakdown[rate] = { cgst: 0, sgst: 0, taxable: 0 };
-          }
-          const itemTaxable = item.taxable_amount || (item.quantity * item.unit_price);
-          const itemTax = item.tax_amount || ((itemTaxable * rate) / 100);
-          gstBreakdown[rate].cgst += itemTax / 2;
-          gstBreakdown[rate].sgst += itemTax / 2;
-          gstBreakdown[rate].taxable += itemTaxable;
-        });
-      }
+    if (invoice.total_cgst !== undefined && invoice.total_sgst !== undefined) {
+      totalGst = invoice.total_cgst + invoice.total_sgst;
     } else if (invoice.total_tax !== undefined && invoice.total_tax > 0) {
-      totalCgst = invoice.total_tax / 2;
-      totalSgst = invoice.total_tax / 2;
+      totalGst = invoice.total_tax;
     } else if (invoice.items && invoice.items.length > 0) {
-      // Calculate from items with rate breakdown
+      // Calculate from items
       invoice.items.forEach(item => {
-        const rate = item.gst_rate || 5;
-        if (!gstBreakdown[rate]) {
-          gstBreakdown[rate] = { cgst: 0, sgst: 0, taxable: 0 };
-        }
         const itemTaxable = item.taxable_amount || (item.quantity * item.unit_price);
-        let itemTax = 0;
+        const rate = item.gst_rate || 5;
         if (item.cgst_amount !== undefined && item.sgst_amount !== undefined) {
-          gstBreakdown[rate].cgst += item.cgst_amount;
-          gstBreakdown[rate].sgst += item.sgst_amount;
-          totalCgst += item.cgst_amount;
-          totalSgst += item.sgst_amount;
+          totalGst += item.cgst_amount + item.sgst_amount;
         } else if (item.tax_amount !== undefined) {
-          itemTax = item.tax_amount;
-          gstBreakdown[rate].cgst += itemTax / 2;
-          gstBreakdown[rate].sgst += itemTax / 2;
-          totalCgst += itemTax / 2;
-          totalSgst += itemTax / 2;
+          totalGst += item.tax_amount;
         } else {
-          itemTax = (itemTaxable * rate) / 100;
-          gstBreakdown[rate].cgst += itemTax / 2;
-          gstBreakdown[rate].sgst += itemTax / 2;
-          totalCgst += itemTax / 2;
-          totalSgst += itemTax / 2;
+          totalGst += (itemTaxable * rate) / 100;
         }
-        gstBreakdown[rate].taxable += itemTaxable;
       });
     }
     
     // If still no GST, calculate from grand_total - subtotal
-    if (totalCgst === 0 && totalSgst === 0 && invoice.grand_total > invoice.subtotal) {
-      const totalTax = invoice.grand_total - invoice.subtotal;
-      totalCgst = totalTax / 2;
-      totalSgst = totalTax / 2;
+    if (totalGst === 0 && invoice.grand_total > invoice.subtotal) {
+      totalGst = invoice.grand_total - invoice.subtotal;
     }
     
-    // Display GST breakdown
-    const gstRates = Object.keys(gstBreakdown).map(Number).sort((a, b) => a - b);
-    
+    // Display Total GST
     pdf.setFont('times', 'normal');
-    
-    if (gstRates.length > 1) {
-      // Multiple GST rates - show each separately
-      gstRates.forEach(rate => {
-        const breakdown = gstBreakdown[rate];
-        const halfRate = rate / 2;
-        
-        pdf.setTextColor(...textMedium);
-        pdf.text(`CGST @ ${halfRate}%`, totalsX, taxY);
-        pdf.setTextColor(...textDark);
-        pdf.text(`Rs.${breakdown.cgst.toFixed(2)}`, pageWidth - 20, taxY, { align: 'right' });
-        taxY += 5;
-        
-        pdf.setTextColor(...textMedium);
-        pdf.text(`SGST @ ${halfRate}%`, totalsX, taxY);
-        pdf.setTextColor(...textDark);
-        pdf.text(`Rs.${breakdown.sgst.toFixed(2)}`, pageWidth - 20, taxY, { align: 'right' });
-        taxY += 5;
-      });
-    } else if (gstRates.length === 1) {
-      // Single GST rate
-      const rate = gstRates[0];
-      const halfRate = rate / 2;
-      
-      pdf.setTextColor(...textMedium);
-      pdf.text(`CGST @ ${halfRate}%`, totalsX, taxY);
-      pdf.setTextColor(...textDark);
-      pdf.text(`Rs.${totalCgst.toFixed(2)}`, pageWidth - 20, taxY, { align: 'right' });
-      taxY += 6;
-      
-      pdf.setTextColor(...textMedium);
-      pdf.text(`SGST @ ${halfRate}%`, totalsX, taxY);
-      pdf.setTextColor(...textDark);
-      pdf.text(`Rs.${totalSgst.toFixed(2)}`, pageWidth - 20, taxY, { align: 'right' });
-      taxY += 6;
-    } else {
-      // No specific rate info - calculate from amounts
-      let effectiveRate = 5; // Default
-      if (invoice.subtotal > 0 && (totalCgst + totalSgst) > 0) {
-        effectiveRate = ((totalCgst + totalSgst) / invoice.subtotal) * 100;
-      }
-      const halfRate = effectiveRate / 2;
-      
-      pdf.setTextColor(...textMedium);
-      pdf.text(`CGST @ ${halfRate.toFixed(1)}%`, totalsX, taxY);
-      pdf.setTextColor(...textDark);
-      pdf.text(`Rs.${totalCgst.toFixed(2)}`, pageWidth - 20, taxY, { align: 'right' });
-      taxY += 6;
-      
-      pdf.setTextColor(...textMedium);
-      pdf.text(`SGST @ ${halfRate.toFixed(1)}%`, totalsX, taxY);
-      pdf.setTextColor(...textDark);
-      pdf.text(`Rs.${totalSgst.toFixed(2)}`, pageWidth - 20, taxY, { align: 'right' });
-      taxY += 6;
-    }
+    pdf.setTextColor(...textMedium);
+    pdf.text('Total GST', totalsX, taxY);
+    pdf.setTextColor(...textDark);
+    pdf.text(`Rs.${totalGst.toFixed(2)}`, pageWidth - 20, taxY, { align: 'right' });
+    taxY += 6;
 
     // Separator line
     taxY += 2;
