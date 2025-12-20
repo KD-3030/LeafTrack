@@ -1,13 +1,32 @@
 // lib/pdfGenerator.ts
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
+import QRCode from 'qrcode';
+
+// Generate QR code as base64 data URL
+async function generateQRCode(data: string): Promise<string | null> {
+  try {
+    const qrDataUrl = await QRCode.toDataURL(data, {
+      width: 200,
+      margin: 1,
+      color: {
+        dark: '#000000',
+        light: '#ffffff'
+      }
+    });
+    return qrDataUrl;
+  } catch (error) {
+    console.error('Error generating QR code:', error);
+    return null;
+  }
+}
 
 // Helper function to fetch company settings
 async function fetchCompanySettings() {
   try {
     const response = await fetch('/api/settings/company', {
       headers: {
-        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        'Authorization': `Bearer ${localStorage.getItem('leaftrack_token')}`,
       },
     });
     
@@ -129,14 +148,15 @@ export async function generateInvoicePDF(invoice: Invoice) {
     const pageHeight = pdf.internal.pageSize.height;
     let yPosition = 15;
 
-    // Enhanced Colors - Same as order bill
-    const primaryColor: [number, number, number] = [26, 82, 118];
-    const accentColor: [number, number, number] = [0, 150, 136];
+    // Unified Green Color Theme
+    const primaryColor: [number, number, number] = [34, 139, 34]; // Forest Green
+    const accentColor: [number, number, number] = [46, 125, 50]; // Dark Green
+    const lightGreen: [number, number, number] = [232, 245, 233]; // Light Green background
     const textDark: [number, number, number] = [33, 33, 33];
     const textMedium: [number, number, number] = [88, 88, 88];
     const textLight: [number, number, number] = [117, 117, 117];
-    const borderColor: [number, number, number] = [224, 224, 224];
-    const bgLight: [number, number, number] = [250, 250, 250];
+    const borderColor: [number, number, number] = [200, 230, 201]; // Light green border
+    const bgLight: [number, number, number] = [241, 248, 233]; // Very light green
 
     // ==================== HEADER SECTION ====================
     pdf.setFillColor(...primaryColor);
@@ -146,31 +166,35 @@ export async function generateInvoicePDF(invoice: Invoice) {
     pdf.setFillColor(...accentColor);
     pdf.rect(0, 40, pageWidth, 2, 'F');
 
-    // Load and add logo if available
+    // Load and add logo if available - Top Left Corner
+    let logoLoaded = false;
     if (companySettings?.logo_url) {
       try {
         const logoBase64 = await loadImageAsBase64(companySettings.logo_url);
         if (logoBase64) {
-          const logoWidth = 50;
-          const logoHeight = 20;
-          pdf.addImage(logoBase64, 'PNG', pageWidth - 65, 10, logoWidth, logoHeight);
+          const logoWidth = 25;
+          const logoHeight = 25;
+          pdf.addImage(logoBase64, 'PNG', 12, 7, logoWidth, logoHeight);
+          logoLoaded = true;
         }
       } catch (error) {
         console.error('Error loading logo:', error);
       }
     }
 
-    // Company Name - Always from database settings
+    // Company Name - Position based on logo presence
     pdf.setTextColor(255, 255, 255);
     pdf.setFontSize(20);
     pdf.setFont('times', 'bold');
     const companyName = 'Sohagtea';
-    pdf.text(companyName, 15, 18);
+    const companyNameX = logoLoaded ? 40 : 15; // Shift right if logo exists
+    pdf.text(companyName, companyNameX, 18);
 
-    // Company Details
+    // Company Details - Position based on logo presence
     pdf.setFontSize(9);
     pdf.setFont('times', 'normal');
     const companyInfo = [];
+    const detailsX = logoLoaded ? 40 : 15; // Shift right if logo exists
     
     // Use company settings from database if available
     const address = companySettings ? 
@@ -186,14 +210,14 @@ export async function generateInvoicePDF(invoice: Invoice) {
     if (companyGstin) companyInfo.push(`GSTIN: ${companyGstin}`);
     
     if (companyInfo.length > 0) {
-      pdf.text(companyInfo[0], 15, 26);
+      pdf.text(companyInfo[0], detailsX, 26);
       if (companyInfo.length > 1) {
         const line2 = companyInfo.slice(1).join(' | ');
-        pdf.text(line2, 15, 31);
+        pdf.text(line2, detailsX, 31);
       }
       if (companyInfo.length > 2) {
         const line3 = companyInfo.slice(2).join(' | ');
-        pdf.text(line3, 15, 35);
+        pdf.text(line3, detailsX, 35);
       }
     }
 
@@ -423,61 +447,160 @@ export async function generateInvoicePDF(invoice: Invoice) {
     // ==================== BALANCE & TOTALS SECTION ====================
     yPosition += 8;
     
-    // Left side - Balance Due Box (if applicable)
+    // Left side - Bank Details & QR Code Section
+    const bankBoxX = 15;
+    const bankBoxWidth = 70; // Reduced from 85
+    
+    // Bank Details Box
+    pdf.setDrawColor(...borderColor);
+    pdf.setLineWidth(0.5);
+    pdf.setFillColor(...lightGreen);
+    pdf.roundedRect(bankBoxX, yPosition, bankBoxWidth, 48, 3, 3, 'FD');
+    
+    // Header
+    pdf.setFillColor(...primaryColor);
+    pdf.roundedRect(bankBoxX, yPosition, bankBoxWidth, 8, 3, 3, 'F');
+    pdf.rect(bankBoxX, yPosition + 5, bankBoxWidth, 3, 'F');
+    
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFontSize(9);
+    pdf.setFont('times', 'bold');
+    pdf.text('PAYMENT DETAILS', bankBoxX + 5, yPosition + 5.5);
+    
+    let bankY = yPosition + 14;
+    pdf.setFontSize(7);
+    pdf.setFont('times', 'normal');
+    pdf.setTextColor(...textDark);
+    
+    // Bank Account Details - Use company settings or defaults
+    const bankName = companySettings?.bank_name || 'Axis Bank';
+    const accountHolder = companySettings?.account_holder_name || 'Sohag';
+    const accountNumber = companySettings?.account_number || '923020024498640';
+    const ifscCode = companySettings?.ifsc_code || 'UTIB0002083';
+    
+    // Bank Name
+    pdf.setFont('times', 'bold');
+    pdf.text('Bank:', bankBoxX + 3, bankY);
+    pdf.setFont('times', 'normal');
+    pdf.text(bankName, bankBoxX + 18, bankY);
+    bankY += 5;
+    
+    // Account Holder Name
+    pdf.setFont('times', 'bold');
+    pdf.text('A/C Name:', bankBoxX + 3, bankY);
+    pdf.setFont('times', 'normal');
+    const accName = accountHolder.length > 18 
+      ? accountHolder.substring(0, 18) + '...' 
+      : accountHolder;
+    pdf.text(accName, bankBoxX + 24, bankY);
+    bankY += 5;
+    
+    // Account Number
+    pdf.setFont('times', 'bold');
+    pdf.text('A/C No:', bankBoxX + 3, bankY);
+    pdf.setFont('times', 'normal');
+    pdf.text(accountNumber, bankBoxX + 20, bankY);
+    bankY += 5;
+    
+    // IFSC Code
+    pdf.setFont('times', 'bold');
+    pdf.text('IFSC:', bankBoxX + 3, bankY);
+    pdf.setFont('times', 'normal');
+    pdf.text(ifscCode, bankBoxX + 16, bankY);
+    
+    // QR Code Section - Next to Bank Details
+    const qrBoxX = bankBoxX + bankBoxWidth + 3;
+    const qrBoxWidth = 38;
+    const qrBoxHeight = 48;
+    
+    pdf.setDrawColor(...borderColor);
+    pdf.setFillColor(...bgLight);
+    pdf.roundedRect(qrBoxX, yPosition, qrBoxWidth, qrBoxHeight, 3, 3, 'FD');
+    
+    // QR Code Header
+    pdf.setFillColor(...primaryColor);
+    pdf.roundedRect(qrBoxX, yPosition, qrBoxWidth, 6, 3, 3, 'F');
+    pdf.rect(qrBoxX, yPosition + 3, qrBoxWidth, 3, 'F');
+    
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFontSize(6);
+    pdf.setFont('times', 'bold');
+    pdf.text('SCAN TO PAY', qrBoxX + qrBoxWidth / 2, yPosition + 4, { align: 'center' });
+    
+    // Generate and add QR Code for UPI payment dynamically
+    const upiString = 'upi://pay?pa=9073353853@okbizaxis&pn=Sohag&cu=INR';
+    const qrBase64 = await generateQRCode(upiString);
+    
+    if (qrBase64) {
+      try {
+        pdf.addImage(qrBase64, 'PNG', qrBoxX + 4, yPosition + 9, 30, 30);
+      } catch (qrError) {
+        console.error('Error adding QR image:', qrError);
+        // Fallback text
+        pdf.setTextColor(...textMedium);
+        pdf.setFontSize(6);
+        pdf.text('Scan QR', qrBoxX + qrBoxWidth / 2, yPosition + 28, { align: 'center' });
+      }
+    } else {
+      // Fallback if QR generation fails
+      pdf.setTextColor(...textMedium);
+      pdf.setFontSize(6);
+      pdf.text('Scan QR', qrBoxX + qrBoxWidth / 2, yPosition + 28, { align: 'center' });
+    }
+    
+    // UPI Text below QR
+    pdf.setTextColor(...textDark);
+    pdf.setFontSize(5);
+    pdf.setFont('times', 'normal');
+    pdf.text('UPI: 9073353853@okbizaxis', qrBoxX + qrBoxWidth / 2, yPosition + 44, { align: 'center' });
+    
+    // Payment Status Box (below bank details)
+    const paymentStatusY = yPosition + 52;
     if (invoice.balance_due > 0 || invoice.paid_amount > 0) {
-      const balanceBoxX = 15;
-      const balanceBoxWidth = 85;
-      const balanceBoxHeight = 35;
+      const statusBoxWidth = bankBoxWidth + qrBoxWidth + 3;
       
-      // Balance box with accent color
       pdf.setDrawColor(...borderColor);
       pdf.setLineWidth(0.5);
-      pdf.setFillColor(255, 243, 205); // Light yellow/orange background
-      pdf.roundedRect(balanceBoxX, yPosition, balanceBoxWidth, balanceBoxHeight, 3, 3, 'FD');
+      pdf.setFillColor(...bgLight);
+      pdf.roundedRect(bankBoxX, paymentStatusY, statusBoxWidth, 22, 3, 3, 'FD');
       
       // Header
-      pdf.setFillColor(243, 156, 18); // Orange header
-      pdf.roundedRect(balanceBoxX, yPosition, balanceBoxWidth, 8, 3, 3, 'F');
-      pdf.rect(balanceBoxX, yPosition + 5, balanceBoxWidth, 3, 'F');
+      pdf.setFillColor(...accentColor);
+      pdf.roundedRect(bankBoxX, paymentStatusY, statusBoxWidth, 7, 3, 3, 'F');
+      pdf.rect(bankBoxX, paymentStatusY + 4, statusBoxWidth, 3, 'F');
       
       pdf.setTextColor(255, 255, 255);
-      pdf.setFontSize(9);
-      pdf.setFont('times', 'bold');
-      pdf.text('PAYMENT STATUS', balanceBoxX + 5, yPosition + 5.5);
-      
-      let balanceY = yPosition + 15;
       pdf.setFontSize(8);
-      pdf.setFont('times', 'normal');
-      pdf.setTextColor(...textMedium);
+      pdf.setFont('times', 'bold');
+      pdf.text('PAYMENT STATUS', bankBoxX + 5, paymentStatusY + 5);
+      
+      let statusY = paymentStatusY + 13;
+      pdf.setFontSize(8);
+      
+      // Total | Paid | Balance in one row
+      const colWidth = statusBoxWidth / 3;
       
       // Total Amount
-      pdf.text('Total Amount:', balanceBoxX + 5, balanceY);
+      pdf.setTextColor(...textMedium);
+      pdf.setFont('times', 'normal');
+      pdf.text('Total:', bankBoxX + 3, statusY);
       pdf.setTextColor(...textDark);
       pdf.setFont('times', 'bold');
-      pdf.text(`Rs.${invoice.grand_total.toFixed(2)}`, balanceBoxX + balanceBoxWidth - 5, balanceY, { align: 'right' });
-      balanceY += 6;
+      pdf.text(`Rs.${invoice.grand_total.toFixed(2)}`, bankBoxX + colWidth - 3, statusY, { align: 'right' });
       
       // Paid Amount
+      pdf.setTextColor(34, 139, 34); // Green
       pdf.setFont('times', 'normal');
-      pdf.setTextColor(39, 174, 96); // Green for paid
-      pdf.text('Paid:', balanceBoxX + 5, balanceY);
+      pdf.text('Paid:', bankBoxX + colWidth + 3, statusY);
       pdf.setFont('times', 'bold');
-      pdf.text(`Rs.${invoice.paid_amount.toFixed(2)}`, balanceBoxX + balanceBoxWidth - 5, balanceY, { align: 'right' });
-      balanceY += 6;
+      pdf.text(`Rs.${invoice.paid_amount.toFixed(2)}`, bankBoxX + colWidth * 2 - 3, statusY, { align: 'right' });
       
-      // Separator line
-      pdf.setDrawColor(243, 156, 18);
-      pdf.setLineWidth(0.5);
-      pdf.line(balanceBoxX + 5, balanceY, balanceBoxX + balanceBoxWidth - 5, balanceY);
-      balanceY += 6;
-      
-      // Balance Due - Highlighted
-      pdf.setTextColor(192, 57, 43); // Red for balance
+      // Balance Due
+      pdf.setTextColor(192, 57, 43); // Red
+      pdf.setFont('times', 'normal');
+      pdf.text('Due:', bankBoxX + colWidth * 2 + 3, statusY);
       pdf.setFont('times', 'bold');
-      pdf.setFontSize(10);
-      pdf.text('Balance Due:', balanceBoxX + 5, balanceY);
-      pdf.setFontSize(11);
-      pdf.text(`Rs.${invoice.balance_due.toFixed(2)}`, balanceBoxX + balanceBoxWidth - 5, balanceY, { align: 'right' });
+      pdf.text(`Rs.${invoice.balance_due.toFixed(2)}`, bankBoxX + statusBoxWidth - 3, statusY, { align: 'right' });
     }
     
     // Right side - Totals Section
@@ -487,49 +610,47 @@ export async function generateInvoicePDF(invoice: Invoice) {
     pdf.setFontSize(9);
     pdf.setFont('times', 'normal');
     
+    // ALWAYS calculate subtotal and GST from items to ensure accuracy
+    // This fixes issues where stored values may be incorrect
+    let calculatedSubtotal = 0;
+    let calculatedGst = 0;
+    
+    if (invoice.items && invoice.items.length > 0) {
+      invoice.items.forEach(item => {
+        // Calculate taxable amount for this item
+        const itemTaxable = item.taxable_amount || (item.quantity * item.unit_price);
+        calculatedSubtotal += itemTaxable;
+        
+        // ALWAYS calculate GST from taxable amount and rate to ensure accuracy
+        // Don't trust stored cgst_amount/sgst_amount as they may be incorrect
+        const rate = item.gst_rate || 5;
+        calculatedGst += (itemTaxable * rate) / 100;
+      });
+    }
+    
+    // Fallback to stored values only if items are empty
+    if (calculatedSubtotal === 0) {
+      calculatedSubtotal = invoice.subtotal || 0;
+    }
+    if (calculatedGst === 0 && invoice.grand_total > calculatedSubtotal) {
+      calculatedGst = invoice.grand_total - calculatedSubtotal;
+    }
+    
     // Subtotal
     pdf.setTextColor(...textMedium);
     pdf.text('Subtotal', totalsX, totalsY);
     pdf.setTextColor(...textDark);
     pdf.setFont('times', 'bold');
-    pdf.text(`Rs.${invoice.subtotal.toFixed(2)}`, pageWidth - 20, totalsY, { align: 'right' });
+    pdf.text(`Rs.${calculatedSubtotal.toFixed(2)}`, pageWidth - 20, totalsY, { align: 'right' });
     
     let taxY = totalsY + 6;
-    
-    // Calculate total GST
-    let totalGst = 0;
-    
-    // Try to get GST values from invoice first
-    if (invoice.total_cgst !== undefined && invoice.total_sgst !== undefined) {
-      totalGst = invoice.total_cgst + invoice.total_sgst;
-    } else if (invoice.total_tax !== undefined && invoice.total_tax > 0) {
-      totalGst = invoice.total_tax;
-    } else if (invoice.items && invoice.items.length > 0) {
-      // Calculate from items
-      invoice.items.forEach(item => {
-        const itemTaxable = item.taxable_amount || (item.quantity * item.unit_price);
-        const rate = item.gst_rate || 5;
-        if (item.cgst_amount !== undefined && item.sgst_amount !== undefined) {
-          totalGst += item.cgst_amount + item.sgst_amount;
-        } else if (item.tax_amount !== undefined) {
-          totalGst += item.tax_amount;
-        } else {
-          totalGst += (itemTaxable * rate) / 100;
-        }
-      });
-    }
-    
-    // If still no GST, calculate from grand_total - subtotal
-    if (totalGst === 0 && invoice.grand_total > invoice.subtotal) {
-      totalGst = invoice.grand_total - invoice.subtotal;
-    }
     
     // Display Total GST
     pdf.setFont('times', 'normal');
     pdf.setTextColor(...textMedium);
     pdf.text('Total GST', totalsX, taxY);
     pdf.setTextColor(...textDark);
-    pdf.text(`Rs.${totalGst.toFixed(2)}`, pageWidth - 20, taxY, { align: 'right' });
+    pdf.text(`Rs.${calculatedGst.toFixed(2)}`, pageWidth - 20, taxY, { align: 'right' });
     taxY += 6;
 
     // Separator line
@@ -556,14 +677,38 @@ export async function generateInvoicePDF(invoice: Invoice) {
     pdf.setFontSize(12);
     pdf.text(`Rs.${invoice.grand_total.toFixed(2)}`, pageWidth - 20, taxY + 2, { align: 'right' });
     
-    yPosition = Math.max(yPosition + (invoice.balance_due > 0 || invoice.paid_amount > 0 ? 40 : 0), taxY + 10);
+    yPosition = Math.max(yPosition + (invoice.balance_due > 0 || invoice.paid_amount > 0 ? 78 : 52), taxY + 10);
 
+    // ==================== AUTHORIZED SIGNATURE SECTION ====================
+    const sigSectionY = pageHeight - 55;
+    
+    // Signature on the right side
+    const sigX = pageWidth - 50;
+    pdf.setFont('times', 'normal');
+    pdf.setFontSize(8);
+    pdf.setTextColor(...textDark);
+    
+    // Signature line
+    pdf.setDrawColor(...primaryColor);
+    pdf.setLineWidth(0.3);
+    pdf.line(sigX - 25, sigSectionY + 12, sigX + 25, sigSectionY + 12);
+    
+    // Label
+    pdf.setTextColor(...textMedium);
+    pdf.setFontSize(8);
+    pdf.text('Authorized Signature', sigX, sigSectionY + 18, { align: 'center' });
+    
+    // Company name under signature
+    pdf.setFont('times', 'bold');
+    pdf.setTextColor(...primaryColor);
+    pdf.setFontSize(7);
+    pdf.text('For Sohagtea', sigX, sigSectionY + 23, { align: 'center' });
 
     // ==================== FOOTER ====================
-    const footerY = pageHeight - 25;
+    const footerY = pageHeight - 20;
     
     // Decorative line
-    pdf.setDrawColor(...accentColor);
+    pdf.setDrawColor(...primaryColor);
     pdf.setLineWidth(0.5);
     pdf.line(15, footerY, pageWidth - 15, footerY);
     
@@ -582,23 +727,14 @@ export async function generateInvoicePDF(invoice: Invoice) {
     
     // Center - Thank you
     pdf.setFont('times', 'italic');
-    pdf.setTextColor(...accentColor);
+    pdf.setTextColor(...primaryColor);
     pdf.setFontSize(9);
     pdf.text('Thank you for your business!', pageWidth / 2, footerY + 7, { align: 'center' });
-    
-    // Right - Signature
-    const sigX = pageWidth - 45;
-    pdf.setFont('times', 'normal');
-    pdf.setFontSize(8);
-    pdf.setTextColor(...textDark);
-    pdf.text('____________________', sigX, footerY + 10, { align: 'center' });
-    pdf.setTextColor(...textMedium);
-    pdf.text('Authorized Signature', sigX, footerY + 15, { align: 'center' });
     
     // Page number
     pdf.setFontSize(7);
     pdf.setTextColor(...textLight);
-    pdf.text(`Page 1 of 1`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+    pdf.text(`Page 1 of 1`, pageWidth / 2, pageHeight - 5, { align: 'center' });
 
     // Save the PDF
     pdf.save(`invoice-${invoice.invoice_number}.pdf`);
@@ -627,17 +763,17 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
     const pageHeight = pdf.internal.pageSize.height;
     let yPosition = 15;
 
-    // Enhanced Colors - More sophisticated palette
-    const primaryColor: [number, number, number] = [26, 82, 118]; // Deep professional blue
-    const accentColor: [number, number, number] = [0, 150, 136]; // Teal accent
+    // Unified Green Color Theme - Same as Invoice
+    const primaryColor: [number, number, number] = [34, 139, 34]; // Forest Green
+    const accentColor: [number, number, number] = [46, 125, 50]; // Dark Green
     const textDark: [number, number, number] = [33, 33, 33];
     const textMedium: [number, number, number] = [88, 88, 88];
     const textLight: [number, number, number] = [117, 117, 117];
-    const borderColor: [number, number, number] = [224, 224, 224];
-    const bgLight: [number, number, number] = [250, 250, 250];
+    const borderColor: [number, number, number] = [200, 230, 201]; // Light green border
+    const bgLight: [number, number, number] = [241, 248, 233]; // Very light green
 
     // ==================== HEADER SECTION ====================
-    // Elegant header with gradient effect (simulated with rectangle)
+    // Elegant header with green theme
     pdf.setFillColor(...primaryColor);
     pdf.rect(0, 0, pageWidth, 40, 'F');
     
@@ -645,31 +781,35 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
     pdf.setFillColor(...accentColor);
     pdf.rect(0, 40, pageWidth, 2, 'F');
 
-    // Load and add logo if available
+    // Load and add logo if available - Top Left Corner
+    let logoLoaded = false;
     if (companySettings?.logo_url) {
       try {
         const logoBase64 = await loadImageAsBase64(companySettings.logo_url);
         if (logoBase64) {
-          const logoWidth = 50;
-          const logoHeight = 20;
-          pdf.addImage(logoBase64, 'PNG', pageWidth - 65, 10, logoWidth, logoHeight);
+          const logoWidth = 25;
+          const logoHeight = 25;
+          pdf.addImage(logoBase64, 'PNG', 12, 7, logoWidth, logoHeight);
+          logoLoaded = true;
         }
       } catch (error) {
         console.error('Error loading logo:', error);
       }
     }
 
-    // Company Name - Always from database settings
+    // Company Name - Position based on logo presence
     pdf.setTextColor(255, 255, 255);
     pdf.setFontSize(20);
     pdf.setFont('times', 'bold');
     const companyName = companySettings?.company_name || 'Sohagtea Company';
-    pdf.text(companyName, 15, 18);
+    const companyNameX = logoLoaded ? 40 : 15;
+    pdf.text(companyName, companyNameX, 18);
 
-    // Company Details - Better organized
+    // Company Details - Position based on logo presence
     pdf.setFontSize(9);
     pdf.setFont('times', 'normal');
     const companyInfo = [];
+    const detailsX = logoLoaded ? 40 : 15;
     
     // Use company settings from database if available
     const address = companySettings ? 
@@ -685,14 +825,14 @@ export async function generateOrderBillPDF(order: Order, companyDetails?: {
     if (companyGstin) companyInfo.push(`GSTIN: ${companyGstin}`);
     
     if (companyInfo.length > 0) {
-      pdf.text(companyInfo[0], 15, 26);
+      pdf.text(companyInfo[0], detailsX, 26);
       if (companyInfo.length > 1) {
         const line2 = companyInfo.slice(1).join(' | ');
-        pdf.text(line2, 15, 31);
+        pdf.text(line2, detailsX, 31);
       }
       if (companyInfo.length > 2) {
         const line3 = companyInfo.slice(2).join(' | ');
-        pdf.text(line3, 15, 35);
+        pdf.text(line3, detailsX, 35);
       }
     }
 

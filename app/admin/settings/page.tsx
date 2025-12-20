@@ -231,7 +231,7 @@ export default function CompanySettingsPage() {
                 <Label htmlFor="website">Website</Label>
                 <Input
                   id="website"
-                  value={settings.website}
+                  value={settings.website || ''}
                   onChange={(e) => handleInputChange('website', e.target.value)}
                   placeholder="https://example.com"
                 />
@@ -327,7 +327,7 @@ export default function CompanySettingsPage() {
                 <Label htmlFor="cin">CIN</Label>
                 <Input
                   id="cin"
-                  value={settings.cin}
+                  value={settings.cin || ''}
                   onChange={(e) => handleInputChange('cin', e.target.value)}
                   placeholder="Corporate Identification Number"
                 />
@@ -353,16 +353,18 @@ export default function CompanySettingsPage() {
                 <Label htmlFor="bank_name">Bank Name</Label>
                 <Input
                   id="bank_name"
-                  value={settings.bank_name}
+                  value={settings.bank_name || ''}
                   onChange={(e) => handleInputChange('bank_name', e.target.value)}
+                  placeholder="e.g., Axis Bank"
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="account_holder_name">Account Holder Name</Label>
                 <Input
                   id="account_holder_name"
-                  value={settings.account_holder_name}
+                  value={settings.account_holder_name || ''}
                   onChange={(e) => handleInputChange('account_holder_name', e.target.value)}
+                  placeholder="Account holder name"
                 />
               </div>
             </div>
@@ -372,17 +374,18 @@ export default function CompanySettingsPage() {
                 <Label htmlFor="account_number">Account Number</Label>
                 <Input
                   id="account_number"
-                  value={settings.account_number}
+                  value={settings.account_number || ''}
                   onChange={(e) => handleInputChange('account_number', e.target.value)}
+                  placeholder="e.g., 923020024498640"
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="ifsc_code">IFSC Code</Label>
                 <Input
                   id="ifsc_code"
-                  value={settings.ifsc_code}
+                  value={settings.ifsc_code || ''}
                   onChange={(e) => handleInputChange('ifsc_code', e.target.value)}
-                  placeholder="e.g., SBIN0001234"
+                  placeholder="e.g., UTIB0002083"
                 />
               </div>
             </div>
