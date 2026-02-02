@@ -21,13 +21,15 @@ import {
   X, 
   RotateCcw,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Store
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 const navigation = [
   { name: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard },
   { name: 'Products', href: '/admin/products', icon: Package },
+  { name: 'Sellers', href: '/admin/sellers', icon: Store },
   { name: 'Purchases', href: '/admin/purchases', icon: ShoppingCart },
   { name: 'Purchase Returns', href: '/admin/purchase-returns', icon: PackageX },
   { name: 'Salesmen', href: '/admin/salesmen', icon: Users },
@@ -47,6 +49,7 @@ const financialNavigation = [
   { name: 'Reports', href: '/admin/reports', icon: BarChart3 },
   { name: 'Settings', href: '/admin/settings', icon: Settings },
 ];
+
 
 export function AdminSidebar() {
   const pathname = usePathname();

@@ -1,37 +1,70 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+// Line Item interface for multiple products per purchase
+export interface IPurchaseItem {
+  product_name: string;
+  hsn_code?: string;
+  quantity: number;
+  unit: string;
+  rate: number;
+  taxable_value: number;
+}
+
 export interface IPurchase extends Document {
+  // Serial Number (Simple incremental ID)
+  serial_number: number;
+  
   // Purchase Identification
   purchase_number: string;
   purchase_date: Date;
   
-  // Product Details (Manual Entry)
-  product_name: string;
+  // Seller Reference (Link to Seller collection)
+  seller_id?: mongoose.Types.ObjectId;
+  
+  // Place of Supply (State) for GST
+  place_of_supply?: string;
+  
+  // Line Items (Multiple products per invoice)
+  items?: IPurchaseItem[];
+  
+  // Product Details (Manual Entry - for single product backward compatibility)
+  product_name?: string;
+  hsn_code?: string;
   product_category?: string;
   product_description?: string;
-  quantity: number;
-  unit: string; // kg, pieces, liters, etc.
+  quantity?: number;
+  unit?: string; // kg, pieces, liters, etc.
   
   // Batch Details
-  batch_number: string;
+  batch_number?: string;
   manufacturing_date?: Date;
   expiry_date?: Date;
   
-  // Supplier/Store Details (Manual Entry)
-  supplier_name: string;
+  // Supplier/Store Details (Manual Entry - for backward compatibility)
+  supplier_name?: string;
   supplier_contact?: string;
   supplier_address?: string;
   supplier_gstin?: string;
   supplier_email?: string;
   
   // Pricing Details
-  unit_price: number;
-  total_amount: number;
+  unit_price?: number;
+  taxable_amount?: number; // Total taxable amount before GST
+  total_amount?: number;
+  
+  // GST Details
   is_taxable?: boolean;
-  tax_amount?: number;
+  cgst_rate?: number;
+  cgst_amount?: number;
+  sgst_rate?: number;
+  sgst_amount?: number;
+  igst_rate?: number;
+  igst_amount?: number;
+  tax_amount?: number; // Total tax (CGST + SGST or IGST)
   tax_percentage?: number;
+  
   discount_amount?: number;
-  final_amount: number;
+  final_amount?: number;
   
   // Payment Details
   payment_status: 'Pending' | 'Partial' | 'Paid';
@@ -40,9 +73,13 @@ export interface IPurchase extends Document {
   payment_method?: string; // Cash, Card, UPI, Cheque, Bank Transfer, etc.
   payment_date?: Date;
   
-  // Additional Details
+  // Bill/Invoice Details
   invoice_number?: string;
+  bill_image_url?: string; // Store uploaded bill image URL
+  
+  // Additional Details
   notes?: string;
+  packaging_note?: string; // e.g., "1 Kg Packet" 
   received_by?: string;
   quality_check?: 'Pass' | 'Fail' | 'Pending';
   
@@ -52,23 +89,80 @@ export interface IPurchase extends Document {
   updated_at: Date;
 }
 
+// Schema for line items
+const PurchaseItemSchema = new Schema({
+  product_name: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  hsn_code: {
+    type: String,
+    trim: true,
+  },
+  quantity: {
+    type: Number,
+    required: true,
+    min: 0,
+  },
+  unit: {
+    type: String,
+    trim: true,
+    default: 'kg',
+  },
+  rate: {
+    type: Number,
+    required: true,
+    min: 0,
+  },
+  taxable_value: {
+    type: Number,
+    min: 0,
+  },
+}, { _id: false });
+
 const PurchaseSchema: Schema = new Schema({
+  // Serial Number (Simple incremental ID)
+  serial_number: {
+    type: Number,
+    unique: true,
+    index: true,
+  },
+  
   // Purchase Identification
   purchase_number: {
     type: String,
     unique: true,
+    sparse: true,
     index: true,
   },
   purchase_date: {
     type: Date,
-    required: true,
     default: Date.now,
   },
   
-  // Product Details
+  // Seller Reference
+  seller_id: {
+    type: Schema.Types.ObjectId,
+    ref: 'Seller',
+  },
+  
+  // Place of Supply (State for GST)
+  place_of_supply: {
+    type: String,
+    trim: true,
+  },
+  
+  // Line Items (Multiple products per invoice)
+  items: [PurchaseItemSchema],
+  
+  // Product Details - All optional for flexible entry
   product_name: {
     type: String,
-    required: true,
+    trim: true,
+  },
+  hsn_code: {
+    type: String,
     trim: true,
   },
   product_category: {
@@ -81,20 +175,17 @@ const PurchaseSchema: Schema = new Schema({
   },
   quantity: {
     type: Number,
-    required: true,
     min: 0,
   },
   unit: {
     type: String,
-    required: true,
     trim: true,
     default: 'kg',
   },
   
-  // Batch Details
+  // Batch Details - Optional
   batch_number: {
     type: String,
-    required: true,
     trim: true,
     index: true,
   },
@@ -105,10 +196,9 @@ const PurchaseSchema: Schema = new Schema({
     type: Date,
   },
   
-  // Supplier/Store Details
+  // Supplier/Store Details - Optional (for backward compatibility)
   supplier_name: {
     type: String,
-    required: true,
     trim: true,
   },
   supplier_contact: {
@@ -129,20 +219,56 @@ const PurchaseSchema: Schema = new Schema({
     lowercase: true,
   },
   
-  // Pricing Details
+  // Pricing Details - Optional
   unit_price: {
     type: Number,
-    required: true,
+    min: 0,
+  },
+  taxable_amount: {
+    type: Number,
     min: 0,
   },
   total_amount: {
     type: Number,
-    required: true,
     min: 0,
   },
   is_taxable: {
     type: Boolean,
     default: false,
+  },
+  // GST Breakdown
+  cgst_rate: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 100,
+  },
+  cgst_amount: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  sgst_rate: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 100,
+  },
+  sgst_amount: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  igst_rate: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 100,
+  },
+  igst_amount: {
+    type: Number,
+    default: 0,
+    min: 0,
   },
   tax_amount: {
     type: Number,
@@ -162,7 +288,6 @@ const PurchaseSchema: Schema = new Schema({
   },
   final_amount: {
     type: Number,
-    required: true,
     min: 0,
   },
   
@@ -190,12 +315,22 @@ const PurchaseSchema: Schema = new Schema({
     type: Date,
   },
   
-  // Additional Details
+  // Bill/Invoice Details
   invoice_number: {
     type: String,
     trim: true,
   },
+  bill_image_url: {
+    type: String,
+    trim: true,
+  },
+  
+  // Additional Details
   notes: {
+    type: String,
+    trim: true,
+  },
+  packaging_note: {
     type: String,
     trim: true,
   },
@@ -225,31 +360,42 @@ const PurchaseSchema: Schema = new Schema({
 });
 
 // Indexes for better query performance
+PurchaseSchema.index({ serial_number: -1 });
 PurchaseSchema.index({ purchase_date: -1 });
+PurchaseSchema.index({ seller_id: 1 });
 PurchaseSchema.index({ supplier_name: 1 });
 PurchaseSchema.index({ product_name: 1 });
 PurchaseSchema.index({ payment_status: 1 });
 
-// Pre-save hook to auto-generate purchase number, calculate due_amount, and update timestamps
+// Pre-save hook to auto-generate serial number, purchase number, calculate due_amount, and update timestamps
 PurchaseSchema.pre<IPurchase>('save', async function(next) {
   try {
     // Update timestamp
     this.updated_at = new Date();
     
-    // Auto-generate purchase number if not provided
-    if (!this.purchase_number) {
+    // Auto-generate serial number if not provided
+    if (!this.serial_number) {
       const Purchase = mongoose.models.Purchase || mongoose.model<IPurchase>('Purchase', PurchaseSchema);
-      const count = await Purchase.countDocuments();
-      this.purchase_number = `PUR${String(count + 1).padStart(6, '0')}`;
+      const lastPurchase = await Purchase.findOne().sort({ serial_number: -1 }).lean();
+      this.serial_number = lastPurchase && (lastPurchase as IPurchase).serial_number 
+        ? (lastPurchase as IPurchase).serial_number + 1 
+        : 1001; // Start at 1001
+    }
+    
+    // Auto-generate purchase number from serial number if not provided
+    if (!this.purchase_number) {
+      this.purchase_number = `PUR-${this.serial_number}`;
     }
     
     // Calculate due_amount
-    this.due_amount = this.final_amount - (this.paid_amount || 0);
+    const finalAmount = this.final_amount || 0;
+    const paidAmount = this.paid_amount || 0;
+    this.due_amount = finalAmount - paidAmount;
     
     // Update payment status based on amounts
-    if ((this.paid_amount || 0) === 0) {
+    if (paidAmount === 0) {
       this.payment_status = 'Pending';
-    } else if ((this.paid_amount || 0) >= this.final_amount) {
+    } else if (paidAmount >= finalAmount) {
       this.payment_status = 'Paid';
     } else {
       this.payment_status = 'Partial';

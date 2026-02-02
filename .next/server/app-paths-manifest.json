@@ -1,13 +1,15 @@
 {
-  "/login/page": "app/login/page.js",
   "/page": "app/page.js",
-  "/api/customers/route": "app/api/customers/route.js",
-  "/api/sales/route": "app/api/sales/route.js",
-  "/api/orders/route": "app/api/orders/route.js",
-  "/api/users/route": "app/api/users/route.js",
-  "/api/locations/route": "app/api/locations/route.js",
   "/api/products/route": "app/api/products/route.js",
-  "/api/invoices/route": "app/api/invoices/route.js",
-  "/admin/invoicing/page": "app/admin/invoicing/page.js",
-  "/admin/dashboard/page": "app/admin/dashboard/page.js"
+  "/login/page": "app/login/page.js",
+  "/api/users/route": "app/api/users/route.js",
+  "/api/auth/login/route": "app/api/auth/login/route.js",
+  "/api/orders/route": "app/api/orders/route.js",
+  "/api/locations/route": "app/api/locations/route.js",
+  "/api/sellers/route": "app/api/sellers/route.js",
+  "/api/purchases/route": "app/api/purchases/route.js",
+  "/admin/products/page": "app/admin/products/page.js",
+  "/admin/dashboard/page": "app/admin/dashboard/page.js",
+  "/admin/sellers/page": "app/admin/sellers/page.js",
+  "/admin/purchases/page": "app/admin/purchases/page.js"
 }

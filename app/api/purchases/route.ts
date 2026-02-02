@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Purchase from '@/models/Purchase';
+import Seller from '@/models/Seller';
 import { verifyToken } from '@/lib/auth';
 
 // GET /api/purchases - Get all purchases with filters
@@ -22,6 +23,7 @@ export async function GET(request: NextRequest) {
     
     // Filters
     const supplier_name = searchParams.get('supplier_name');
+    const seller_id = searchParams.get('seller_id');
     const product_name = searchParams.get('product_name');
     const payment_status = searchParams.get('payment_status');
     const quality_check = searchParams.get('quality_check');
@@ -32,16 +34,21 @@ export async function GET(request: NextRequest) {
     // Build query
     interface QueryType {
       supplier_name?: { $regex: string; $options: string };
+      seller_id?: string;
       product_name?: { $regex: string; $options: string };
       payment_status?: string;
       quality_check?: string;
       purchase_date?: { $gte?: Date; $lte?: Date };
-      $or?: Array<{ [key: string]: { $regex: string; $options: string } }>;
+      $or?: Array<{ [key: string]: { $regex: string; $options: string } | number }>;
     }
     const query: QueryType = {};
 
     if (supplier_name) {
       query.supplier_name = { $regex: supplier_name, $options: 'i' };
+    }
+
+    if (seller_id) {
+      query.seller_id = seller_id;
     }
 
     if (product_name) {
@@ -68,25 +75,28 @@ export async function GET(request: NextRequest) {
 
     // Global search
     if (search) {
+      const searchNum = parseInt(search);
       query.$or = [
         { purchase_number: { $regex: search, $options: 'i' } },
         { product_name: { $regex: search, $options: 'i' } },
         { supplier_name: { $regex: search, $options: 'i' } },
         { batch_number: { $regex: search, $options: 'i' } },
         { invoice_number: { $regex: search, $options: 'i' } },
+        ...(isNaN(searchNum) ? [] : [{ serial_number: searchNum }]),
       ];
     }
 
     const purchases = await Purchase.find(query)
-      .sort({ purchase_date: -1, created_at: -1 })
+      .populate('seller_id', 'name gstin phone city')
+      .sort({ serial_number: -1, purchase_date: -1, created_at: -1 })
       .lean();
 
     // Calculate summary statistics
     const summary = {
       total_purchases: purchases.length,
-      total_amount: purchases.reduce((sum, p) => sum + p.final_amount, 0),
-      total_paid: purchases.reduce((sum, p) => sum + p.paid_amount, 0),
-      total_due: purchases.reduce((sum, p) => sum + p.due_amount, 0),
+      total_amount: purchases.reduce((sum, p) => sum + (p.final_amount || 0), 0),
+      total_paid: purchases.reduce((sum, p) => sum + (p.paid_amount || 0), 0),
+      total_due: purchases.reduce((sum, p) => sum + (p.due_amount || 0), 0),
       pending_count: purchases.filter(p => p.payment_status === 'Pending').length,
       partial_count: purchases.filter(p => p.payment_status === 'Partial').length,
       paid_count: purchases.filter(p => p.payment_status === 'Paid').length,
@@ -123,40 +133,39 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
 
-    // Validate required fields
-    const requiredFields = [
-      'product_name',
-      'quantity',
-      'unit',
-      'batch_number',
-      'supplier_name',
-      'unit_price',
-      'final_amount',
-    ];
+    // NO REQUIRED FIELDS - all fields are optional for flexible entry
+    // This allows OCR to fill what it can and user to edit/add later
 
-    for (const field of requiredFields) {
-      if (!body[field]) {
-        return NextResponse.json(
-          { error: `Missing required field: ${field}` },
-          { status: 400 }
-        );
+    // If seller_id is provided, fetch seller info for backward compatibility
+    if (body.seller_id) {
+      const seller = await Seller.findById(body.seller_id);
+      if (seller) {
+        // Auto-fill supplier fields from seller if not already provided
+        if (!body.supplier_name) body.supplier_name = seller.name;
+        if (!body.supplier_gstin) body.supplier_gstin = seller.gstin;
+        if (!body.supplier_contact) body.supplier_contact = seller.phone;
+        if (!body.supplier_address) {
+          const addressParts = [seller.address, seller.city, seller.state, seller.pincode].filter(Boolean);
+          body.supplier_address = addressParts.join(', ');
+        }
+        if (!body.supplier_email) body.supplier_email = seller.email;
       }
     }
 
-    // Calculate total_amount if not provided
-    if (!body.total_amount) {
+    // Calculate total_amount if we have quantity and unit_price
+    if (!body.total_amount && body.quantity && body.unit_price) {
       body.total_amount = body.quantity * body.unit_price;
     }
 
     // Calculate final_amount if not provided
     if (!body.final_amount) {
-      const total = body.total_amount || (body.quantity * body.unit_price);
+      const total = body.total_amount || 0;
       const tax = body.tax_amount || 0;
       const discount = body.discount_amount || 0;
       body.final_amount = total + tax - discount;
     }
 
-    // Set paid_amount default
+    // Set default paid_amount
     if (body.paid_amount === undefined) {
       body.paid_amount = 0;
     }
@@ -164,13 +173,22 @@ export async function POST(request: NextRequest) {
     // Set created_by
     body.created_by = decoded.userId;
 
+    // Set default purchase_date if not provided
+    if (!body.purchase_date) {
+      body.purchase_date = new Date();
+    }
+
     const purchase = new Purchase(body);
     await purchase.save();
+
+    // Populate seller info for response
+    await purchase.populate('seller_id', 'name gstin phone city');
 
     return NextResponse.json({
       success: true,
       message: 'Purchase created successfully',
       purchase,
+      serial_number: purchase.serial_number,
     });
   } catch (error) {
     console.error('Error creating purchase:', error);
