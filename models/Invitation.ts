@@ -49,7 +49,6 @@ const InvitationSchema = new Schema<IInvitation>(
     expires_at: {
       type: Date,
       required: true,
-      index: true,
     },
     used: {
       type: Boolean,

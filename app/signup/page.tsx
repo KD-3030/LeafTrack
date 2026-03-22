@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Navigation } from '@/components/ui/navigation';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function SignupPage() {
+function SignupPageContent() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -191,5 +191,13 @@ export default function SignupPage() {
         </Card>
       </main>
     </div>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#F5F5DC]" />}>
+      <SignupPageContent />
+    </Suspense>
   );
 }
