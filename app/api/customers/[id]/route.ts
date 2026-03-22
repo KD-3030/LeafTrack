@@ -3,11 +3,24 @@ import connectDB from '@/lib/mongodb';
 import Customer, { ICustomer } from '@/models/Customer';
 import { requireUserAuth } from '@/lib/authMiddleware';
 import { Model } from 'mongoose';
+import User from '@/models/User';
+import { normalizeRoleId } from '@/lib/roles';
 
 interface RouteParams {
   params: {
     id: string;
   };
+}
+
+function canAccessCustomer(customer: ICustomer, roleId: string | null, userId: string, managerId?: string): boolean {
+  if (roleId === 'admin') return true;
+  if (roleId === 'primary_executive') {
+    return customer.primary_executive_id?.toString() === userId;
+  }
+  if (roleId === 'secondary_executive') {
+    return customer.primary_executive_id?.toString() === managerId && customer.secondary_executive_id?.toString() === userId;
+  }
+  return false;
 }
 
 // GET - Get single customer
@@ -21,6 +34,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return authResult;
     }
 
+    const currentUser = await User.findById(authResult.userId).select('role managerId');
+    if (!currentUser) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+    const roleId = normalizeRoleId(currentUser.role);
+
     const CustomerModel = Customer as Model<ICustomer>;
     const customer = await CustomerModel.findById(params.id);
 
@@ -28,9 +47,30 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
     }
 
+    if (!canAccessCustomer(customer, roleId, authResult.userId, currentUser.managerId?.toString())) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
+
+    // Keep outstanding balance synchronized from invoices (source of truth)
+    const Invoice = (await import('@/models/Invoice')).default;
+    const invoices = await Invoice.find({
+      customer_id: customer._id,
+      status: { $ne: 'Cancelled' },
+    }).select('balance_due').lean();
+
+    const outstandingBalance = invoices.reduce((sum, inv) => sum + (inv.balance_due || 0), 0);
+
+    if ((customer.outstanding_balance || 0) !== outstandingBalance) {
+      customer.outstanding_balance = outstandingBalance;
+      await customer.save();
+    }
+
     return NextResponse.json({
       success: true,
-      customer,
+      customer: {
+        ...customer.toObject(),
+        outstanding_balance: outstandingBalance,
+      },
     });
   } catch (error) {
     console.error('Error fetching customer:', error);
@@ -49,6 +89,12 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       return authResult;
     }
 
+    const currentUser = await User.findById(authResult.userId).select('role managerId');
+    if (!currentUser) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+    const roleId = normalizeRoleId(currentUser.role);
+
     const updateData = await request.json();
     const CustomerModel = Customer as Model<ICustomer>;
 
@@ -62,6 +108,48 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const existingCustomer = await CustomerModel.findById(params.id);
     if (!existingCustomer) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+    }
+
+    if (!canAccessCustomer(existingCustomer, roleId, authResult.userId, currentUser.managerId?.toString())) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
+
+    if (roleId === 'secondary_executive') {
+      delete updateData.primary_executive_id;
+      delete updateData.secondary_executive_id;
+      delete updateData.created_by;
+    }
+
+    if (roleId === 'primary_executive' && updateData.secondary_executive_id) {
+      const subordinate = await User.findById(updateData.secondary_executive_id).select('role managerId');
+      if (!subordinate || normalizeRoleId(subordinate.role) !== 'secondary_executive' || subordinate.managerId?.toString() !== authResult.userId) {
+        return NextResponse.json({ error: 'secondary_executive_id must belong to your team' }, { status: 400 });
+      }
+      updateData.primary_executive_id = authResult.userId;
+    }
+
+    if (roleId === 'admin') {
+      const requestedPrimaryId = updateData.primary_executive_id as string | undefined;
+      const requestedSecondaryId = updateData.secondary_executive_id as string | undefined;
+
+      if (requestedPrimaryId) {
+        const primary = await User.findById(requestedPrimaryId).select('role');
+        if (!primary || normalizeRoleId(primary.role) !== 'primary_executive') {
+          return NextResponse.json({ error: 'primary_executive_id must belong to a primary executive' }, { status: 400 });
+        }
+      }
+
+      if (requestedSecondaryId) {
+        const secondary = await User.findById(requestedSecondaryId).select('role managerId');
+        if (!secondary || normalizeRoleId(secondary.role) !== 'secondary_executive') {
+          return NextResponse.json({ error: 'secondary_executive_id must belong to a secondary executive' }, { status: 400 });
+        }
+
+        const effectivePrimaryId = requestedPrimaryId || existingCustomer.primary_executive_id?.toString();
+        if (effectivePrimaryId && secondary.managerId?.toString() !== effectivePrimaryId) {
+          return NextResponse.json({ error: 'Secondary executive is not mapped to selected primary executive' }, { status: 400 });
+        }
+      }
     }
 
     // If phone is being updated, check for conflicts
@@ -174,7 +262,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     // Check if user has admin role for deletion
-    if (authResult.role?.toLowerCase() !== 'admin') {
+    if (normalizeRoleId(authResult.role) !== 'admin') {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 

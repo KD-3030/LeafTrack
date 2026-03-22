@@ -3,6 +3,7 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
+import { normalizeRoleId } from '@/lib/roles';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -13,6 +14,13 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
   const { user, loading } = useAuth();
   const router = useRouter();
 
+  const getDefaultRouteForRole = (role?: string) => {
+    const roleId = normalizeRoleId(role || '');
+    if (roleId === 'admin') return '/admin/dashboard';
+    if (roleId === 'primary_executive' || roleId === 'secondary_executive') return '/salesman/dashboard';
+    return '/login';
+  };
+
   useEffect(() => {
     if (!loading) {
       if (!user) {
@@ -21,11 +29,11 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
       }
       
       // Case-insensitive role check
-      const normalizedUserRole = user.role?.toLowerCase();
-      const normalizedAllowedRoles = allowedRoles.map(r => r.toLowerCase());
+      const normalizedUserRole = normalizeRoleId(user.role);
+      const normalizedAllowedRoles = allowedRoles.map((r) => normalizeRoleId(r));
       
       if (!normalizedAllowedRoles.includes(normalizedUserRole)) {
-        router.push('/');
+        router.replace(getDefaultRouteForRole(user.role));
         return;
       }
     }
@@ -40,10 +48,10 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
   }
 
   // Case-insensitive role check
-  const normalizedUserRole = user?.role?.toLowerCase();
-  const normalizedAllowedRoles = allowedRoles.map(r => r.toLowerCase());
+  const normalizedUserRole = normalizeRoleId(user?.role || '');
+  const normalizedAllowedRoles = allowedRoles.map((r) => normalizeRoleId(r));
   
-  if (!user || !normalizedAllowedRoles.includes(normalizedUserRole || '')) {
+  if (!user || !normalizedAllowedRoles.includes(normalizedUserRole)) {
     return null;
   }
 

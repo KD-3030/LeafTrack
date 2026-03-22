@@ -9,6 +9,24 @@ import mongoose from 'mongoose';
 
 export const dynamic = 'force-dynamic';
 
+async function updateCustomerOutstandingBalance(customerId: mongoose.Types.ObjectId | string, session: mongoose.ClientSession) {
+  const InvoiceModel = Invoice;
+  const CustomerModel = Customer;
+
+  const invoices = await InvoiceModel.find({
+    customer_id: customerId,
+    status: { $ne: 'Cancelled' },
+  }).select('balance_due').session(session).lean();
+
+  const outstandingBalance = invoices.reduce((sum, inv) => sum + (inv.balance_due || 0), 0);
+
+  await CustomerModel.findByIdAndUpdate(
+    customerId,
+    { $set: { outstanding_balance: outstandingBalance } },
+    { session }
+  );
+}
+
 // POST - Create manual invoice
 export async function POST(request: NextRequest) {
   try {
@@ -28,6 +46,9 @@ export async function POST(request: NextRequest) {
       payment_terms,
       notes,
       items,
+      manual_discount,
+      discount_mode,
+      discount_value,
       invoice_sequence,
       custom_invoice_number
     } = await request.json();
@@ -100,7 +121,8 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        const grandTotal = subtotal + totalTax;
+        const totalDiscount = Math.max(0, Number(manual_discount) || 0);
+        const grandTotal = Math.max(0, subtotal + totalTax - totalDiscount);
 
         // Generate invoice number
         let invoiceNumber: string;
@@ -162,6 +184,9 @@ export async function POST(request: NextRequest) {
           salesman_id: decoded.userId, // Admin creating the invoice
           items: validatedItems,
           subtotal: subtotal,
+          total_discount: totalDiscount,
+          discount_mode: discount_mode === 'percentage' ? 'percentage' : 'amount',
+          discount_value: Math.max(0, Number(discount_value) || 0),
           taxable_amount: subtotal, // Required field - same as subtotal for now
           total_cgst: totalCgst, // CGST amount
           total_sgst: totalSgst, // SGST amount
@@ -179,6 +204,8 @@ export async function POST(request: NextRequest) {
         });
 
         await invoice.save({ session });
+
+        await updateCustomerOutstandingBalance(customer._id as mongoose.Types.ObjectId, session);
 
         // Update product stock (if tracking stock for manual invoices)
         // Note: This depends on business logic - manual invoices might not affect stock

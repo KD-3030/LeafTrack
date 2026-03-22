@@ -18,11 +18,17 @@ export interface ICustomer extends Document {
   // Credit information
   credit_limit: number;
   credit_days: number;
+  outstanding_balance: number;
   
   // Metadata
   status: 'Active' | 'Inactive';
   tags?: string[]; // For categorization
   notes?: string;
+
+  // Ownership and hierarchy mapping
+  primary_executive_id?: mongoose.Types.ObjectId;
+  secondary_executive_id?: mongoose.Types.ObjectId;
+  created_by?: mongoose.Types.ObjectId;
   
   createdAt: Date;
   updatedAt: Date;
@@ -92,6 +98,11 @@ const CustomerSchema = new Schema<ICustomer>({
     default: 30,
     min: 0,
   },
+  outstanding_balance: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
   status: {
     type: String,
     enum: ['Active', 'Inactive'],
@@ -104,6 +115,20 @@ const CustomerSchema = new Schema<ICustomer>({
   notes: {
     type: String,
     trim: true,
+  },
+  primary_executive_id: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    index: true,
+  },
+  secondary_executive_id: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    index: true,
+  },
+  created_by: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
   },
 }, {
   timestamps: true,

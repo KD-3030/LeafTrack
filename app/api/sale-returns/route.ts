@@ -6,7 +6,31 @@ import Product from '@/models/Product';
 import Customer from '@/models/Customer'; // Import Customer model for populate
 import User from '@/models/User'; // Import User model for populate (salesman, approved_by)
 import { requireUserAuth, requireAdminAuth, DecodedToken } from '@/lib/authMiddleware';
+import { normalizeRoleId } from '@/lib/roles';
 import mongoose from 'mongoose';
+
+interface ManualReturnItemInput {
+  product_name: string;
+  quantity_returned?: number;
+  quantity?: number;
+  unit_price: number;
+  total_amount: number;
+  reason?: string;
+}
+
+interface InvoiceReturnItemInput {
+  product_id: string;
+  product_name: string;
+  return_quantity: number;
+  unit_price: number;
+  total_refund?: number;
+}
+
+interface InvoiceItemShape {
+  product_id: mongoose.Types.ObjectId | string;
+  quantity: number;
+  gst_rate?: number;
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -32,9 +56,21 @@ export async function GET(request: NextRequest) {
     // Build filter based on user role and query parameters
     const filter: Record<string, string | object> = {};
     
-    // If user is a salesman, only show their returns
-    if (decoded.role?.toLowerCase() === 'salesman') {
+    const roleId = normalizeRoleId(decoded.role);
+
+    // Secondary executives can only see their own returns.
+    if (roleId === 'secondary_executive') {
       filter.salesman_id = decoded.userId;
+    } else if (roleId === 'primary_executive') {
+      const secondaries = await User.find({
+        managerId: decoded.userId,
+        role: 'SecondaryExecutive',
+        approval_status: 'approved',
+      }).select('_id').lean();
+
+      filter.salesman_id = {
+        $in: [decoded.userId, ...secondaries.map((s) => s._id.toString())],
+      };
     }
     
     // Add additional filters from query params
@@ -147,7 +183,17 @@ export async function POST(request: NextRequest) {
       return_date,
       total_refund_amount,
       return_reason
-    } = await request.json();
+    } = await request.json() as {
+      original_invoice_id?: string;
+      return_items: ManualReturnItemInput[] | InvoiceReturnItemInput[];
+      refund_method?: string;
+      notes?: string;
+      is_manual_entry?: boolean;
+      customer_details?: { name?: string; email?: string; phone?: string };
+      return_date?: string | Date;
+      total_refund_amount?: number;
+      return_reason?: string;
+    };
 
     // Handle manual entry vs invoice-based returns
     if (is_manual_entry) {
@@ -164,6 +210,8 @@ export async function POST(request: NextRequest) {
       const return_number = `RTN${String(returnCount + 1).padStart(6, '0')}`;
 
       // Create manual sale return record
+      const manualReturnItems = return_items as ManualReturnItemInput[];
+
       const saleReturn = new SaleReturn({
         return_number,
         customer_details: {
@@ -172,7 +220,7 @@ export async function POST(request: NextRequest) {
           phone: customer_details.phone || ''
         },
         return_date: return_date || new Date(),
-        return_items: return_items.map((item: any) => ({
+        return_items: manualReturnItems.map((item) => ({
           product_name: item.product_name,
           quantity_returned: item.quantity_returned || item.quantity,
           unit_price: item.unit_price,
@@ -180,7 +228,7 @@ export async function POST(request: NextRequest) {
           condition: 'Good',
           reason: item.reason || return_reason || 'Manual entry return'
         })),
-        total_refund_amount: total_refund_amount || return_items.reduce((sum: number, item: any) => sum + (item.total_amount || 0), 0),
+        total_refund_amount: total_refund_amount || manualReturnItems.reduce((sum, item) => sum + (item.total_amount || 0), 0),
         refund_method: refund_method || 'Cash',
         return_reason: return_reason || 'Manual entry return',
         notes: notes || '',
@@ -206,6 +254,8 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const invoiceReturnItems = return_items as InvoiceReturnItemInput[];
+
       // Start transaction to ensure data consistency
       const session = await mongoose.startSession();
       let savedReturn: typeof SaleReturn.prototype | null = null;
@@ -223,14 +273,15 @@ export async function POST(request: NextRequest) {
 
           // Validate return items against invoice items
           const invoiceItemsMap = new Map();
-          invoice.items.forEach((item: any) => {
-            invoiceItemsMap.set(item.product_id.toString(), item);
+          invoice.items.forEach((item) => {
+            const typedItem = item as unknown as InvoiceItemShape;
+            invoiceItemsMap.set(typedItem.product_id.toString(), typedItem);
           });
 
           let subtotal = 0;
           let tax_amount = 0;
           
-          for (const returnItem of return_items) {
+          for (const returnItem of invoiceReturnItems) {
             const invoiceItem = invoiceItemsMap.get(returnItem.product_id);
             if (!invoiceItem) {
               throw new Error(`Product ${returnItem.product_id} not found in original invoice`);
@@ -261,7 +312,7 @@ export async function POST(request: NextRequest) {
             original_sale_id: invoice.sale_id,
             customer_id: invoice.customer_id,
             salesman_id: invoice.salesman_id,
-            return_items,
+            return_items: invoiceReturnItems,
             subtotal,
             tax_amount,
             total_refund: subtotal + tax_amount,

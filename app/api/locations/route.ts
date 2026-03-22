@@ -3,6 +3,7 @@ import connectDB from '@/lib/mongodb';
 import Location, { ILocation } from '@/models/Location';
 import User from '@/models/User'; // Import User model to ensure it's registered
 import { verifyToken } from '@/lib/auth';
+import { normalizeRoleId } from '@/lib/roles';
 import mongoose from 'mongoose';
 
 export const dynamic = 'force-dynamic';
@@ -45,11 +46,29 @@ export async function GET(request: NextRequest) {
 
     const query: Record<string, unknown> = { timestamp: { $gte: timeFilter } };
 
-    // If salesman, only show own locations
-    if (decoded.role?.toLowerCase() === 'salesman') {
+    const roleId = normalizeRoleId(decoded.role);
+
+    // Secondary executives can only see their own locations.
+    if (roleId === 'secondary_executive') {
       query.salesman_id = decoded.userId;
+    } else if (roleId === 'primary_executive') {
+      const secondaries = await User.find({
+        managerId: decoded.userId,
+        role: 'SecondaryExecutive',
+        approval_status: 'approved',
+      }).select('_id').lean();
+
+      const teamIds = [decoded.userId, ...secondaries.map((s) => s._id.toString())];
+      if (salesmanId) {
+        if (!teamIds.includes(salesmanId)) {
+          return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+        }
+        query.salesman_id = salesmanId;
+      } else {
+        query.salesman_id = { $in: teamIds };
+      }
     } else if (salesmanId) {
-      // Admin can filter by specific salesman
+      // Admin can filter by specific executive.
       query.salesman_id = salesmanId;
     }
 
@@ -89,9 +108,10 @@ export async function POST(request: NextRequest) {
     const token = authHeader.substring(7);
     const decoded = verifyToken(token);
     
-    if (!decoded || decoded.role?.toLowerCase() !== 'salesman') {
+    const roleId = normalizeRoleId(decoded?.role);
+    if (!decoded || (roleId !== 'secondary_executive' && roleId !== 'primary_executive')) {
       return NextResponse.json(
-        { error: 'Only salesmen can submit locations' },
+        { error: 'Only executives can submit locations' },
         { status: 403 }
       );
     }

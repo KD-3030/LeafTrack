@@ -1,17 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import User, { IUser } from '@/models/User';
-import { verifyToken } from '@/lib/auth';
+import { requireAdminAuth } from '@/lib/authMiddleware';
 import { Model } from 'mongoose';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     await connectDB();
+
+    const authResult = requireAdminAuth(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
     
     const UserModel = User as Model<IUser>;
-    const users = await UserModel.find({}).select('-password').sort({ createdAt: -1 });
+    const users = await UserModel.find({})
+      .select('-password')
+      .populate('managerId', 'name email role')
+      .sort({ createdAt: -1 });
     
     return NextResponse.json({
       success: true,

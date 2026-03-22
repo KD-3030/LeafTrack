@@ -4,11 +4,11 @@ import Invoice from '@/models/Invoice';
 import Sale from '@/models/Sale';
 // import Product from '@/models/Product';
 import Customer from '@/models/Customer';
-// import User from '@/models/User';
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import { IProduct } from '@/models/Product';
 import { IUser } from '@/models/User';
+import { normalizeRoleId } from '@/lib/roles';
 
 // Type for populated sale document
 interface PopulatedSale {
@@ -89,8 +89,8 @@ export async function GET(request: NextRequest) {
     // Build filter object
     const filter: {
       status?: string;
-      customer_id?: string | mongoose.Types.ObjectId;
-      salesman_id?: string | mongoose.Types.ObjectId;
+      customer_id?: string | mongoose.Types.ObjectId | { $in: mongoose.Types.ObjectId[] };
+      salesman_id?: string | mongoose.Types.ObjectId | { $in: mongoose.Types.ObjectId[] };
       invoice_date?: {
         $gte?: Date;
         $lte?: Date;
@@ -107,9 +107,59 @@ export async function GET(request: NextRequest) {
       if (toDate) filter.invoice_date.$lte = new Date(toDate);
     }
 
-    // If user is a salesman, filter by their ID
-    if (decoded.role?.toLowerCase() === 'salesman') {
-      filter.salesman_id = new mongoose.Types.ObjectId(decoded.id);
+    const roleId = normalizeRoleId(decoded.role);
+    if (roleId === 'secondary_executive') {
+      const ownedCustomers = await Customer.find({
+        secondary_executive_id: new mongoose.Types.ObjectId(decoded.id),
+      }).select('_id').lean();
+
+      const ownedCustomerIds = ownedCustomers.map((c) => c._id as mongoose.Types.ObjectId);
+      if (!ownedCustomerIds.length) {
+        return NextResponse.json({
+          success: true,
+          invoices: [],
+          pagination: {
+            currentPage: page,
+            totalPages: 0,
+            totalCount: 0,
+            hasNextPage: false,
+            hasPrevPage: false,
+          },
+        });
+      }
+
+      if (customerId) {
+        const requested = new mongoose.Types.ObjectId(customerId);
+        filter.customer_id = ownedCustomerIds.some((id) => id.equals(requested)) ? requested : { $in: [] };
+      } else {
+        filter.customer_id = { $in: ownedCustomerIds };
+      }
+    } else if (roleId === 'primary_executive') {
+      const ownedCustomers = await Customer.find({
+        primary_executive_id: new mongoose.Types.ObjectId(decoded.id),
+      }).select('_id').lean();
+
+      const ownedCustomerIds = ownedCustomers.map((c) => c._id as mongoose.Types.ObjectId);
+      if (!ownedCustomerIds.length) {
+        return NextResponse.json({
+          success: true,
+          invoices: [],
+          pagination: {
+            currentPage: page,
+            totalPages: 0,
+            totalCount: 0,
+            hasNextPage: false,
+            hasPrevPage: false,
+          },
+        });
+      }
+
+      if (customerId) {
+        const requested = new mongoose.Types.ObjectId(customerId);
+        filter.customer_id = ownedCustomerIds.some((id) => id.equals(requested)) ? requested : { $in: [] };
+      } else {
+        filter.customer_id = { $in: ownedCustomerIds };
+      }
     }
     
     // Get total count for pagination

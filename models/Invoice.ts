@@ -50,6 +50,8 @@ export interface IInvoice extends Document {
   // Totals
   subtotal: number;
   total_discount: number;
+  discount_mode?: 'amount' | 'percentage';
+  discount_value?: number;
   taxable_amount: number;
   total_cgst: number;
   total_sgst: number;
@@ -186,6 +188,16 @@ const InvoiceSchema = new Schema<IInvoice>({
   total_discount: {
     type: Number,
     default: 0,
+  },
+  discount_mode: {
+    type: String,
+    enum: ['amount', 'percentage'],
+    default: 'amount',
+  },
+  discount_value: {
+    type: Number,
+    default: 0,
+    min: 0,
   },
   taxable_amount: {
     type: Number,

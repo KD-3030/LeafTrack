@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User, AuthContextType } from '@/types';
 import { useRouter } from 'next/navigation';
+import { normalizeRoleId } from '@/lib/roles';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -19,7 +20,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (token && userData) {
       try {
         setUser(JSON.parse(userData));
-      } catch (error) {
+      } catch {
         localStorage.removeItem('leaftrack_token');
         localStorage.removeItem('leaftrack_user');
       }
@@ -28,7 +29,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, []);
 
-  const login = async (email: string, password: string, role: string): Promise<boolean> => {
+  const login = async (email: string, password: string, role: string): Promise<{ success: boolean; error?: string }> => {
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
@@ -41,7 +42,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await response.json();
       
       if (!response.ok || !data.success) {
-        return false;
+        return {
+          success: false,
+          error: data?.error || 'Login failed',
+        };
       }
       
       localStorage.setItem('leaftrack_token', data.token);
@@ -49,42 +53,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       setUser(data.user);
       
-      // Redirect based on role (case-insensitive)
-      setTimeout(() => {
-        if (data.user.role.toLowerCase() === 'admin') {
-          router.push('/admin/dashboard');
-        } else {
-          router.push('/salesman/dashboard');
-        }
-      }, 500);
+      // Redirect based on role aliases.
+      const roleId = normalizeRoleId(data.user.role);
+      if (roleId === 'admin') {
+        router.replace('/admin/dashboard');
+      } else {
+        router.replace('/salesman/dashboard');
+      }
       
-      return true;
+      return { success: true };
     } catch (error) {
       console.error('Login error:', error);
-      return false;
+      return {
+        success: false,
+        error: 'Login failed. Please try again.',
+      };
     }
   };
 
-  const signup = async (name: string, email: string, password: string, role: string): Promise<boolean> => {
+  const signup = async (
+    name: string,
+    email: string,
+    password: string,
+    invitationToken: string
+  ): Promise<{ success: boolean; error?: string }> => {
     try {
       const response = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ name, email, password, role }),
+        body: JSON.stringify({ name, email, password, invitationToken }),
       });
 
       const data = await response.json();
       
       if (!response.ok || !data.success) {
-        return false;
+        return {
+          success: false,
+          error: data?.error || 'Signup failed',
+        };
       }
       
-      return true;
+      return { success: true };
     } catch (error) {
       console.error('Signup error:', error);
-      return false;
+      return {
+        success: false,
+        error: 'Signup failed. Please try again.',
+      };
     }
   };
 

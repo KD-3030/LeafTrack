@@ -1,0 +1,503 @@
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import { connectDB } from '@/lib/mongodb';
+import Invoice from '@/models/Invoice';
+import Customer from '@/models/Customer';
+import CompanySettings from '@/models/CompanySettings';
+import User from '@/models/User';
+import { verifyToken } from '@/lib/auth';
+import { normalizeRoleId } from '@/lib/roles';
+import QRCode from 'qrcode';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+interface JwtPayload {
+  userId: string;
+  role: string;
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatDate(value?: string | Date): string {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleDateString('en-IN');
+}
+
+function formatCurrency(amount: number): string {
+  return amount.toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function toWordsIndian(num: number): string {
+  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
+  const teens = ['Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+  const twoDigits = (n: number): string => {
+    if (n < 10) return ones[n];
+    if (n < 20) return teens[n - 10];
+    return `${tens[Math.floor(n / 10)]}${n % 10 ? ` ${ones[n % 10]}` : ''}`.trim();
+  };
+
+  const threeDigits = (n: number): string => {
+    const hundred = Math.floor(n / 100);
+    const rest = n % 100;
+    const parts: string[] = [];
+    if (hundred) parts.push(`${ones[hundred]} Hundred`);
+    if (rest) parts.push(twoDigits(rest));
+    return parts.join(' ');
+  };
+
+  const integer = Math.floor(Math.max(0, num));
+  if (integer === 0) return 'Zero';
+
+  const crore = Math.floor(integer / 10000000);
+  const lakh = Math.floor((integer % 10000000) / 100000);
+  const thousand = Math.floor((integer % 100000) / 1000);
+  const hundred = integer % 1000;
+
+  const parts: string[] = [];
+  if (crore) parts.push(`${threeDigits(crore)} Crore`);
+  if (lakh) parts.push(`${threeDigits(lakh)} Lakh`);
+  if (thousand) parts.push(`${threeDigits(thousand)} Thousand`);
+  if (hundred) parts.push(threeDigits(hundred));
+
+  return parts.join(' ').trim();
+}
+
+function toAbsoluteAssetUrl(url: string | undefined, origin: string): string | undefined {
+  if (!url) return undefined;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
+  if (url.startsWith('/')) return `${origin}${url}`;
+  return `${origin}/${url}`;
+}
+
+function getBrowserExecutablePath(): string | undefined {
+  const candidates = [
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    process.env.CHROME_PATH,
+    'C:/Program Files/Google/Chrome/Application/chrome.exe',
+    'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+    'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
+    'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    if (fs.existsSync(candidate)) return candidate;
+  }
+
+  return undefined;
+}
+
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    await connectDB();
+
+    const authHeader = request.headers.get('authorization');
+    if (!authHeader?.startsWith('Bearer ')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const token = authHeader.substring(7);
+    const decoded = verifyToken(token) as JwtPayload | null;
+    if (!decoded) {
+      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    }
+
+    const invoice = await Invoice.findById(params.id).lean();
+    if (!invoice) {
+      return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
+    }
+
+    const roleId = normalizeRoleId(decoded.role);
+    if (roleId === 'secondary_executive') {
+      if (invoice.salesman_id?.toString() !== decoded.userId) {
+        return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+      }
+    } else if (roleId === 'primary_executive') {
+      const secondaries = await User.find({
+        managerId: decoded.userId,
+        role: 'SecondaryExecutive',
+        approval_status: 'approved',
+      }).select('_id').lean();
+
+      const teamIds = new Set([decoded.userId, ...secondaries.map((s) => s._id.toString())]);
+      if (!teamIds.has(invoice.salesman_id?.toString())) {
+        return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+      }
+    }
+
+    const customer = await Customer.findById(invoice.customer_id).select('outstanding_balance').lean();
+    const rawSettings = await CompanySettings.findOne().lean();
+    const settings = (rawSettings || null) as Record<string, unknown> | null;
+
+    const origin = request.nextUrl.origin;
+    const companyName = (settings?.company_name as string | undefined) || invoice.company_details?.name || 'Company Name';
+    const companyAddress = [
+      settings?.address as string | undefined,
+      settings?.city as string | undefined,
+      settings?.state as string | undefined,
+      settings?.pincode as string | undefined,
+    ].filter(Boolean).join(', ') || invoice.company_details?.address || '-';
+    const companyPhone = (settings?.phone as string | undefined) || invoice.company_details?.phone || '-';
+    const companyEmail = (settings?.email as string | undefined) || invoice.company_details?.email || '-';
+    const companyGstin = (settings?.gstin as string | undefined) || invoice.company_details?.gstin || '-';
+
+    const logoUrl = toAbsoluteAssetUrl(settings?.logo_url as string | undefined, origin);
+    const signatureUrl = toAbsoluteAssetUrl(settings?.signature_url as string | undefined, origin);
+
+    const upiId = settings?.upi_id as string | undefined;
+    let qrDataUrl = '';
+    if (upiId) {
+      const upiUri = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(companyName)}&cu=INR`;
+      qrDataUrl = await QRCode.toDataURL(upiUri, { width: 120, margin: 1 });
+    }
+
+    const items = (invoice.items || []).map((item) => {
+      const quantity = Number(item.quantity || 0);
+      const unitPrice = Number(item.unit_price || 0);
+      const taxableAmount = Number(item.taxable_amount || quantity * unitPrice);
+      const cgst = Number(item.cgst_amount || 0);
+      const sgst = Number(item.sgst_amount || 0);
+      const igst = Number(item.igst_amount || 0);
+      const taxAmount = cgst + sgst + igst || Number((taxableAmount * Number(item.gst_rate || 0)) / 100);
+      const discountAmount = Number((quantity * unitPrice * Number(item.discount_percentage || 0)) / 100);
+      return {
+        productName: item.product_name || '-',
+        hsnCode: item.hsn_code || '-',
+        qty: quantity,
+        unit: 'Pcs',
+        price: unitPrice,
+        discount: discountAmount,
+        gstRate: Number(item.gst_rate || 0),
+        gstAmount: taxAmount,
+        amount: Number(item.total_amount || taxableAmount + taxAmount),
+        taxableAmount,
+      };
+    });
+
+    const groupedByHsn = new Map<string, { taxable: number; tax: number; rate: number }>();
+    items.forEach((item) => {
+      const key = item.hsnCode || '-';
+      const current = groupedByHsn.get(key) || { taxable: 0, tax: 0, rate: item.gstRate };
+      current.taxable += item.taxableAmount;
+      current.tax += item.gstAmount;
+      current.rate = item.gstRate || current.rate;
+      groupedByHsn.set(key, current);
+    });
+
+    const taxSummaryRows = Array.from(groupedByHsn.entries()).map(([hsn, row]) => {
+      const halfRate = row.rate / 2;
+      const halfTax = row.tax / 2;
+      return {
+        hsn,
+        taxable: row.taxable,
+        cgstRate: halfRate,
+        cgstAmt: halfTax,
+        sgstRate: halfRate,
+        sgstAmt: halfTax,
+        totalTax: row.tax,
+      };
+    });
+
+    const totalTaxable = taxSummaryRows.reduce((sum, row) => sum + row.taxable, 0);
+    const totalTax = taxSummaryRows.reduce((sum, row) => sum + row.totalTax, 0);
+    const avgRate = totalTaxable > 0 ? (totalTax * 100) / totalTaxable : 0;
+
+    const subtotal = Number(invoice.subtotal || items.reduce((sum, item) => sum + item.taxableAmount, 0));
+    const grandTotal = Number(invoice.grand_total || 0);
+    const rounded = Math.round(grandTotal);
+    const roundOff = Number((rounded - grandTotal).toFixed(2));
+
+    const paidAmount = Number(invoice.paid_amount || 0);
+    const balanceDue = Number(invoice.balance_due || Math.max(0, grandTotal - paidAmount));
+    const currentBalance = Number(customer?.outstanding_balance || balanceDue);
+    const previousBalance = Math.max(0, currentBalance - balanceDue);
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Helvetica, Arial, sans-serif; font-size: 12px; color: #111; line-height: 1.35; }
+    .invoice-document { width: 100%; padding: 12px; border: 1px solid #555; }
+    h1 { font-size: 20px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.4px; }
+    h2 { font-size: 15px; font-weight: 700; margin-bottom: 3px; }
+    h3 { font-size: 13px; font-weight: 700; border-bottom: 1px solid #555; padding-bottom: 3px; margin-bottom: 6px; }
+    .text-bold { font-weight: 700; }
+    .text-right { text-align: right; }
+    .text-center { text-align: center; }
+    .uppercase { text-transform: uppercase; }
+    .header-grid { display: grid; grid-template-columns: 2fr 1fr; border: 1px solid #555; padding: 8px; margin-bottom: 8px; }
+    .company-row { display: grid; grid-template-columns: 48px 1fr; gap: 8px; }
+    .logo-box { width: 44px; height: 44px; border: 1px solid #777; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .logo-box img { max-width: 42px; max-height: 42px; }
+    .header-meta { text-align: right; }
+    .header-meta p { font-size: 11px; color: #444; margin-top: 4px; }
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #555; border-top: none; }
+    .info-col { padding: 6px; }
+    .info-col.left { border-right: 1px solid #555; }
+    .detail-grid { display: grid; grid-template-columns: 95px 1fr; row-gap: 3px; font-size: 12px; }
+    .detail-grid span:first-child { font-weight: 700; }
+    .ship-box { border: 1px solid #555; border-top: none; padding: 6px; margin-bottom: 8px; }
+    .data-table, .tax-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .data-table th, .data-table td, .tax-table th, .tax-table td { border: 1px solid #555; padding: 5px; vertical-align: top; }
+    .data-table th, .tax-table th { background: #f4f4f4; font-weight: 700; }
+    .summary-grid { display: grid; grid-template-columns: 2.1fr 1.2fr; border: 1px solid #555; border-top: none; margin-bottom: 8px; }
+    .summary-left { border-right: 1px solid #555; padding: 6px; }
+    .summary-right { padding: 6px; }
+    .totals-calc-grid { display: grid; grid-template-columns: 1fr 110px; row-gap: 5px; font-size: 12px; }
+    .totals-calc-grid .calc-label { text-align: left; }
+    .totals-calc-grid .calc-value { text-align: right; }
+    .totals-calc-grid .grand-total { font-weight: 700; font-size: 14px; border-top: 1px solid #555; padding-top: 4px; }
+    .terms-box { border: 1px solid #555; border-top: none; padding: 6px; margin-bottom: 0; }
+    .footer-grid { display: grid; grid-template-columns: 1.8fr 1fr; border: 1px solid #555; border-top: none; }
+    .bank-box { padding: 6px; border-right: 1px solid #555; }
+    .signature-area { padding: 6px; display: flex; flex-direction: column; justify-content: space-between; min-height: 120px; }
+    .signature-line { border-top: 1px solid #555; width: 170px; padding-top: 4px; margin-top: 30px; }
+    .bank-grid { display: grid; grid-template-columns: 1fr 60px; gap: 8px; }
+    .qr-box { border: 1px solid #777; width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .qr-box img { width: 54px; height: 54px; }
+  </style>
+</head>
+<body>
+  <div class="invoice-document">
+    <div class="header-grid">
+      <div class="company-row">
+        <div class="logo-box">${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="logo" />` : ''}</div>
+        <div>
+          <h2>${escapeHtml(companyName)}</h2>
+          <p>${escapeHtml(companyAddress)}</p>
+          <p>Phone: ${escapeHtml(companyPhone)}${companyEmail ? ` | Email: ${escapeHtml(companyEmail)}` : ''}</p>
+          <p>GSTIN: ${escapeHtml(companyGstin)}</p>
+        </div>
+      </div>
+      <div class="header-meta">
+        <h1>Tax Invoice</h1>
+        <p class="uppercase">Original for Recipient</p>
+      </div>
+    </div>
+
+    <div class="info-grid">
+      <div class="info-col left">
+        <h3>Bill To:</h3>
+        <p class="text-bold">${escapeHtml(invoice.customer_details?.name || '-')}</p>
+        <p>${escapeHtml(invoice.customer_details?.address || '-')}</p>
+        <div class="detail-grid" style="margin-top: 6px;">
+          <span>Contact No:</span><span>${escapeHtml(invoice.customer_details?.phone || '-')}</span>
+          <span>GSTIN:</span><span>${escapeHtml(invoice.customer_details?.gstin || '-')}</span>
+          <span>State:</span><span>${escapeHtml(invoice.customer_details?.state || '-')}</span>
+        </div>
+      </div>
+      <div class="info-col">
+        <h3>Invoice Details:</h3>
+        <div class="detail-grid">
+          <span>Invoice No:</span><span>${escapeHtml(invoice.invoice_number || '-')}</span>
+          <span>Date:</span><span>${escapeHtml(formatDate(invoice.invoice_date))}</span>
+          <span>Place Of Supply:</span><span>${escapeHtml(invoice.customer_details?.state || '-')}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="ship-box">
+      <h3>Ship To:</h3>
+      <p>${escapeHtml(invoice.customer_details?.address || '-')}</p>
+    </div>
+
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width:5%">#</th>
+          <th style="width:31%; text-align:left;">Item name</th>
+          <th style="width:10%">HSN/ SAC</th>
+          <th style="width:7%">Quantity</th>
+          <th style="width:7%">Unit</th>
+          <th style="width:12%; text-align:right;">Price / Unit(₹)</th>
+          <th style="width:10%; text-align:right;">Discount(₹)</th>
+          <th style="width:10%; text-align:right;">GST(₹)</th>
+          <th style="width:13%; text-align:right;">Amount(₹)</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map((item, i) => `
+          <tr>
+            <td class="text-center">${i + 1}</td>
+            <td>${escapeHtml(item.productName)}</td>
+            <td class="text-center">${escapeHtml(item.hsnCode)}</td>
+            <td class="text-center">${item.qty}</td>
+            <td class="text-center">${escapeHtml(item.unit)}</td>
+            <td class="text-right">${formatCurrency(item.price)}</td>
+            <td class="text-right">${formatCurrency(item.discount)}</td>
+            <td class="text-right">${formatCurrency(item.gstAmount)} (${item.gstRate.toFixed(0)}%)</td>
+            <td class="text-right">${formatCurrency(item.amount)}</td>
+          </tr>
+        `).join('')}
+        <tr>
+          <td></td>
+          <td class="text-bold">Total</td>
+          <td></td>
+          <td class="text-center text-bold">${items.reduce((sum, item) => sum + item.qty, 0)}</td>
+          <td></td>
+          <td></td>
+          <td class="text-right text-bold">${formatCurrency(items.reduce((sum, item) => sum + item.discount, 0))}</td>
+          <td class="text-right text-bold">${formatCurrency(items.reduce((sum, item) => sum + item.gstAmount, 0))}</td>
+          <td class="text-right text-bold">${formatCurrency(grandTotal)}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="summary-grid">
+      <div class="summary-left">
+        <p class="text-bold" style="margin-bottom:4px;">Tax Summary:</p>
+        <table class="tax-table" style="margin-bottom:8px;">
+          <thead>
+            <tr>
+              <th>HSN/ SAC</th>
+              <th>Taxable amount</th>
+              <th>CGST Rate (%)</th>
+              <th>CGST Amt (₹)</th>
+              <th>SGST Rate (%)</th>
+              <th>SGST Amt (₹)</th>
+              <th>Total Tax (₹)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${taxSummaryRows.map((row) => `
+              <tr>
+                <td class="text-center">${escapeHtml(row.hsn)}</td>
+                <td class="text-right">${formatCurrency(row.taxable)}</td>
+                <td class="text-center">${row.cgstRate.toFixed(1)}</td>
+                <td class="text-right">${formatCurrency(row.cgstAmt)}</td>
+                <td class="text-center">${row.sgstRate.toFixed(1)}</td>
+                <td class="text-right">${formatCurrency(row.sgstAmt)}</td>
+                <td class="text-right">${formatCurrency(row.totalTax)}</td>
+              </tr>
+            `).join('')}
+            <tr>
+              <td class="text-center text-bold">TOTAL</td>
+              <td class="text-right text-bold">${formatCurrency(totalTaxable)}</td>
+              <td class="text-center text-bold">${(avgRate / 2).toFixed(1)}</td>
+              <td class="text-right text-bold">${formatCurrency(totalTax / 2)}</td>
+              <td class="text-center text-bold">${(avgRate / 2).toFixed(1)}</td>
+              <td class="text-right text-bold">${formatCurrency(totalTax / 2)}</td>
+              <td class="text-right text-bold">${formatCurrency(totalTax)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="text-bold" style="margin-bottom:4px;">Invoice Amount in Words:</p>
+        <p style="font-style: italic;">${escapeHtml(toWordsIndian(grandTotal))} Rupees only</p>
+      </div>
+
+      <div class="summary-right">
+        <div class="totals-calc-grid">
+          <div class="calc-label">Sub Total:</div><div class="calc-value">₹ ${formatCurrency(subtotal)}</div>
+          <div class="calc-label">Round Off:</div><div class="calc-value">₹ ${formatCurrency(roundOff)}</div>
+          <div class="calc-label grand-total">Total:</div><div class="calc-value grand-total">₹ ${formatCurrency(grandTotal)}</div>
+          <div class="calc-label">Received:</div><div class="calc-value">₹ ${formatCurrency(paidAmount)}</div>
+          <div class="calc-label">Balance:</div><div class="calc-value">₹ ${formatCurrency(balanceDue)}</div>
+          <div class="calc-label">Previous Bal:</div><div class="calc-value">₹ ${formatCurrency(previousBalance)}</div>
+          <div class="calc-label text-bold">Current Bal:</div><div class="calc-value text-bold">₹ ${formatCurrency(currentBalance)}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="terms-box">
+      <p class="text-bold">Terms & Conditions:</p>
+      <p>${escapeHtml(invoice.terms_and_conditions || (settings?.invoice_terms as string | undefined) || 'Thanks for doing business with us!')}</p>
+    </div>
+
+    <div class="footer-grid">
+      <div class="bank-box">
+        <h3>Bank Details:</h3>
+        <div class="bank-grid">
+          <div>
+            <p><span class="text-bold">Name:</span> ${escapeHtml((settings?.bank_name as string | undefined) || '-')}</p>
+            <p><span class="text-bold">Account No:</span> ${escapeHtml((settings?.account_number as string | undefined) || '-')}</p>
+            <p><span class="text-bold">IFSC code:</span> ${escapeHtml((settings?.ifsc_code as string | undefined) || '-')}</p>
+            <p><span class="text-bold">Account holder's name:</span> ${escapeHtml((settings?.account_holder_name as string | undefined) || companyName)}</p>
+          </div>
+          <div>
+            ${qrDataUrl ? `<div class="qr-box"><img src="${qrDataUrl}" alt="QR" /></div>` : ''}
+          </div>
+        </div>
+      </div>
+      <div class="signature-area">
+        <div>
+          <p class="text-bold">For ${escapeHtml(companyName)}:</p>
+        </div>
+        <div class="signature-line">
+          ${signatureUrl ? `<img src="${escapeHtml(signatureUrl)}" alt="signature" style="height:30px; max-width:140px; object-fit:contain;" />` : ''}
+          <p>Authorized Signatory</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    const executablePath = getBrowserExecutablePath();
+    if (!executablePath) {
+      return NextResponse.json(
+        {
+          error: 'No Chrome/Edge executable found for puppeteer-core. Set PUPPETEER_EXECUTABLE_PATH.',
+        },
+        { status: 500 },
+      );
+    }
+
+    const puppeteer = await import('puppeteer-core');
+    const browser = await puppeteer.default.launch({
+      headless: true,
+      executablePath,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+
+    try {
+      const page = await browser.newPage();
+      await page.setContent(html, { waitUntil: 'networkidle0' });
+
+      const pdf = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        margin: {
+          top: '8mm',
+          right: '8mm',
+          bottom: '8mm',
+          left: '8mm',
+        },
+      });
+
+      return new NextResponse(Buffer.from(pdf), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="invoice-${invoice.invoice_number}.pdf"`,
+          'Cache-Control': 'no-store',
+        },
+      });
+    } finally {
+      await browser.close();
+    }
+  } catch (error) {
+    console.error('Error generating invoice PDF via puppeteer:', error);
+    return NextResponse.json({ error: 'Failed to generate invoice PDF' }, { status: 500 });
+  }
+}

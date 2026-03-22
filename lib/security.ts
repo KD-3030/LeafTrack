@@ -216,8 +216,10 @@ export function validateOrigin(request: NextRequest): boolean {
 /**
  * Create security middleware
  */
-export function securityMiddleware(handler: Function) {
-  return async (request: NextRequest, ...args: any[]) => {
+type SecuredRouteHandler = (request: NextRequest, ...args: unknown[]) => NextResponse | Promise<NextResponse>;
+
+export function securityMiddleware(handler: SecuredRouteHandler) {
+  return async (request: NextRequest, ...args: unknown[]) => {
     // Check origin
     if (!validateOrigin(request)) {
       logSecurityEvent('INVALID_ORIGIN', { origin: request.headers.get('origin') }, request);

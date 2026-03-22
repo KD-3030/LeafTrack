@@ -29,9 +29,9 @@ export default function LoginPage() {
     setIsLoading(true);
     
     try {
-      const success = await login(email, password, role);
-      if (!success) {
-        toast.error('Invalid credentials or role mismatch');
+      const result = await login(email, password, role);
+      if (!result.success) {
+        toast.error(result.error || 'Invalid credentials or role mismatch');
         return;
       }
       toast.success('Login successful! Redirecting...');
@@ -93,7 +93,8 @@ export default function LoginPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="Admin">Admin</SelectItem>
-                    <SelectItem value="Salesman">Salesman</SelectItem>
+                    <SelectItem value="PrimaryExecutive">Primary Executive</SelectItem>
+                    <SelectItem value="SecondaryExecutive">Secondary Executive</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -109,10 +110,7 @@ export default function LoginPage() {
             
             <div className="mt-6 text-center">
               <p className="text-sm text-gray-600">
-                 Dont have an account?{' '}
-                <a href="/signup" className="text-green-600 hover:text-green-700 font-medium">
-                  Sign up here
-                </a>
+                Accounts are invite-only. Contact your admin for an invitation link.
               </p>
             </div>
           </CardContent>

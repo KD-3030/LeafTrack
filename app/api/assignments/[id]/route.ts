@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import Assignment, { IAssignment } from '@/models/Assignment';
 import Product from '@/models/Product';
+import User from '@/models/User';
 import { requireAdminAuth, requireUserAuth, DecodedToken } from '@/lib/authMiddleware';
 import mongoose from 'mongoose';
+import { normalizeRoleId } from '@/lib/roles';
 
 export const dynamic = 'force-dynamic';
 
@@ -138,6 +140,13 @@ export async function GET(
     }
 
     const decoded = authResult as DecodedToken;
+    const currentUser = await User.findById(decoded.userId).select('role managerId');
+    if (!currentUser) {
+      return NextResponse.json(
+        { success: false, error: 'User not found' },
+        { status: 404 }
+      );
+    }
     const { id } = params;
 
     // Validate assignment ID
@@ -148,11 +157,18 @@ export async function GET(
       );
     }
 
-    // Build query based on user role
-    const query = { _id: id };
-    
-    // If user is a salesman, they can only see their own assignments
-    if (decoded.role?.toLowerCase() === 'salesman') {
+    const query: Record<string, string> = { _id: id };
+    const roleId = normalizeRoleId(currentUser.role);
+
+    if (roleId === 'secondary_executive') {
+      if (!currentUser.managerId) {
+        return NextResponse.json(
+          { success: false, error: 'Secondary executive is not assigned to a primary executive' },
+          { status: 400 }
+        );
+      }
+      Object.assign(query, { salesman_id: currentUser.managerId.toString() });
+    } else if (roleId === 'primary_executive') {
       Object.assign(query, { salesman_id: decoded.userId });
     }
 

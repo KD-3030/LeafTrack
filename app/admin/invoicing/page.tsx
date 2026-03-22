@@ -10,12 +10,13 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { FileText, Plus, Search, Edit, Download, RefreshCw, DollarSign, TrendingUp, AlertCircle, Calendar, Filter, Eye, ArrowLeft, Trash2, Edit2 } from 'lucide-react';
+import { FileText, Plus, Search, Edit, Download, RefreshCw, DollarSign, TrendingUp, AlertCircle, Calendar, Filter, Eye, Trash2, Edit2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { generateInvoicePDF } from '@/lib/pdfGenerator';
 
 interface Invoice {
   _id: string;
+  customer_id?: string;
   invoice_number: string;
   invoice_date: string;
   due_date: string;
@@ -49,6 +50,14 @@ interface Invoice {
     gst_rate: number;
     total_amount: number;
   }[];
+  total_discount?: number;
+  discount_mode?: 'amount' | 'percentage';
+  discount_value?: number;
+  subtotal?: number;
+  total_tax?: number;
+  total_cgst?: number;
+  total_sgst?: number;
+  total_igst?: number;
 }
 
 interface Sale {
@@ -75,6 +84,7 @@ interface Customer {
   phone?: string;
   gstin?: string;
   address?: string;
+  outstanding_balance?: number;
 }
 
 interface Product {
@@ -104,6 +114,9 @@ interface ManualInvoiceForm {
   due_date: string;
   payment_terms: string;
   notes?: string;
+  manual_discount: number;
+  discount_mode: 'amount' | 'percentage';
+  discount_value: number;
   items: ManualInvoiceItem[];
   invoice_sequence?: string; // Custom sequence number (last 4 digits)
 }
@@ -137,6 +150,9 @@ export default function InvoicingPage() {
     due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days from now
     payment_terms: '30 days',
     notes: '',
+    manual_discount: 0,
+    discount_mode: 'amount',
+    discount_value: 0,
     items: []
   });
   const [previewInvoiceNumber, setPreviewInvoiceNumber] = useState<string>('');
@@ -146,6 +162,8 @@ export default function InvoicingPage() {
   const [isEditingFullInvoiceNumber, setIsEditingFullInvoiceNumber] = useState(false); // Toggle for editing mode
   const [isEditingExistingInvoiceNumber, setIsEditingExistingInvoiceNumber] = useState(false); // For editing existing invoice
   const [editedInvoiceNumber, setEditedInvoiceNumber] = useState<string>(''); // New invoice number for existing invoice
+  const [editDiscountMode, setEditDiscountMode] = useState<'amount' | 'percentage'>('amount');
+  const [editDiscountValue, setEditDiscountValue] = useState<number>(0);
   const [selectedProduct, setSelectedProduct] = useState('');
   const [itemQuantity, setItemQuantity] = useState(1);
   const [itemUnitPrice, setItemUnitPrice] = useState(0);
@@ -401,8 +419,61 @@ export default function InvoicingPage() {
     }));
   };
 
+  const calculateDiscountAmount = (
+    baseTotal: number,
+    mode: 'amount' | 'percentage',
+    value: number,
+  ) => {
+    const sanitizedValue = Math.max(0, Number(value) || 0);
+    const rawDiscount = mode === 'percentage'
+      ? (baseTotal * sanitizedValue) / 100
+      : sanitizedValue;
+    return Math.min(rawDiscount, baseTotal);
+  };
+
+  const calculateItemTotals = (items: Invoice['items']) => {
+    const subtotal = items.reduce((sum, item) => {
+      const taxable = item.taxable_amount || (item.quantity * item.unit_price) || 0;
+      return sum + taxable;
+    }, 0);
+    const totalTax = items.reduce((sum, item) => {
+      const taxable = item.taxable_amount || (item.quantity * item.unit_price) || 0;
+      const tax = item.total_amount - taxable;
+      return sum + (tax > 0 ? tax : 0);
+    }, 0);
+
+    return {
+      subtotal,
+      totalTax,
+      grossTotal: subtotal + totalTax,
+    };
+  };
+
+  const getManualInvoiceTotals = () => {
+    const subtotal = manualInvoiceForm.items.reduce((sum, item) => sum + item.taxable_amount, 0);
+    const totalTax = manualInvoiceForm.items.reduce((sum, item) => sum + item.tax_amount, 0);
+    const grossTotal = subtotal + totalTax;
+
+    const clampedDiscount = calculateDiscountAmount(
+      grossTotal,
+      manualInvoiceForm.discount_mode,
+      manualInvoiceForm.discount_value,
+    );
+    const grandTotal = Math.max(0, grossTotal - clampedDiscount);
+
+    return {
+      subtotal,
+      totalTax,
+      grossTotal,
+      discountAmount: clampedDiscount,
+      grandTotal,
+    };
+  };
+
   const createManualInvoice = async () => {
     try {
+      const totals = getManualInvoiceTotals();
+
       if (!manualInvoiceForm.customer_id) {
         toast({
           title: "Error",
@@ -439,6 +510,9 @@ export default function InvoicingPage() {
         },
         body: JSON.stringify({
           ...manualInvoiceForm,
+          manual_discount: totals.discountAmount,
+          discount_mode: manualInvoiceForm.discount_mode,
+          discount_value: Math.max(0, manualInvoiceForm.discount_value || 0),
           invoice_sequence: !isEditingFullInvoiceNumber && invoiceSequence ? parseInt(invoiceSequence) : undefined,
           custom_invoice_number: isEditingFullInvoiceNumber && customInvoiceNumber ? customInvoiceNumber : undefined
         }),
@@ -457,6 +531,9 @@ export default function InvoicingPage() {
           due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
           payment_terms: '30 days',
           notes: '',
+          manual_discount: 0,
+          discount_mode: 'amount',
+          discount_value: 0,
           items: []
         });
         setInvoiceSequence(''); // Reset sequence number
@@ -570,14 +647,29 @@ export default function InvoicingPage() {
       
       const data = await response.json();
       if (data.success && data.invoice) {
+        const mode = data.invoice.discount_mode === 'percentage' ? 'percentage' : 'amount';
+        const value = Math.max(
+          0,
+          Number(
+            data.invoice.discount_value ??
+              (mode === 'amount' ? data.invoice.total_discount : 0) ??
+              0,
+          ),
+        );
+
         // Ensure all items have taxable_amount calculated
         const invoiceWithCalculatedItems = {
           ...data.invoice,
+          discount_mode: mode,
+          discount_value: value,
+          total_discount: data.invoice.total_discount || 0,
           items: data.invoice.items.map((item: Invoice['items'][0]) => ({
             ...item,
             taxable_amount: item.taxable_amount || (item.quantity * item.unit_price) || 0,
           }))
         };
+        setEditDiscountMode(mode);
+        setEditDiscountValue(value);
         setSelectedInvoice(invoiceWithCalculatedItems);
         setIsEditDialogOpen(true);
       } else {
@@ -603,18 +695,12 @@ export default function InvoicingPage() {
     try {
       const token = localStorage.getItem('leaftrack_token');
       
-      // Calculate subtotal and tax totals from items (with fallbacks for missing values)
-      const subtotal = selectedInvoice.items.reduce((sum, item) => {
-        const taxable = item.taxable_amount || (item.quantity * item.unit_price) || 0;
-        return sum + taxable;
-      }, 0);
-      const totalTax = selectedInvoice.items.reduce((sum, item) => {
-        const taxable = item.taxable_amount || (item.quantity * item.unit_price) || 0;
-        const tax = item.total_amount - taxable;
-        return sum + (tax > 0 ? tax : 0);
-      }, 0);
+      const { subtotal, totalTax, grossTotal } = calculateItemTotals(selectedInvoice.items);
+      const totalDiscount = calculateDiscountAmount(grossTotal, editDiscountMode, editDiscountValue);
       const totalCgst = totalTax / 2;
       const totalSgst = totalTax / 2;
+      const grandTotal = Math.max(0, subtotal + totalTax - totalDiscount);
+      const balanceDue = Math.max(0, grandTotal - selectedInvoice.paid_amount);
       
       const response = await fetch(`/api/invoices/${selectedInvoice._id}`, {
         method: 'PUT',
@@ -628,7 +714,11 @@ export default function InvoicingPage() {
           notes: selectedInvoice.notes,
           items: selectedInvoice.items,
           subtotal: subtotal,
-          grand_total: selectedInvoice.grand_total,
+          total_discount: totalDiscount,
+          discount_mode: editDiscountMode,
+          discount_value: Math.max(0, editDiscountValue || 0),
+          grand_total: grandTotal,
+          balance_due: balanceDue,
           total_cgst: totalCgst,
           total_sgst: totalSgst,
           total_tax: totalTax,
@@ -751,6 +841,10 @@ export default function InvoicingPage() {
     inv.status === 'Overdue' || 
     (new Date(inv.due_date) < new Date() && inv.payment_status !== 'Paid')
   ).length;
+
+  const manualTotals = getManualInvoiceTotals();
+  const selectedManualCustomer = customers.find((customer) => customer._id === manualInvoiceForm.customer_id);
+  const selectedCustomerOutstanding = Math.max(0, selectedManualCustomer?.outstanding_balance || 0);
 
   return (
     <div className="min-h-screen bg-[#F5F5DC] p-6">
@@ -958,42 +1052,49 @@ export default function InvoicingPage() {
                           variant="outline"
                           onClick={async () => {
                             try {
-                              // Fetch full invoice details for PDF generation
                               const token = localStorage.getItem('leaftrack_token');
                               const response = await fetch(`/api/invoices/${invoice._id}`, {
                                 headers: {
-                                  'Authorization': `Bearer ${token}`,
+                                  Authorization: `Bearer ${token}`,
                                 },
                               });
-                              
+
                               const data = await response.json();
                               if (data.success && data.invoice) {
-                                const success = await generateInvoicePDF(data.invoice);
+                                const customerId = typeof data.invoice.customer_id === 'string'
+                                  ? data.invoice.customer_id
+                                  : data.invoice.customer_id?._id;
+                                const matchingCustomer = customers.find((customer) => customer._id === customerId);
+
+                                const success = await generateInvoicePDF({
+                                  ...data.invoice,
+                                  customer_total_due: matchingCustomer?.outstanding_balance ?? data.invoice.customer_total_due,
+                                });
                                 if (success) {
                                   toast({
-                                    title: "Success",
-                                    description: "Invoice PDF downloaded successfully",
+                                    title: 'Success',
+                                    description: 'Invoice PDF downloaded successfully',
                                   });
                                 } else {
                                   toast({
-                                    title: "Error",
-                                    description: "Failed to generate PDF",
-                                    variant: "destructive",
+                                    title: 'Error',
+                                    description: 'Failed to generate PDF',
+                                    variant: 'destructive',
                                   });
                                 }
                               } else {
                                 toast({
-                                  title: "Error",
-                                  description: "Failed to load invoice details",
-                                  variant: "destructive",
+                                  title: 'Error',
+                                  description: 'Failed to load invoice details',
+                                  variant: 'destructive',
                                 });
                               }
                             } catch (error) {
                               console.error('PDF generation error:', error);
                               toast({
-                                title: "Error",
-                                description: "Failed to download PDF",
-                                variant: "destructive",
+                                title: 'Error',
+                                description: 'Failed to download PDF',
+                                variant: 'destructive',
                               });
                             }
                           }}
@@ -1539,17 +1640,64 @@ export default function InvoicingPage() {
                     {/* Invoice Summary */}
                     <div className="mt-4 flex justify-end">
                       <div className="w-64 space-y-2 border-t pt-4">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-gray-600">Discount Type</Label>
+                          <Select
+                            value={manualInvoiceForm.discount_mode}
+                            onValueChange={(value: 'amount' | 'percentage') =>
+                              setManualInvoiceForm((prev) => ({
+                                ...prev,
+                                discount_mode: value,
+                              }))
+                            }
+                          >
+                            <SelectTrigger className="h-8">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="amount">Amount (₹)</SelectItem>
+                              <SelectItem value="percentage">Percentage (%)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="manual_discount" className="text-xs text-gray-600">
+                            Discount Value ({manualInvoiceForm.discount_mode === 'percentage' ? '%' : '₹'})
+                          </Label>
+                          <Input
+                            id="manual_discount"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={manualInvoiceForm.discount_value}
+                            onChange={(e) =>
+                              setManualInvoiceForm((prev) => ({
+                                ...prev,
+                                discount_value: Math.max(0, parseFloat(e.target.value) || 0),
+                              }))
+                            }
+                            className="h-8"
+                          />
+                        </div>
                         <div className="flex justify-between">
                           <span>Subtotal:</span>
-                          <span>₹{manualInvoiceForm.items.reduce((sum, item) => sum + item.taxable_amount, 0).toFixed(2)}</span>
+                          <span>₹{manualTotals.subtotal.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between">
                           <span>Tax:</span>
-                          <span>₹{manualInvoiceForm.items.reduce((sum, item) => sum + item.tax_amount, 0).toFixed(2)}</span>
+                          <span>₹{manualTotals.totalTax.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-red-600">
+                          <span>Discount:</span>
+                          <span>-₹{manualTotals.discountAmount.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm text-orange-600">
+                          <span>Customer Total Due:</span>
+                          <span>₹{(selectedCustomerOutstanding + manualTotals.grandTotal).toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between font-semibold border-t pt-2">
                           <span>Grand Total:</span>
-                          <span>₹{manualInvoiceForm.items.reduce((sum, item) => sum + item.total_amount, 0).toFixed(2)}</span>
+                          <span>₹{manualTotals.grandTotal.toFixed(2)}</span>
                         </div>
                       </div>
                     </div>
@@ -1658,7 +1806,7 @@ export default function InvoicingPage() {
                                       variant: "destructive"
                                     });
                                   }
-                                } catch (error) {
+                                } catch {
                                   toast({
                                     title: "Error",
                                     description: "Failed to update invoice number",
@@ -1770,10 +1918,13 @@ export default function InvoicingPage() {
                                   updatedItems[index].total_amount = taxableAmount + taxAmount;
                                   
                                   // Recalculate grand total
-                                  const newGrandTotal = updatedItems.reduce((sum, i) => sum + i.total_amount, 0);
+                                  const { grossTotal } = calculateItemTotals(updatedItems);
+                                  const discount = calculateDiscountAmount(grossTotal, editDiscountMode, editDiscountValue);
+                                  const newGrandTotal = Math.max(0, grossTotal - discount);
                                   setSelectedInvoice({ 
                                     ...selectedInvoice, 
                                     items: updatedItems,
+                                    total_discount: discount,
                                     grand_total: newGrandTotal,
                                     balance_due: newGrandTotal - selectedInvoice.paid_amount
                                   });
@@ -1797,10 +1948,13 @@ export default function InvoicingPage() {
                                   updatedItems[index].total_amount = taxableAmount + taxAmount;
                                   
                                   // Recalculate grand total
-                                  const newGrandTotal = updatedItems.reduce((sum, i) => sum + i.total_amount, 0);
+                                  const { grossTotal } = calculateItemTotals(updatedItems);
+                                  const discount = calculateDiscountAmount(grossTotal, editDiscountMode, editDiscountValue);
+                                  const newGrandTotal = Math.max(0, grossTotal - discount);
                                   setSelectedInvoice({ 
                                     ...selectedInvoice, 
                                     items: updatedItems,
+                                    total_discount: discount,
                                     grand_total: newGrandTotal,
                                     balance_due: newGrandTotal - selectedInvoice.paid_amount
                                   });
@@ -1825,10 +1979,13 @@ export default function InvoicingPage() {
                                   updatedItems[index].total_amount = taxableAmount + taxAmount;
                                   
                                   // Recalculate grand total
-                                  const newGrandTotal = updatedItems.reduce((sum, i) => sum + i.total_amount, 0);
+                                  const { grossTotal } = calculateItemTotals(updatedItems);
+                                  const discount = calculateDiscountAmount(grossTotal, editDiscountMode, editDiscountValue);
+                                  const newGrandTotal = Math.max(0, grossTotal - discount);
                                   setSelectedInvoice({ 
                                     ...selectedInvoice, 
                                     items: updatedItems,
+                                    total_discount: discount,
                                     grand_total: newGrandTotal,
                                     balance_due: newGrandTotal - selectedInvoice.paid_amount
                                   });
@@ -1848,17 +2005,72 @@ export default function InvoicingPage() {
                     </Table>
                     <div className="mt-4 flex justify-end">
                       <div className="w-64 space-y-2">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-gray-600">Discount Type</Label>
+                          <Select
+                            value={editDiscountMode}
+                            onValueChange={(value: 'amount' | 'percentage') => {
+                              const nextMode = value;
+                              setEditDiscountMode(nextMode);
+                              const { grossTotal } = calculateItemTotals(selectedInvoice.items);
+                              const discount = calculateDiscountAmount(grossTotal, nextMode, editDiscountValue);
+                              const newGrandTotal = Math.max(0, grossTotal - discount);
+                              setSelectedInvoice({
+                                ...selectedInvoice,
+                                total_discount: discount,
+                                discount_mode: nextMode,
+                                grand_total: newGrandTotal,
+                                balance_due: Math.max(0, newGrandTotal - selectedInvoice.paid_amount),
+                              });
+                            }}
+                          >
+                            <SelectTrigger className="h-8">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="amount">Amount (₹)</SelectItem>
+                              <SelectItem value="percentage">Percentage (%)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="edit_discount" className="text-xs text-gray-600">
+                            Discount Value ({editDiscountMode === 'percentage' ? '%' : '₹'})
+                          </Label>
+                          <Input
+                            id="edit_discount"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={editDiscountValue}
+                            onChange={(e) => {
+                              const nextValue = Math.max(0, parseFloat(e.target.value) || 0);
+                              setEditDiscountValue(nextValue);
+                              const { grossTotal } = calculateItemTotals(selectedInvoice.items);
+                              const discount = calculateDiscountAmount(grossTotal, editDiscountMode, nextValue);
+                              const newGrandTotal = Math.max(0, grossTotal - discount);
+                              setSelectedInvoice({
+                                ...selectedInvoice,
+                                total_discount: discount,
+                                discount_value: nextValue,
+                                grand_total: newGrandTotal,
+                                balance_due: Math.max(0, newGrandTotal - selectedInvoice.paid_amount),
+                              });
+                            }}
+                            className="h-8"
+                          />
+                        </div>
                         <div className="flex justify-between text-sm">
                           <span>Subtotal:</span>
-                          <span>₹{selectedInvoice.items.reduce((sum, item) => sum + (item.taxable_amount || (item.quantity * item.unit_price) || 0), 0).toFixed(2)}</span>
+                          <span>₹{calculateItemTotals(selectedInvoice.items).subtotal.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between text-sm">
                           <span>Total Tax:</span>
-                          <span>₹{selectedInvoice.items.reduce((sum, item) => {
-                            const taxable = item.taxable_amount || (item.quantity * item.unit_price) || 0;
-                            const tax = item.total_amount - taxable;
-                            return sum + (tax > 0 ? tax : 0);
-                          }, 0).toFixed(2)}</span>
+                          <span>₹{calculateItemTotals(selectedInvoice.items).totalTax.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm text-red-600">
+                          <span>Discount:</span>
+                          <span>-₹{(selectedInvoice.total_discount || 0).toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between font-bold text-lg border-t pt-2">
                           <span>Grand Total:</span>

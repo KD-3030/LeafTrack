@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Order from '@/models/Order';
+import User from '@/models/User';
 import { verifyToken } from '@/lib/auth';
+import { normalizeRoleId } from '@/lib/roles';
+import mongoose from 'mongoose';
 
 // GET /api/orders - Get all orders (filtered by role)
 export async function GET(request: NextRequest) {
@@ -27,7 +30,7 @@ export async function GET(request: NextRequest) {
 
     // Build query based on user role
     interface QueryType {
-      salesman_id?: any;
+      salesman_id?: string | { $in: string[] };
       status?: string;
       customer_name?: { $regex: string; $options: string };
       order_date?: { $gte?: Date; $lte?: Date };
@@ -35,9 +38,18 @@ export async function GET(request: NextRequest) {
     }
     const query: QueryType = {};
 
-    // If salesman, only show their orders (case-insensitive)
-    if (decoded.role?.toLowerCase() === 'salesman') {
+    const roleId = normalizeRoleId(decoded.role);
+    if (roleId === 'secondary_executive') {
       query.salesman_id = decoded.userId;
+    } else if (roleId === 'primary_executive') {
+      const teamMembers = await User.find({
+        managerId: decoded.userId,
+        role: 'SecondaryExecutive',
+        approval_status: 'approved',
+      }).select('_id');
+        query.salesman_id = {
+          $in: [decoded.userId, ...teamMembers.map((member) => (member._id as mongoose.Types.ObjectId).toString())],
+      };
     }
 
     // Apply filters
@@ -74,13 +86,18 @@ export async function GET(request: NextRequest) {
       .lean();
 
     // Calculate summary statistics
+    const pendingForAdmin = orders.filter((o) => o.status === 'pending');
+    const pendingForPrimary = orders.filter((o) => o.status === 'pending_primary');
+
     const summary = {
       total_orders: orders.length,
-      pending_count: orders.filter(o => o.status === 'pending').length,
+      pending_count: pendingForAdmin.length,
+      primary_review_count: pendingForPrimary.length,
       approved_count: orders.filter(o => o.status === 'approved').length,
       rejected_count: orders.filter(o => o.status === 'rejected').length,
       total_value: orders.reduce((sum, o) => sum + o.total_amount, 0),
-      pending_value: orders.filter(o => o.status === 'pending').reduce((sum, o) => sum + o.total_amount, 0),
+      pending_value: (roleId === 'admin' ? pendingForAdmin : [...pendingForAdmin, ...pendingForPrimary])
+        .reduce((sum, o) => sum + o.total_amount, 0),
       approved_value: orders.filter(o => o.status === 'approved').reduce((sum, o) => sum + o.total_amount, 0),
     };
 
@@ -98,7 +115,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/orders - Create a new order (Salesman only)
+// POST /api/orders - Create a new order
 export async function POST(request: NextRequest) {
   try {
     await connectDB();
@@ -113,10 +130,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
-    // Only salesmen can create orders (case-insensitive check)
-    if (decoded.role?.toLowerCase() !== 'salesman') {
+    const roleId = normalizeRoleId(decoded.role);
+    if (roleId !== 'secondary_executive' && roleId !== 'primary_executive') {
       return NextResponse.json(
-        { error: 'Only salesmen can create orders' },
+        { error: 'Only executives can create orders' },
         { status: 403 }
       );
     }
@@ -149,12 +166,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const isSecondaryExecutive = roleId === 'secondary_executive';
+
     // Create order
     const order = new Order({
       ...body,
       salesman_id: decoded.userId,
       salesman_name: decoded.name || 'Unknown',
-      status: 'pending',
+      // Secondary orders are reviewed by primary executives first.
+      status: isSecondaryExecutive ? 'pending_primary' : 'pending',
       submitted_at: new Date(),
     });
 
@@ -162,7 +182,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: 'Order submitted successfully and is pending admin approval',
+      message: isSecondaryExecutive
+        ? 'Order submitted successfully and is pending primary executive review'
+        : 'Order submitted successfully and is pending admin approval',
       order,
     });
   } catch (error) {

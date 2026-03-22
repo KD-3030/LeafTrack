@@ -2,14 +2,29 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import Invoice from '@/models/Invoice';
 import Payment from '@/models/Payment';
+import Customer from '@/models/Customer';
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
+import { normalizeRoleId } from '@/lib/roles';
 
 export const dynamic = 'force-dynamic';
 
 interface JWTPayload {
   role: string;
   id: string;
+}
+
+async function updateCustomerOutstandingBalance(customerId: mongoose.Types.ObjectId | string) {
+  const invoices = await Invoice.find({
+    customer_id: customerId,
+    status: { $ne: 'Cancelled' },
+  }).select('balance_due').lean();
+
+  const outstandingBalance = invoices.reduce((sum, inv) => sum + (inv.balance_due || 0), 0);
+
+  await Customer.findByIdAndUpdate(customerId, {
+    $set: { outstanding_balance: outstandingBalance },
+  });
 }
 
 // GET - Get specific invoice
@@ -31,21 +46,37 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
     
-    // Build filter
-    const filter: {
-      _id: string;
-      salesman_id?: string | mongoose.Types.ObjectId;
-    } = { _id: params.id };
-    
-    // If user is a salesman, only show their invoices
-    if (decoded.role === 'salesman') {
-      filter.salesman_id = decoded.id;
-    }
-
-    const invoice = await Invoice.findOne(filter).lean();
+    const invoice = await Invoice.findById(params.id).lean();
 
     if (!invoice) {
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
+    }
+
+    const roleId = normalizeRoleId(decoded.role);
+    if (roleId === 'secondary_executive') {
+      const customer = await Customer.findById(invoice.customer_id)
+        .select('primary_executive_id secondary_executive_id')
+        .lean();
+
+      if (!customer) {
+        return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+      }
+
+      if (customer.secondary_executive_id?.toString() !== decoded.id) {
+        return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+      }
+    } else if (roleId === 'primary_executive') {
+      const customer = await Customer.findById(invoice.customer_id)
+        .select('primary_executive_id')
+        .lean();
+
+      if (!customer) {
+        return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+      }
+
+      if (customer.primary_executive_id?.toString() !== decoded.id) {
+        return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+      }
     }
 
     // Calculate payment information
@@ -56,12 +87,14 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
     const paidAmount = payments.reduce((sum, payment) => sum + payment.amount_paid, 0);
     const balanceDue = invoice.grand_total - paidAmount;
+    const customer = await Customer.findById(invoice.customer_id).select('outstanding_balance').lean();
 
     const invoiceWithPayments = {
       ...invoice,
       paid_amount: paidAmount,
       balance_due: balanceDue,
-      payment_status: balanceDue <= 0 ? 'Paid' : (paidAmount > 0 ? 'Partial' : 'Pending')
+      payment_status: balanceDue <= 0 ? 'Paid' : (paidAmount > 0 ? 'Partial' : 'Pending'),
+      customer_total_due: customer?.outstanding_balance || 0,
     };
 
     return NextResponse.json({
@@ -133,7 +166,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     }
 
     // Update allowed invoice fields
-    const allowedUpdates = ['status', 'notes', 'due_date', 'items', 'grand_total', 'subtotal', 'total_cgst', 'total_sgst', 'total_tax'];
+    const allowedUpdates = ['status', 'notes', 'due_date', 'items', 'grand_total', 'subtotal', 'total_discount', 'discount_mode', 'discount_value', 'balance_due', 'total_cgst', 'total_sgst', 'total_tax'];
     const filteredUpdates: Record<string, unknown> = {};
     
     allowedUpdates.forEach(field => {
@@ -176,10 +209,24 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       payment_status: balanceDue <= 0 ? 'Paid' : (totalPaid > 0 ? 'Partial' : 'Pending')
     };
 
+    await Invoice.findByIdAndUpdate(params.id, {
+      $set: {
+        paid_amount: totalPaid,
+        balance_due: balanceDue,
+        payment_status: balanceDue <= 0 ? 'Paid' : (totalPaid > 0 ? 'Partial' : 'Pending'),
+      },
+    });
+
+    await updateCustomerOutstandingBalance(updatedInvoice.customer_id as mongoose.Types.ObjectId);
+    const customer = await Customer.findById(updatedInvoice.customer_id).select('outstanding_balance').lean();
+
     return NextResponse.json({
       success: true,
       message: 'Invoice updated successfully',
-      invoice: invoiceWithPayments,
+      invoice: {
+        ...invoiceWithPayments,
+        customer_total_due: customer?.outstanding_balance || 0,
+      },
     });
   } catch (error) {
     console.error('Error updating invoice:', error);
@@ -251,6 +298,8 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
         error: 'Invoice not found or already deleted' 
       }, { status: 404 });
     }
+
+    await updateCustomerOutstandingBalance(deletedInvoice.customer_id as mongoose.Types.ObjectId);
 
     return NextResponse.json({
       success: true,

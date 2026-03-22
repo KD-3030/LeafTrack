@@ -66,7 +66,7 @@ interface Order {
   tax_amount: number;
   discount_amount: number;
   total_amount: number;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending_primary' | 'pending' | 'approved' | 'rejected';
   submitted_at: string;
   reviewed_at?: string;
   reviewer_name?: string;
@@ -335,6 +335,8 @@ export default function AdminOrdersPage() {
 
   const getStatusBadge = (status: string) => {
     switch (status) {
+      case 'pending_primary':
+        return <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-300"><Clock className="mr-1 h-3 w-3" />Awaiting Primary Review</Badge>;
       case 'pending':
         return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-300"><Clock className="mr-1 h-3 w-3" />Pending</Badge>;
       case 'approved':

@@ -23,6 +23,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
+import { normalizeRoleId } from '@/lib/roles';
 import {
   ArrowLeft,
   Plus,
@@ -62,6 +64,7 @@ interface Product {
 
 export default function NewOrderPage() {
   const router = useRouter();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -83,6 +86,9 @@ export default function NewOrderPage() {
   const [taxPercentage, setTaxPercentage] = useState('18');
   const [discountAmount, setDiscountAmount] = useState('0');
   const [notes, setNotes] = useState('');
+
+  const roleId = normalizeRoleId(user?.role || '');
+  const isPrimaryExecutive = roleId === 'primary_executive';
 
   useEffect(() => {
     fetchCustomers();
@@ -284,7 +290,9 @@ export default function NewOrderPage() {
           <CardHeader>
             <CardTitle>Create New Order</CardTitle>
             <CardDescription>
-              Fill in customer details and add products to create an order for admin approval
+              {isPrimaryExecutive
+                ? 'Fill in customer details and add products to send this order directly to admin approval'
+                : 'Fill in customer details and add products. This order will be sent to your primary executive for review first'}
             </CardDescription>
           </CardHeader>
         </Card>

@@ -4,6 +4,7 @@ import User, { IUser } from '@/models/User';
 import { comparePassword, generateToken } from '@/lib/auth';
 import { Model } from 'mongoose';
 import { strictRateLimit } from '@/lib/rateLimit';
+import { normalizeRoleId, roleIdToDbRole } from '@/lib/roles';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,9 +29,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Find user (case-insensitive role check)
-    // Capitalize first letter to match schema enum: 'Admin', 'Salesman', 'Customer'
-    const normalizedRole = role.charAt(0).toUpperCase() + role.slice(1).toLowerCase();
+    // Normalize role and map it to canonical DB enum value.
+    const normalizedRoleId = normalizeRoleId(role);
+    if (!normalizedRoleId) {
+      return NextResponse.json(
+        { error: 'Invalid role' },
+        { status: 400 }
+      );
+    }
+
+    const normalizedRole = roleIdToDbRole(normalizedRoleId);
     
     console.log('🔐 Login attempt:', { email, role: normalizedRole, hasPassword: !!password });
     
@@ -67,6 +75,27 @@ export async function POST(request: NextRequest) {
 
     console.log('✅ Password verified for user:', email);
 
+    if (user.approval_status === 'pending') {
+      return NextResponse.json(
+        { error: 'Account is pending approval', code: 'PENDING_APPROVAL' },
+        { status: 403 }
+      );
+    }
+
+    if (user.approval_status === 'rejected') {
+      return NextResponse.json(
+        { error: user.rejection_reason || 'Account has been rejected', code: 'REJECTED' },
+        { status: 403 }
+      );
+    }
+
+    if (user.approval_status !== 'approved') {
+      return NextResponse.json(
+        { error: 'Invalid account approval status', code: 'INVALID_APPROVAL_STATUS' },
+        { status: 403 }
+      );
+    }
+
     // Generate token with user name
     const token = generateToken((user._id as string).toString(), user.role, user.name);
 
@@ -76,6 +105,8 @@ export async function POST(request: NextRequest) {
       name: user.name,
       email: user.email,
       role: user.role,
+      managerId: user.managerId,
+      approval_status: user.approval_status,
       created_at: user.createdAt,
     };
 

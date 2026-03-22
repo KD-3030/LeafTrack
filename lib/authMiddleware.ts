@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { JwtPayload } from 'jsonwebtoken';
+import { isRoleAllowed, normalizeRoleId } from '@/lib/roles';
 
 // Extended interface for decoded JWT tokens
 export interface DecodedToken extends JwtPayload {
@@ -50,9 +51,7 @@ export function authenticateRequest(request: NextRequest): DecodedToken | NextRe
  * @returns Boolean indicating if user has permission
  */
 export function hasPermission(userRole: string, requiredRoles: string[]): boolean {
-  const normalizedUserRole = userRole?.toLowerCase();
-  const normalizedRequiredRoles = requiredRoles.map(r => r.toLowerCase());
-  return normalizedRequiredRoles.includes(normalizedUserRole);
+  return isRoleAllowed(userRole, requiredRoles);
 }
 
 /**
@@ -91,14 +90,21 @@ export function requireAdminAuth(request: NextRequest): DecodedToken | NextRespo
  * Helper function for salesman-only routes
  */
 export function requireSalesmanAuth(request: NextRequest): DecodedToken | NextResponse {
-  return requireAuth(request, ['salesman']);
+  return requireAuth(request, ['secondary_executive']);
+}
+
+/**
+ * Helper function for primary executive-only routes
+ */
+export function requirePrimaryExecutiveAuth(request: NextRequest): DecodedToken | NextResponse {
+  return requireAuth(request, ['primary_executive']);
 }
 
 /**
  * Helper function for routes accessible to both Admin and Salesman
  */
 export function requireUserAuth(request: NextRequest): DecodedToken | NextResponse {
-  return requireAuth(request, ['admin', 'salesman']);
+  return requireAuth(request, ['admin', 'primary_executive', 'secondary_executive']);
 }
 
 /**
@@ -118,8 +124,10 @@ export function requireAuthWithUserFilter(
   // Create user filter for data access
   const userFilter: Record<string, string> = {};
   
-  // If user is a salesman, filter data to their own records
-  if (authResult.role?.toLowerCase() === 'salesman') {
+  const roleId = normalizeRoleId(authResult.role);
+
+  // Secondary executives can only see their own records.
+  if (roleId === 'secondary_executive') {
     userFilter.salesman_id = authResult.userId;
   }
   // Admins get no filter (can see all data)

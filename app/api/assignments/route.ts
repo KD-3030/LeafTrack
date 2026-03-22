@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import Assignment, { IAssignment } from '@/models/Assignment';
 import Product, { IProduct } from '@/models/Product';
+import User from '@/models/User';
 import { requireUserAuth, requireAdminAuth, DecodedToken } from '@/lib/authMiddleware';
 import { Model } from 'mongoose';
+import { normalizeRoleId } from '@/lib/roles';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,15 +20,29 @@ export async function GET(request: NextRequest) {
     }
 
     const decoded = authResult as DecodedToken;
+    const currentUser = await User.findById(decoded.userId).select('role managerId');
+    if (!currentUser) {
+      return NextResponse.json(
+        { success: false, error: 'User not found' },
+        { status: 404 }
+      );
+    }
     
     // Create user filter for data access
     let userFilter = {};
+    const roleId = normalizeRoleId(currentUser.role);
     
-    // If user is a salesman, filter assignments for that salesman only
-    if (decoded.role?.toLowerCase() === 'salesman') {
+    if (roleId === 'secondary_executive') {
+      if (!currentUser.managerId) {
+        return NextResponse.json(
+          { success: false, error: 'Secondary executive is not assigned to a primary executive' },
+          { status: 400 }
+        );
+      }
+      userFilter = { salesman_id: currentUser.managerId };
+    } else if (roleId === 'primary_executive') {
       userFilter = { salesman_id: decoded.userId };
     }
-    // Admin can see all assignments (no filter)
     
     const AssignmentModel = Assignment as Model<IAssignment>;
     const assignments = await AssignmentModel.find(userFilter)
@@ -58,12 +74,21 @@ export async function POST(request: NextRequest) {
       return authResult;
     }
 
-    const { salesmanId, productId, quantity, sellingPricePerUnit } = await request.json();
+    const { primaryExecutiveId, salesmanId, productId, quantity, sellingPricePerUnit } = await request.json();
+    const assignmentOwnerId = primaryExecutiveId || salesmanId;
 
     // Validate input
-    if (!salesmanId || !productId || !quantity || !sellingPricePerUnit) {
+    if (!assignmentOwnerId || !productId || !quantity || !sellingPricePerUnit) {
       return NextResponse.json(
-        { success: false, error: 'All fields are required: salesmanId, productId, quantity, sellingPricePerUnit' },
+        { success: false, error: 'All fields are required: primaryExecutiveId, productId, quantity, sellingPricePerUnit' },
+        { status: 400 }
+      );
+    }
+
+    const assignmentOwner = await User.findById(assignmentOwnerId).select('role');
+    if (!assignmentOwner || normalizeRoleId(assignmentOwner.role) !== 'primary_executive') {
+      return NextResponse.json(
+        { success: false, error: 'Stock pool owner must be a primary executive' },
         { status: 400 }
       );
     }
@@ -88,7 +113,7 @@ export async function POST(request: NextRequest) {
     // Create assignment
     const AssignmentModel = Assignment as Model<IAssignment>;
     const assignment = await AssignmentModel.create({
-      salesman_id: salesmanId,
+      salesman_id: assignmentOwnerId,
       productId,
       quantity: parseInt(quantity),
       sellingPricePerUnit: parseFloat(sellingPricePerUnit),

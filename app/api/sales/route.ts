@@ -4,8 +4,10 @@ import Sale from '@/models/Sale';
 import Assignment from '@/models/Assignment';
 // import Product from '@/models/Product';
 import Customer from '@/models/Customer';
+import User from '@/models/User';
 // import User from '@/models/User';
 import { requireAuth } from '@/lib/authMiddleware';
+import { normalizeRoleId } from '@/lib/roles';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +21,11 @@ export async function GET(request: NextRequest) {
       return authResult;
     }
     const decoded = authResult;
+    const currentUser = await User.findById(decoded.userId).select('role managerId');
+    if (!currentUser) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+    const roleId = normalizeRoleId(currentUser.role);
 
     // Get query parameters for filtering
     const { searchParams } = new URL(request.url);
@@ -32,7 +39,7 @@ export async function GET(request: NextRequest) {
 
     // Build filter object
     interface SaleFilter {
-      salesman_id?: string;
+      salesman_id?: string | { $in: string[] };
       customer_id?: string;
       invoice_generated?: boolean;
       sale_date?: {
@@ -55,9 +62,13 @@ export async function GET(request: NextRequest) {
       if (toDate) filter.sale_date.$lte = new Date(toDate);
     }
 
-    // If user is a salesman, filter by their ID
-    if (decoded.role?.toLowerCase() === 'salesman') {
+    if (roleId === 'secondary_executive') {
       filter.salesman_id = decoded.userId;
+    } else if (roleId === 'primary_executive') {
+      const teamMembers = await User.find({ managerId: decoded.userId }).select('_id');
+      filter.salesman_id = {
+        $in: [decoded.userId, ...teamMembers.map((member) => member._id.toString())],
+      };
     }
     
     // Get total count for pagination
@@ -100,6 +111,11 @@ export async function POST(request: NextRequest) {
       return authResult;
     }
     const decoded = authResult;
+    const currentUser = await User.findById(decoded.userId).select('role managerId');
+    if (!currentUser) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+    const roleId = normalizeRoleId(currentUser.role);
     
     const saleData = await request.json();
 
@@ -119,9 +135,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Assignment not found' }, { status: 404 });
     }
 
-    // Check if user has permission to create sale for this assignment
-    if (decoded.role?.toLowerCase() === 'salesman' && assignment.salesman_id._id.toString() !== decoded.userId) {
-      return NextResponse.json({ error: 'Unauthorized to create sale for this assignment' }, { status: 403 });
+    const assignmentOwnerId = assignment.salesman_id._id.toString();
+
+    if (roleId === 'secondary_executive') {
+      if (!currentUser.managerId || assignmentOwnerId !== currentUser.managerId.toString()) {
+        return NextResponse.json({ error: 'Unauthorized to consume stock outside your primary executive pool' }, { status: 403 });
+      }
+    } else if (roleId === 'primary_executive') {
+      if (assignmentOwnerId !== decoded.userId) {
+        return NextResponse.json({ error: 'Unauthorized to consume stock outside your pool' }, { status: 403 });
+      }
     }
 
     // Check if assignment has sufficient quantity
@@ -135,6 +158,14 @@ export async function POST(request: NextRequest) {
     let customerId = saleData.customer_id;
     
     if (!customerId && saleData.customer_details) {
+      const primaryExecutiveId = roleId === 'primary_executive'
+        ? decoded.userId
+        : (roleId === 'secondary_executive' ? currentUser.managerId?.toString() : undefined);
+
+      const secondaryExecutiveId = roleId === 'secondary_executive'
+        ? decoded.userId
+        : undefined;
+
       // Create new customer if customer details are provided
       const customer = await Customer.create({
         name: saleData.customer_details.name,
@@ -145,6 +176,9 @@ export async function POST(request: NextRequest) {
         gstin: saleData.customer_details.gstin,
         business_type: 'Individual',
         status: 'Active',
+        primary_executive_id: primaryExecutiveId,
+        secondary_executive_id: secondaryExecutiveId,
+        created_by: decoded.userId,
       });
       customerId = customer._id;
     }
@@ -159,7 +193,7 @@ export async function POST(request: NextRequest) {
     const productData = assignment.productId as unknown as { _id: string };
     const sale = new Sale({
       assignment_id: saleData.assignment_id,
-      salesman_id: assignment.salesman_id._id,
+      salesman_id: currentUser._id,
       product_id: productData._id,
       customer_id: customerId,
       quantity_sold: quantity,

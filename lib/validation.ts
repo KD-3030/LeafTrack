@@ -34,7 +34,7 @@ export const userRegistrationSchema = z.object({
   name: z.string().min(2).max(100).trim(),
   email: emailSchema,
   password: passwordSchema,
-  role: z.enum(['Admin', 'Salesman', 'Customer']),
+  invitationToken: z.string().min(10, 'Invitation token is required'),
   phone: phoneSchema.optional(),
   address: z.string().max(500).optional(),
   state: z.string().max(100).optional(),
@@ -45,7 +45,7 @@ export const userRegistrationSchema = z.object({
 export const userLoginSchema = z.object({
   email: emailSchema,
   password: z.string().min(1, 'Password is required'),
-  role: z.enum(['Admin', 'Salesman', 'Customer'])
+  role: z.enum(['Admin', 'PrimaryExecutive', 'SecondaryExecutive', 'Customer'])
 });
 
 // Product schema

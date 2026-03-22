@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -37,6 +38,7 @@ import {
   Edit,
   Trash2,
   Eye,
+  Download,
   RefreshCw,
   Package,
   IndianRupee,
@@ -49,6 +51,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { scanBillImage, fileToBase64 } from '@/lib/ocrHelper';
+import { generatePurchaseBillPDF } from '@/lib/pdfGenerator';
 
 interface Seller {
   _id: string;
@@ -454,6 +457,15 @@ export default function PurchasesPage() {
     setIsViewDialogOpen(true);
   };
 
+  const handleDownloadBill = async (purchase: Purchase) => {
+    const success = await generatePurchaseBillPDF(purchase);
+    if (success) {
+      toast.success('Purchase bill downloaded successfully');
+      return;
+    }
+    toast.error('Failed to download purchase bill');
+  };
+
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this purchase?')) return;
 
@@ -491,7 +503,7 @@ export default function PurchasesPage() {
     setIsDialogOpen(true);
   };
 
-  const { taxableAmount, cgstAmount, sgstAmount, igstAmount, totalTax, finalAmount } = calculateAmounts();
+  const { taxableAmount, cgstAmount, sgstAmount, totalTax, finalAmount } = calculateAmounts();
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -693,6 +705,9 @@ export default function PurchasesPage() {
                           <Button variant="ghost" size="icon" onClick={() => handleView(purchase)}>
                             <Eye className="h-4 w-4" />
                           </Button>
+                          <Button variant="ghost" size="icon" onClick={() => handleDownloadBill(purchase)}>
+                            <Download className="h-4 w-4" />
+                          </Button>
                           <Button variant="ghost" size="icon" onClick={() => handleEdit(purchase)}>
                             <Edit className="h-4 w-4" />
                           </Button>
@@ -766,9 +781,12 @@ export default function PurchasesPage() {
                     </div>
                     {billPreview && (
                       <div className="relative">
-                        <img
+                        <Image
                           src={billPreview}
                           alt="Bill preview"
+                          width={80}
+                          height={80}
+                          unoptimized
                           className="h-20 w-20 object-cover rounded border"
                         />
                         <button
@@ -1285,6 +1303,17 @@ export default function PurchasesPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>
               Close
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (selectedPurchase) {
+                  handleDownloadBill(selectedPurchase);
+                }
+              }}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Download Bill
             </Button>
             <Button
               onClick={() => {

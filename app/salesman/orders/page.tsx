@@ -15,6 +15,8 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
+import { normalizeRoleId } from '@/lib/roles';
 import {
   Plus,
   Search,
@@ -41,6 +43,8 @@ interface OrderItem {
 
 interface Order {
   _id: string;
+  salesman_id: string;
+  salesman_name: string;
   order_number: string;
   order_date: string;
   customer_name: string;
@@ -50,7 +54,7 @@ interface Order {
   tax_amount: number;
   discount_amount: number;
   total_amount: number;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending_primary' | 'pending' | 'approved' | 'rejected';
   submitted_at: string;
   reviewed_at?: string;
   reviewer_name?: string;
@@ -63,6 +67,7 @@ interface Order {
 interface OrderSummary {
   total_orders: number;
   pending_count: number;
+  primary_review_count?: number;
   approved_count: number;
   rejected_count: number;
   total_value: number;
@@ -72,11 +77,16 @@ interface OrderSummary {
 
 export default function SalesmanOrdersPage() {
   const router = useRouter();
+  const { user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [summary, setSummary] = useState<OrderSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+
+  const roleId = normalizeRoleId(user?.role || '');
+  const isPrimaryExecutive = roleId === 'primary_executive';
+  const currentUserId = user?._id || '';
 
   useEffect(() => {
     fetchOrders();
@@ -165,10 +175,41 @@ export default function SalesmanOrdersPage() {
     }
   };
 
+  const handleSendToAdmin = async (id: string) => {
+    try {
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch(`/api/orders/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          status: 'pending',
+          admin_notes: 'Forwarded by primary executive for admin review',
+        }),
+      });
+
+      const data = await response.json();
+      if (!data.success) {
+        toast.error(data.error || 'Failed to send order to admin');
+        return;
+      }
+
+      toast.success('Order forwarded to admin successfully');
+      fetchOrders();
+    } catch (error) {
+      console.error('Error forwarding order to admin:', error);
+      toast.error('Failed to send order to admin');
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'pending':
         return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-300"><Clock className="mr-1 h-3 w-3" />Pending</Badge>;
+      case 'pending_primary':
+        return <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-300"><Clock className="mr-1 h-3 w-3" />Awaiting Primary Review</Badge>;
       case 'approved':
         return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300"><CheckCircle className="mr-1 h-3 w-3" />Approved</Badge>;
       case 'rejected':
@@ -183,6 +224,14 @@ export default function SalesmanOrdersPage() {
     order.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     order.customer_contact.includes(searchTerm)
   );
+
+  const teamReviewOrders = isPrimaryExecutive
+    ? filteredOrders.filter((order) => order.salesman_id !== currentUserId && order.status === 'pending_primary')
+    : [];
+
+  const ownOrders = isPrimaryExecutive
+    ? filteredOrders.filter((order) => order.salesman_id === currentUserId || order.status !== 'pending_primary')
+    : filteredOrders;
 
   if (loading) {
     return (
@@ -201,7 +250,11 @@ export default function SalesmanOrdersPage() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">My Orders</h1>
-          <p className="text-gray-500 mt-1">Create and manage customer orders</p>
+          <p className="text-gray-500 mt-1">
+            {isPrimaryExecutive
+              ? 'Monitor team orders, forward reviewed orders to admin, and manage your own submissions'
+              : 'Create and manage customer orders'}
+          </p>
         </div>
         <Button onClick={() => router.push('/salesman/orders/new')} size="lg">
           <Plus className="mr-2 h-5 w-5" />
@@ -227,8 +280,8 @@ export default function SalesmanOrdersPage() {
 
           <Card className="border-yellow-200 bg-yellow-50">
             <CardHeader className="pb-2">
-              <CardDescription className="text-yellow-700">Pending Approval</CardDescription>
-              <CardTitle className="text-3xl text-yellow-700">{summary.pending_count}</CardTitle>
+              <CardDescription className="text-yellow-700">Pending Admin Approval</CardDescription>
+              <CardTitle className="text-3xl text-yellow-700">{summary.pending_count || 0}</CardTitle>
             </CardHeader>
             <CardContent>
               <p className="text-sm text-yellow-600">
@@ -237,6 +290,15 @@ export default function SalesmanOrdersPage() {
               </p>
             </CardContent>
           </Card>
+
+          {isPrimaryExecutive && (
+            <Card className="border-blue-200 bg-blue-50">
+              <CardHeader className="pb-2">
+                <CardDescription className="text-blue-700">Awaiting Your Review</CardDescription>
+                <CardTitle className="text-3xl text-blue-700">{summary.primary_review_count || 0}</CardTitle>
+              </CardHeader>
+            </Card>
+          )}
 
           <Card className="border-green-200 bg-green-50">
             <CardHeader className="pb-2">
@@ -305,16 +367,77 @@ export default function SalesmanOrdersPage() {
         </CardContent>
       </Card>
 
+      {isPrimaryExecutive && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Secondary Executive Orders Awaiting Review</CardTitle>
+            <CardDescription>
+              Review team submissions and forward approved ones to admin.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {teamReviewOrders.length === 0 ? (
+              <p className="text-sm text-gray-500">No team orders are awaiting your review.</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Order Number</TableHead>
+                    <TableHead>Executive</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Total Amount</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {teamReviewOrders.map((order) => (
+                    <TableRow key={`team-${order._id}`}>
+                      <TableCell className="font-medium">{order.order_number}</TableCell>
+                      <TableCell>{order.salesman_name}</TableCell>
+                      <TableCell>{order.customer_name}</TableCell>
+                      <TableCell>₹{order.total_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</TableCell>
+                      <TableCell>{getStatusBadge(order.status)}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleSendToAdmin(order._id)}
+                          >
+                            Send To Admin
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDelete(order._id)}
+                            title="Delete Team Order"
+                          >
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Orders Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Orders List</CardTitle>
+          <CardTitle>{isPrimaryExecutive ? 'My And Team Orders' : 'Orders List'}</CardTitle>
           <CardDescription>
-            View and manage your submitted orders
+            {isPrimaryExecutive
+              ? 'Track your own orders and team lifecycle from primary review to admin approval'
+              : 'View and manage your submitted orders'}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {filteredOrders.length === 0 ? (
+          {ownOrders.length === 0 ? (
             <div className="text-center py-12">
               <Package className="mx-auto h-12 w-12 text-gray-400" />
               <h3 className="mt-4 text-lg font-medium text-gray-900">No orders found</h3>
@@ -342,7 +465,7 @@ export default function SalesmanOrdersPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredOrders.map((order) => (
+                {ownOrders.map((order) => (
                   <TableRow key={order._id}>
                     <TableCell className="font-medium">{order.order_number}</TableCell>
                     <TableCell>
@@ -357,7 +480,12 @@ export default function SalesmanOrdersPage() {
                         <div className="text-sm text-gray-500">{order.customer_contact}</div>
                       </div>
                     </TableCell>
-                    <TableCell>{order.items.length} item(s)</TableCell>
+                    <TableCell>
+                      <div>{order.items.length} item(s)</div>
+                      {isPrimaryExecutive && order.salesman_id !== currentUserId && (
+                        <div className="text-xs text-gray-500">By: {order.salesman_name}</div>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <div className="font-medium">
                         ₹{order.total_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
@@ -385,7 +513,7 @@ export default function SalesmanOrdersPage() {
                         >
                           <Download className="h-4 w-4 text-blue-600" />
                         </Button>
-                        {order.status === 'pending' && (
+                        {(order.status === 'pending' || order.status === 'pending_primary') && (
                           <>
                             <Button
                               variant="ghost"
@@ -395,6 +523,16 @@ export default function SalesmanOrdersPage() {
                             >
                               <Edit className="h-4 w-4" />
                             </Button>
+                            {isPrimaryExecutive && order.salesman_id !== currentUserId && order.status === 'pending_primary' && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleSendToAdmin(order._id)}
+                                title="Forward To Admin"
+                              >
+                                Send To Admin
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="icon"

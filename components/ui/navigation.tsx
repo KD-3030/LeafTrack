@@ -61,11 +61,6 @@ export function Navigation({ children }: NavigationProps) {
                   Login
                 </Button>
               </Link>
-              <Link href="/signup" className="hidden sm:inline-block">
-                <Button size="sm" className="bg-green-600 hover:bg-green-700">
-                  Sign Up
-                </Button>
-              </Link>
             </>
           )}
         </div>

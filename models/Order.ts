@@ -38,7 +38,9 @@ export interface IOrder extends Document {
   total_amount: number;
   
   // Approval Status
-  status: 'pending' | 'approved' | 'rejected';
+  // pending_primary -> secondary submitted, waiting for primary review
+  // pending -> approved by primary (or created by primary), waiting for admin review
+  status: 'pending_primary' | 'pending' | 'approved' | 'rejected';
   submitted_at: Date;
   reviewed_at?: Date;
   reviewed_by?: mongoose.Types.ObjectId;
@@ -194,7 +196,7 @@ const OrderSchema = new Schema<IOrder>({
   // Approval Status
   status: {
     type: String,
-    enum: ['pending', 'approved', 'rejected'],
+    enum: ['pending_primary', 'pending', 'approved', 'rejected'],
     default: 'pending',
     index: true,
   },

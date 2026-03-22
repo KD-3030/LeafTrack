@@ -1,740 +1,905 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { User } from '@/types';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Edit, Trash2, Users, Plus, User as UserIcon, ShoppingCart, TrendingUp, Clock, CheckCircle, XCircle, Eye } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { toast } from 'sonner';
+import {
+  CheckCircle,
+  Copy,
+  Link2,
+  Package,
+  ShieldCheck,
+  UserCog,
+  UserPlus,
+  Users,
+  XCircle,
+  Pencil,
+  Trash2,
+  Users2,
+} from 'lucide-react';
+import { normalizeRoleId } from '@/lib/roles';
 
-interface Order {
+interface ManagerInfo {
   _id: string;
-  salesman_id: {
-    _id: string;
-    name: string;
-    email: string;
+  name: string;
+  email: string;
+}
+
+interface ManagedUser {
+  _id: string;
+  name: string;
+  email: string;
+  role: string;
+  approval_status?: 'pending' | 'approved' | 'rejected';
+  managerId?: string | ManagerInfo | null;
+}
+
+interface ProductItem {
+  _id: string;
+  name: string;
+  totalStock: number;
+}
+
+interface CustomerItem {
+  _id: string;
+  name: string;
+  phone: string;
+  primary_executive_id?: string;
+  secondary_executive_id?: string;
+}
+
+interface CustomerApiRow {
+  _id: string;
+  name: string;
+  phone: string;
+  primary_executive_id?: { toString: () => string } | string;
+  secondary_executive_id?: { toString: () => string } | string;
+}
+
+const toIdString = (value?: { toString: () => string } | string): string => {
+  if (!value) return '';
+  return typeof value === 'string' ? value : value.toString();
+};
+
+export default function ExecutiveManagementPage() {
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [customers, setCustomers] = useState<CustomerItem[]>([]);
+  const [products, setProducts] = useState<ProductItem[]>([]);
+
+  const [loading, setLoading] = useState(true);
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [savingStockAssignment, setSavingStockAssignment] = useState(false);
+
+  const [inviteRole, setInviteRole] = useState<'PrimaryExecutive' | 'SecondaryExecutive'>('PrimaryExecutive');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteManagerId, setInviteManagerId] = useState('');
+  const [generatedInviteLink, setGeneratedInviteLink] = useState('');
+  const [rejectionReasonById, setRejectionReasonById] = useState<Record<string, string>>({});
+
+  const [stockPrimaryId, setStockPrimaryId] = useState('');
+  const [stockProductId, setStockProductId] = useState('');
+  const [stockQuantity, setStockQuantity] = useState('');
+  const [stockSellingPrice, setStockSellingPrice] = useState('');
+
+  const [customerOwnerPrimaryById, setCustomerOwnerPrimaryById] = useState<Record<string, string>>({});
+  const [customerOwnerSecondaryById, setCustomerOwnerSecondaryById] = useState<Record<string, string>>({});
+
+  const [editingUser, setEditingUser] = useState<ManagedUser | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editRole, setEditRole] = useState<'PrimaryExecutive' | 'SecondaryExecutive'>('SecondaryExecutive');
+  const [editManagerId, setEditManagerId] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const token = typeof window !== 'undefined' ? localStorage.getItem('leaftrack_token') : null;
+
+  const primaryExecutives = useMemo(
+    () => users.filter((u) => normalizeRoleId(u.role) === 'primary_executive' && u.approval_status === 'approved'),
+    [users]
+  );
+
+  const secondaryExecutives = useMemo(
+    () => users.filter((u) => normalizeRoleId(u.role) === 'secondary_executive' && u.approval_status === 'approved'),
+    [users]
+  );
+
+  const pendingUsers = useMemo(
+    () => users.filter((u) => u.approval_status === 'pending'),
+    [users]
+  );
+
+  const teamByPrimary = useMemo(() => {
+    const map = new Map<string, ManagedUser[]>();
+    for (const secondary of secondaryExecutives) {
+      const managerId = typeof secondary.managerId === 'object' && secondary.managerId
+        ? secondary.managerId._id
+        : (secondary.managerId || '');
+      if (!managerId) continue;
+      if (!map.has(managerId)) map.set(managerId, []);
+      map.get(managerId)?.push(secondary);
+    }
+    return map;
+  }, [secondaryExecutives]);
+
+  const getManagerName = (user: ManagedUser) => {
+    if (!user.managerId) return '-';
+    if (typeof user.managerId === 'object') return user.managerId.name;
+    const manager = users.find((u) => u._id === user.managerId);
+    return manager?.name || '-';
   };
-  customer_name: string;
-  customer_phone: string;
-  products: Array<{
-    product_id: string;
-    product_name: string;
-    quantity: number;
-    unit_price: number;
-    total_price: number;
-  }>;
-  total_amount: number;
-  status: 'pending' | 'approved' | 'rejected';
-  admin_notes?: string;
-  created_at: string;
-  updated_at: string;
-}
 
-interface SalesmanStats {
-  salesman_id: string;
-  salesman_name: string;
-  salesman_email: string;
-  total_orders: number;
-  pending_orders: number;
-  approved_orders: number;
-  rejected_orders: number;
-  total_order_value: number;
-  approved_order_value: number;
-}
+  const loadUsers = async () => {
+    const response = await fetch('/api/users', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Failed to load users');
+    setUsers(data.users || []);
+  };
 
-export default function SalesmenPage() {
-  const [salesmen, setSalesmen] = useState<User[]>([]);
-  const [salesmanStats, setSalesmanStats] = useState<SalesmanStats[]>([]);
-  const [salesmanOrders, setSalesmanOrders] = useState<Order[]>([]);
-  const [selectedSalesman] = useState<User | null>(null);
-  const [editingSalesman, setEditingSalesman] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [isViewOrdersDialogOpen, setIsViewOrdersDialogOpen] = useState(false);
-  const [newSalesman, setNewSalesman] = useState({
-    name: '',
-    email: '',
-    password: '',
-  });
+  const loadProducts = async () => {
+    const response = await fetch('/api/products', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Failed to load products');
+    setProducts(data.products || []);
+  };
+
+  const loadCustomers = async () => {
+    const response = await fetch('/api/customers?limit=200', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Failed to load customers');
+
+    const rows = (data.customers || []) as CustomerApiRow[];
+    const normalizedRows: CustomerItem[] = rows.map((c) => ({
+      _id: c._id,
+      name: c.name,
+      phone: c.phone,
+      primary_executive_id: toIdString(c.primary_executive_id),
+      secondary_executive_id: toIdString(c.secondary_executive_id),
+    }));
+
+    setCustomers(normalizedRows);
+
+    const primaryMap: Record<string, string> = {};
+    const secondaryMap: Record<string, string> = {};
+    for (const c of normalizedRows) {
+      primaryMap[c._id] = c.primary_executive_id || '';
+      secondaryMap[c._id] = c.secondary_executive_id || '';
+    }
+    setCustomerOwnerPrimaryById(primaryMap);
+    setCustomerOwnerSecondaryById(secondaryMap);
+  };
+
+  const loadAll = async () => {
+    try {
+      setLoading(true);
+      await Promise.all([loadUsers(), loadProducts(), loadCustomers()]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to load executive management data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    loadSalesmen();
-    loadSalesmanStats();
+    if (token) {
+      loadAll();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [token]);
 
-  const getAuthToken = () => {
-    return localStorage.getItem('leaftrack_token');
-  };
-
-  const loadSalesmen = async () => {
-    try {
-      setIsLoading(true);
-      const response = await fetch('/api/users');
-      const data = await response.json();
-      
-      if (data.success) {
-        // Filter only salesmen
-        const salesmenOnly = data.users.filter((user: User) => user.role?.toLowerCase() === 'salesman');
-        setSalesmen(salesmenOnly);
-      } else {
-        toast.error('Failed to load salesmen');
-      }
-    } catch (error) {
-      console.error('Error loading salesmen:', error);
-      toast.error('Failed to load salesmen');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const loadSalesmanStats = async () => {
-    try {
-      const token = getAuthToken();
-      const response = await fetch('/api/orders', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-      const data = await response.json();
-      
-      if (data.success) {
-        // Calculate stats for each salesman
-        const statsMap = new Map<string, SalesmanStats>();
-        
-        data.orders.forEach((order: Order) => {
-          const salesmanId = order.salesman_id._id;
-          const existing = statsMap.get(salesmanId);
-          
-          if (existing) {
-            existing.total_orders++;
-            existing.total_order_value += order.total_amount;
-            
-            if (order.status === 'pending') existing.pending_orders++;
-            else if (order.status === 'approved') {
-              existing.approved_orders++;
-              existing.approved_order_value += order.total_amount;
-            }
-            else if (order.status === 'rejected') existing.rejected_orders++;
-          } else {
-            statsMap.set(salesmanId, {
-              salesman_id: salesmanId,
-              salesman_name: order.salesman_id.name,
-              salesman_email: order.salesman_id.email,
-              total_orders: 1,
-              pending_orders: order.status === 'pending' ? 1 : 0,
-              approved_orders: order.status === 'approved' ? 1 : 0,
-              rejected_orders: order.status === 'rejected' ? 1 : 0,
-              total_order_value: order.total_amount,
-              approved_order_value: order.status === 'approved' ? order.total_amount : 0,
-            });
-          }
-        });
-        
-        setSalesmanStats(Array.from(statsMap.values()).sort((a, b) => b.total_order_value - a.total_order_value));
-      }
-    } catch (error) {
-      console.error('Error loading salesman stats:', error);
-    }
-  };
-
-  const loadSalesmanOrders = async (salesmanId: string) => {
-    try {
-      const token = getAuthToken();
-      const response = await fetch(`/api/orders?salesman_id=${salesmanId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-      const data = await response.json();
-      
-      if (data.success) {
-        setSalesmanOrders(data.orders);
-        setIsViewOrdersDialogOpen(true);
-      } else {
-        toast.error('Failed to load orders');
-      }
-    } catch (error) {
-      console.error('Error loading orders:', error);
-      toast.error('Failed to load orders');
-    }
-  };
-
-  const handleCreateSalesman = async (e: React.FormEvent) => {
+  const createInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!newSalesman.name || !newSalesman.email || !newSalesman.password) {
-      toast.error('Please fill in all fields');
+    if (!inviteEmail) {
+      toast.error('Email is required');
+      return;
+    }
+    if (inviteRole === 'SecondaryExecutive' && !inviteManagerId) {
+      toast.error('Select primary executive for secondary invitation');
       return;
     }
 
     try {
-      const token = getAuthToken();
-      const response = await fetch('/api/users', {
+      setInviteLoading(true);
+      const response = await fetch('/api/invitations/send', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          name: newSalesman.name,
-          email: newSalesman.email,
-          password: newSalesman.password,
-          role: 'salesman'
+          email: inviteEmail,
+          role: inviteRole,
+          managerId: inviteRole === 'SecondaryExecutive' ? inviteManagerId : undefined,
         }),
       });
 
       const data = await response.json();
-
-      if (data.success) {
-        setSalesmen(prev => [data.user, ...prev]);
-        setNewSalesman({ name: '', email: '', password: '' });
-        setIsAddDialogOpen(false);
-        toast.success('Salesman created successfully');
-        loadSalesmanStats();
-      } else {
-        toast.error(data.error || 'Failed to create salesman');
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to create invitation');
       }
+
+      const fullLink = `${window.location.origin}${data.inviteLink}`;
+      setGeneratedInviteLink(fullLink);
+      toast.success('Invitation link created');
+      setInviteEmail('');
+      setInviteManagerId('');
     } catch (error) {
-      console.error('Error creating salesman:', error);
-      toast.error('Failed to create salesman');
+      toast.error(error instanceof Error ? error.message : 'Failed to create invitation');
+    } finally {
+      setInviteLoading(false);
     }
   };
 
-  const handleEditSalesman = async (e: React.FormEvent) => {
+  const copyInviteLink = async () => {
+    if (!generatedInviteLink) return;
+    await navigator.clipboard.writeText(generatedInviteLink);
+    toast.success('Invite link copied');
+  };
+
+  const approveUser = async (id: string) => {
+    const response = await fetch(`/api/users/${id}/approve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      toast.error(data.error || 'Failed to approve user');
+      return;
+    }
+    toast.success('User approved');
+    loadAll();
+  };
+
+  const rejectUser = async (id: string) => {
+    const reason = (rejectionReasonById[id] || '').trim();
+    if (!reason) {
+      toast.error('Rejection reason is required');
+      return;
+    }
+
+    const response = await fetch(`/api/users/${id}/reject`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ reason }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      toast.error(data.error || 'Failed to reject user');
+      return;
+    }
+    toast.success('User rejected');
+    loadAll();
+  };
+
+  const reassignSecondary = async (secondaryId: string, managerId: string) => {
+    const response = await fetch(`/api/users/${secondaryId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ managerId }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      toast.error(data.error || 'Failed to reassign executive');
+      return;
+    }
+    toast.success('Secondary executive reassigned');
+    loadAll();
+  };
+
+  const assignStockPool = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!editingSalesman) return;
+
+    if (!stockPrimaryId || !stockProductId || !stockQuantity || !stockSellingPrice) {
+      toast.error('Please fill all stock assignment fields');
+      return;
+    }
 
     try {
-      const token = getAuthToken();
-      const response = await fetch(`/api/users/${editingSalesman._id}`, {
+      setSavingStockAssignment(true);
+      const response = await fetch('/api/assignments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          primaryExecutiveId: stockPrimaryId,
+          productId: stockProductId,
+          quantity: Number(stockQuantity),
+          sellingPricePerUnit: Number(stockSellingPrice),
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to assign stock pool');
+      }
+
+      toast.success('Stock pool assigned to primary executive');
+      setStockPrimaryId('');
+      setStockProductId('');
+      setStockQuantity('');
+      setStockSellingPrice('');
+      loadProducts();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to assign stock');
+    } finally {
+      setSavingStockAssignment(false);
+    }
+  };
+
+  const assignCustomerOwner = async (customerId: string) => {
+    const primaryId = customerOwnerPrimaryById[customerId] || '';
+    const secondaryId = customerOwnerSecondaryById[customerId] || '';
+
+    if (!primaryId) {
+      toast.error('Primary executive is required for customer ownership');
+      return;
+    }
+
+    const response = await fetch(`/api/customers/${customerId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        primary_executive_id: primaryId,
+        secondary_executive_id: secondaryId || undefined,
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      toast.error(data.error || 'Failed to assign customer ownership');
+      return;
+    }
+
+    toast.success('Customer ownership updated');
+    loadCustomers();
+  };
+
+  const openEditDialog = (user: ManagedUser) => {
+    const role = normalizeRoleId(user.role) === 'primary_executive' ? 'PrimaryExecutive' : 'SecondaryExecutive';
+    const managerId = typeof user.managerId === 'object' && user.managerId ? user.managerId._id : (user.managerId || '');
+
+    setEditingUser(user);
+    setEditName(user.name);
+    setEditEmail(user.email);
+    setEditRole(role);
+    setEditManagerId(managerId);
+    setEditPassword('');
+  };
+
+  const saveEditedUser = async () => {
+    if (!editingUser) return;
+    if (!editName.trim() || !editEmail.trim()) {
+      toast.error('Name and email are required');
+      return;
+    }
+
+    if (editRole === 'SecondaryExecutive' && !editManagerId) {
+      toast.error('Secondary executive requires a primary manager');
+      return;
+    }
+
+    try {
+      setSavingEdit(true);
+      const response = await fetch(`/api/users/${editingUser._id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          name: editingSalesman.name,
-          email: editingSalesman.email,
-          role: editingSalesman.role,
+          name: editName.trim(),
+          email: editEmail.trim(),
+          role: editRole,
+          managerId: editRole === 'SecondaryExecutive' ? editManagerId : undefined,
+          password: editPassword.trim() || undefined,
         }),
       });
 
       const data = await response.json();
-
-      if (data.success) {
-        setSalesmen(prev => prev.map(s => 
-          s._id === editingSalesman._id ? data.user : s
-        ));
-        setEditingSalesman(null);
-        setIsEditDialogOpen(false);
-        toast.success('Salesman updated successfully');
-      } else {
-        toast.error(data.error || 'Failed to update salesman');
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to update executive');
       }
+
+      toast.success('Executive updated successfully');
+      setEditingUser(null);
+      loadAll();
     } catch (error) {
-      console.error('Error updating salesman:', error);
-      toast.error('Failed to update salesman');
+      toast.error(error instanceof Error ? error.message : 'Failed to update executive');
+    } finally {
+      setSavingEdit(false);
     }
   };
 
-  const handleDeleteSalesman = async (salesmanId: string) => {
-    if (!confirm('Are you sure you want to delete this salesman? This action cannot be undone.')) return;
+  const deleteExecutive = async (user: ManagedUser) => {
+    const confirmed = window.confirm(`Delete ${user.name}? This action cannot be undone.`);
+    if (!confirmed) return;
 
-    try {
-      const token = getAuthToken();
-      const response = await fetch(`/api/users/${salesmanId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+    const response = await fetch(`/api/users/${user._id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
-      const data = await response.json();
-
-      if (data.success) {
-        setSalesmen(prev => prev.filter(s => s._id !== salesmanId));
-        toast.success('Salesman deleted successfully');
-        loadSalesmanStats();
-      } else {
-        toast.error(data.error || 'Failed to delete salesman');
-      }
-    } catch (error) {
-      console.error('Error deleting salesman:', error);
-      toast.error('Failed to delete salesman');
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      toast.error(data.error || 'Failed to delete executive');
+      return;
     }
+
+    toast.success('Executive deleted successfully');
+    loadAll();
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
+  const filteredSecondariesForPrimary = (primaryId: string) => {
+    return secondaryExecutives.filter((s) => {
+      const managerId = typeof s.managerId === 'object' && s.managerId ? s.managerId._id : (s.managerId || '');
+      return managerId === primaryId;
+    });
   };
 
-  const getStatusBadge = (status: string) => {
-    const styles = {
-      pending: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-      approved: 'bg-green-100 text-green-800 border-green-300',
-      rejected: 'bg-red-100 text-red-800 border-red-300',
-    };
-    const icons = {
-      pending: <Clock className="h-3 w-3 mr-1" />,
-      approved: <CheckCircle className="h-3 w-3 mr-1" />,
-      rejected: <XCircle className="h-3 w-3 mr-1" />,
-    };
-    const style = styles[status as keyof typeof styles] || 'bg-gray-100 text-gray-800';
-    const icon = icons[status as keyof typeof icons] || null;
-    
-    return (
-      <Badge className={`${style} flex items-center w-fit`}>
-        {icon}
-        {status.charAt(0).toUpperCase() + status.slice(1)}
-      </Badge>
-    );
-  };
+  if (loading) {
+    return <div className="p-6 text-gray-600">Loading executive management...</div>;
+  }
 
   return (
     <div className="min-h-screen bg-[#F5F5DC] p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-              <Users className="h-8 w-8 text-green-600" />
-              Salesmen Management
-            </h1>
-            <p className="text-gray-600 mt-2">
-              Manage salesmen, view their performance, and track order statistics
-            </p>
-          </div>
-          
-          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-green-600 hover:bg-green-700 text-white">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Salesman
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="bg-white">
-              <DialogHeader>
-                <DialogTitle>Add New Salesman</DialogTitle>
-                <DialogDescription>
-                  Create a new salesman account with login credentials.
-                </DialogDescription>
-              </DialogHeader>
-              <form onSubmit={handleCreateSalesman} className="space-y-4">
-                  <div>
-                    <Label htmlFor="name">Full Name *</Label>
-                    <Input
-                      id="name"
-                      value={newSalesman.name}
-                      onChange={(e) => setNewSalesman({ ...newSalesman, name: e.target.value })}
-                      placeholder="Enter full name"
-                      required
-                    />
+      <div className="max-w-7xl mx-auto space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
+            <Users className="h-8 w-8 text-green-600" />
+            Executive Management
+          </h1>
+          <p className="text-gray-600 mt-2">Manage hierarchy, assign stock pools and customers, and maintain executive accounts.</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card><CardHeader><CardTitle className="text-sm">Primary Executives</CardTitle></CardHeader><CardContent className="text-2xl font-bold">{primaryExecutives.length}</CardContent></Card>
+          <Card><CardHeader><CardTitle className="text-sm">Secondary Executives</CardTitle></CardHeader><CardContent className="text-2xl font-bold">{secondaryExecutives.length}</CardContent></Card>
+          <Card><CardHeader><CardTitle className="text-sm">Pending Approvals</CardTitle></CardHeader><CardContent className="text-2xl font-bold text-yellow-700">{pendingUsers.length}</CardContent></Card>
+          <Card><CardHeader><CardTitle className="text-sm">Customers</CardTitle></CardHeader><CardContent className="text-2xl font-bold">{customers.length}</CardContent></Card>
+        </div>
+
+        <Tabs defaultValue="invite">
+          <TabsList className="flex flex-wrap h-auto gap-2">
+            <TabsTrigger value="invite">Invite</TabsTrigger>
+            <TabsTrigger value="pending">Pending</TabsTrigger>
+            <TabsTrigger value="hierarchy">Hierarchy</TabsTrigger>
+            <TabsTrigger value="stock">Stock Pool</TabsTrigger>
+            <TabsTrigger value="customers">Customer Assignment</TabsTrigger>
+            <TabsTrigger value="manage">Manage Executives</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="invite" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><UserPlus className="h-5 w-5 text-green-600" />Create Invite Link</CardTitle>
+                <CardDescription>Invite-only onboarding is enforced. Generate and share invitation links.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={createInvite} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                  <div className="md:col-span-2">
+                    <Label>Email</Label>
+                    <Input value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="executive@company.com" type="email" required />
                   </div>
-                  
                   <div>
-                    <Label htmlFor="email">Email Address *</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      value={newSalesman.email}
-                      onChange={(e) => setNewSalesman({ ...newSalesman, email: e.target.value })}
-                      placeholder="Enter email address"
-                      required
-                    />
+                    <Label>Role</Label>
+                    <Select value={inviteRole} onValueChange={(v: 'PrimaryExecutive' | 'SecondaryExecutive') => setInviteRole(v)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="PrimaryExecutive">Primary Executive</SelectItem>
+                        <SelectItem value="SecondaryExecutive">Secondary Executive</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
-                  
                   <div>
-                    <Label htmlFor="password">Password *</Label>
-                    <Input
-                      id="password"
-                      type="password"
-                      value={newSalesman.password}
-                      onChange={(e) => setNewSalesman({ ...newSalesman, password: e.target.value })}
-                      placeholder="Enter password"
-                      required
-                    />
+                    <Label>Primary Manager</Label>
+                    <Select value={inviteManagerId} onValueChange={setInviteManagerId} disabled={inviteRole !== 'SecondaryExecutive'}>
+                      <SelectTrigger><SelectValue placeholder="Select manager" /></SelectTrigger>
+                      <SelectContent>
+                        {primaryExecutives.map((p) => (
+                          <SelectItem key={p._id} value={p._id}>{p.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-                  
-                  <div className="flex justify-end space-x-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setIsAddDialogOpen(false)}
-                    >
-                      Cancel
-                    </Button>
-                    <Button type="submit" className="bg-green-600 hover:bg-green-700">
-                      Create Salesman
+                  <div className="md:col-span-4">
+                    <Button type="submit" className="bg-green-600 hover:bg-green-700" disabled={inviteLoading}>
+                      <Link2 className="h-4 w-4 mr-2" />
+                      {inviteLoading ? 'Creating...' : 'Generate Invite Link'}
                     </Button>
                   </div>
                 </form>
-              </DialogContent>
-          </Dialog>
-        </div>
 
-        {/* Salesman Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Total Salesmen</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-gray-900">{salesmen.length}</div>
-              <p className="text-sm text-gray-500 mt-1">Active sales team</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Total Orders</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-gray-900">
-                {salesmanStats.reduce((sum, s) => sum + s.total_orders, 0)}
-              </div>
-              <p className="text-sm text-gray-500 mt-1">All orders combined</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Pending Approval</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-yellow-600">
-                {salesmanStats.reduce((sum, s) => sum + s.pending_orders, 0)}
-              </div>
-              <p className="text-sm text-gray-500 mt-1">Awaiting admin action</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Total Order Value</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-green-600">
-                {formatCurrency(salesmanStats.reduce((sum, s) => sum + s.total_order_value, 0))}
-              </div>
-              <p className="text-sm text-gray-500 mt-1">Approved orders only</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        <Tabs defaultValue="performance" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="performance">Performance & Analytics</TabsTrigger>
-            <TabsTrigger value="list">Salesman List</TabsTrigger>
-          </TabsList>
-
-          {/* Performance Tab */}
-          <TabsContent value="performance" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Salesman Performance Overview</CardTitle>
-                <CardDescription>
-                  Order statistics and performance metrics for each salesman
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <div className="flex justify-center items-center p-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
-                  </div>
-                ) : salesmanStats.length === 0 ? (
-                  <div className="text-center py-12">
-                    <TrendingUp className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">No performance data yet</h3>
-                    <p className="text-gray-500">Salesmen haven&apos;t created any orders yet.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {salesmanStats.map((stat) => (
-                      <Card key={stat.salesman_id} className="border-2">
-                        <CardContent className="pt-6">
-                          <div className="flex items-start justify-between mb-4">
-                            <div>
-                              <h3 className="text-lg font-semibold text-gray-900">{stat.salesman_name}</h3>
-                              <p className="text-sm text-gray-500">{stat.salesman_email}</p>
-                            </div>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => loadSalesmanOrders(stat.salesman_id)}
-                              className="flex items-center gap-2"
-                            >
-                              <Eye className="h-4 w-4" />
-                              View Orders
-                            </Button>
-                          </div>
-
-                          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                            <div className="bg-blue-50 p-3 rounded-lg">
-                              <p className="text-xs text-blue-600 font-medium mb-1">Total Orders</p>
-                              <p className="text-2xl font-bold text-blue-900">{stat.total_orders}</p>
-                            </div>
-
-                            <div className="bg-yellow-50 p-3 rounded-lg">
-                              <p className="text-xs text-yellow-600 font-medium mb-1">Pending</p>
-                              <p className="text-2xl font-bold text-yellow-900">{stat.pending_orders}</p>
-                            </div>
-
-                            <div className="bg-green-50 p-3 rounded-lg">
-                              <p className="text-xs text-green-600 font-medium mb-1">Approved</p>
-                              <p className="text-2xl font-bold text-green-900">{stat.approved_orders}</p>
-                            </div>
-
-                            <div className="bg-red-50 p-3 rounded-lg">
-                              <p className="text-xs text-red-600 font-medium mb-1">Rejected</p>
-                              <p className="text-2xl font-bold text-red-900">{stat.rejected_orders}</p>
-                            </div>
-
-                            <div className="bg-indigo-50 p-3 rounded-lg">
-                              <p className="text-xs text-indigo-600 font-medium mb-1">Order Value</p>
-                              <p className="text-lg font-bold text-indigo-900">{formatCurrency(stat.approved_order_value)}</p>
-                            </div>
-                          </div>
-
-                          <div className="mt-4 pt-4 border-t">
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="text-gray-600">Approval Rate:</span>
-                              <span className="font-semibold text-gray-900">
-                                {stat.total_orders > 0
-                                  ? `${((stat.approved_orders / stat.total_orders) * 100).toFixed(1)}%`
-                                  : 'N/A'}
-                              </span>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
+                {generatedInviteLink && (
+                  <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-md">
+                    <p className="text-sm text-gray-700 mb-2">Invitation link generated</p>
+                    <div className="flex gap-2">
+                      <Input value={generatedInviteLink} readOnly />
+                      <Button type="button" variant="outline" onClick={copyInviteLink}><Copy className="h-4 w-4 mr-1" />Copy</Button>
+                    </div>
                   </div>
                 )}
               </CardContent>
             </Card>
           </TabsContent>
 
-          {/* Salesman List Tab */}
-          <TabsContent value="list" className="space-y-6">
+          <TabsContent value="pending" className="mt-4">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <UserIcon className="h-5 w-5" />
-                  All Salesmen ({salesmen.length})
-                </CardTitle>
-                <CardDescription>
-                  Manage salesman accounts and credentials
-                </CardDescription>
+                <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-yellow-600" />Approval Queue</CardTitle>
+                <CardDescription>Approve or reject invited users after signup completion.</CardDescription>
               </CardHeader>
               <CardContent>
-                {isLoading ? (
-                  <div className="flex justify-center items-center p-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
-                  </div>
-                ) : salesmen.length === 0 ? (
-                  <div className="text-center py-12">
-                    <UserIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">No salesmen found</h3>
-                    <p className="text-gray-500">Create your first salesman to get started.</p>
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Email</TableHead>
-                        <TableHead>Role</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Role</TableHead>
+                      <TableHead>Manager</TableHead>
+                      <TableHead>Reject Reason</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pendingUsers.map((u) => (
+                      <TableRow key={u._id}>
+                        <TableCell>{u.name}</TableCell>
+                        <TableCell>{u.email}</TableCell>
+                        <TableCell><Badge>{u.role}</Badge></TableCell>
+                        <TableCell>{getManagerName(u)}</TableCell>
+                        <TableCell>
+                          <Input
+                            placeholder="Reason for rejection"
+                            value={rejectionReasonById[u._id] || ''}
+                            onChange={(e) => setRejectionReasonById((prev) => ({ ...prev, [u._id]: e.target.value }))}
+                          />
+                        </TableCell>
+                        <TableCell className="space-x-2">
+                          <Button size="sm" onClick={() => approveUser(u._id)} className="bg-green-600 hover:bg-green-700"><CheckCircle className="h-4 w-4 mr-1" />Approve</Button>
+                          <Button size="sm" variant="destructive" onClick={() => rejectUser(u._id)}><XCircle className="h-4 w-4 mr-1" />Reject</Button>
+                        </TableCell>
                       </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {salesmen.map((salesman) => {
-                        const stats = salesmanStats.find(s => s.salesman_id === salesman._id);
-                        return (
-                          <TableRow key={salesman._id}>
-                            <TableCell className="font-medium">
-                              <div>
-                                <p className="font-semibold">{salesman.name}</p>
-                                {stats && (
-                                  <p className="text-xs text-gray-500">
-                                    {stats.total_orders} orders • {formatCurrency(stats.approved_order_value)} value
-                                  </p>
-                                )}
-                              </div>
-                            </TableCell>
-                            <TableCell>{salesman.email}</TableCell>
-                            <TableCell>
-                              <Badge className="bg-blue-100 text-blue-800">
-                                {salesman.role}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex items-center justify-end gap-2">
-                                {stats && stats.total_orders > 0 && (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => loadSalesmanOrders(salesman._id!)}
-                                  >
-                                    <Eye className="h-4 w-4" />
-                                  </Button>
-                                )}
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setEditingSalesman(salesman);
-                                    setIsEditDialogOpen(true);
-                                  }}
-                                >
-                                  <Edit className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="destructive"
-                                  onClick={() => handleDeleteSalesman(salesman._id!)}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                )}
+                    ))}
+                    {pendingUsers.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-gray-500 py-8">No pending users.</TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
               </CardContent>
             </Card>
           </TabsContent>
-        </Tabs>
 
-        {/* View Orders Dialog */}
-        <Dialog open={isViewOrdersDialogOpen} onOpenChange={setIsViewOrdersDialogOpen}>
-          <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto bg-white">
-            <DialogHeader>
-              <DialogTitle>Salesman Orders</DialogTitle>
-              <DialogDescription>
-                {selectedSalesman && `All orders from ${selectedSalesman.name}`}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              {salesmanOrders.length === 0 ? (
-                <div className="text-center py-12">
-                  <ShoppingCart className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No orders found</h3>
-                  <p className="text-gray-500">This salesman hasn&apos;t created any orders yet.</p>
-                </div>
-              ) : (
+          <TabsContent value="hierarchy" className="mt-4 space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><UserCog className="h-5 w-5 text-blue-600" />Secondary Reassignment</CardTitle>
+                <CardDescription>Admin can reassign secondary executives between primary executives.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Secondary Executive</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Current Manager</TableHead>
+                      <TableHead>Reassign To</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {secondaryExecutives.map((u) => {
+                      const currentManagerId = typeof u.managerId === 'object' && u.managerId ? u.managerId._id : (u.managerId || '');
+                      return (
+                        <TableRow key={u._id}>
+                          <TableCell>{u.name}</TableCell>
+                          <TableCell>{u.email}</TableCell>
+                          <TableCell>{getManagerName(u)}</TableCell>
+                          <TableCell>
+                            <Select defaultValue={currentManagerId} onValueChange={(managerId) => reassignSecondary(u._id, managerId)}>
+                              <SelectTrigger className="w-[260px]"><SelectValue placeholder="Select primary executive" /></SelectTrigger>
+                              <SelectContent>
+                                {primaryExecutives.map((p) => (
+                                  <SelectItem key={p._id} value={p._id}>{p.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {secondaryExecutives.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center text-gray-500 py-8">No secondary executives found.</TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><Users2 className="h-5 w-5 text-indigo-600" />Teams by Primary Executive</CardTitle>
+                <CardDescription>Primary executives and the secondary executives reporting to them.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {primaryExecutives.map((primary) => {
+                  const team = teamByPrimary.get(primary._id) || [];
+                  return (
+                    <div key={primary._id} className="p-3 rounded-md border bg-white">
+                      <div className="flex items-center justify-between">
+                        <p className="font-semibold">{primary.name}</p>
+                        <Badge variant="outline">{team.length} secondary</Badge>
+                      </div>
+                      <p className="text-sm text-gray-600 mb-2">{primary.email}</p>
+                      {team.length === 0 ? (
+                        <p className="text-sm text-gray-500">No secondary executives assigned.</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {team.map((member) => (
+                            <Badge key={member._id} variant="secondary">{member.name}</Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="stock" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><Package className="h-5 w-5 text-emerald-600" />Assign Stock Pool to Primary Executive</CardTitle>
+                <CardDescription>Secondaries will sell from this primary-owned stock pool.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={assignStockPool} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                  <div>
+                    <Label>Primary Executive</Label>
+                    <Select value={stockPrimaryId} onValueChange={setStockPrimaryId}>
+                      <SelectTrigger><SelectValue placeholder="Select primary" /></SelectTrigger>
+                      <SelectContent>
+                        {primaryExecutives.map((p) => (
+                          <SelectItem key={p._id} value={p._id}>{p.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label>Product</Label>
+                    <Select value={stockProductId} onValueChange={setStockProductId}>
+                      <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
+                      <SelectContent>
+                        {products.map((p) => (
+                          <SelectItem key={p._id} value={p._id}>{p.name} (Stock: {p.totalStock})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label>Quantity</Label>
+                    <Input type="number" min="1" value={stockQuantity} onChange={(e) => setStockQuantity(e.target.value)} placeholder="Quantity" />
+                  </div>
+
+                  <div>
+                    <Label>Selling Price/Unit</Label>
+                    <Input type="number" min="0" step="0.01" value={stockSellingPrice} onChange={(e) => setStockSellingPrice(e.target.value)} placeholder="Price" />
+                  </div>
+
+                  <div className="md:col-span-4">
+                    <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700" disabled={savingStockAssignment}>
+                      {savingStockAssignment ? 'Assigning...' : 'Assign Stock Pool'}
+                    </Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="customers" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Assign Customers to Primary/Secondary Executives</CardTitle>
+                <CardDescription>Each customer can be owned by a primary and optionally a mapped secondary.</CardDescription>
+              </CardHeader>
+              <CardContent>
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Customer</TableHead>
-                      <TableHead>Products</TableHead>
-                      <TableHead>Total Amount</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Date</TableHead>
+                      <TableHead>Phone</TableHead>
+                      <TableHead>Primary Executive</TableHead>
+                      <TableHead>Secondary Executive</TableHead>
+                      <TableHead>Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {salesmanOrders.map((order) => (
-                      <TableRow key={order._id}>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">{order.customer_name}</p>
-                            <p className="text-sm text-gray-500">{order.customer_phone}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="text-sm">
-                            {(order.products || []).map((p, idx) => (
-                              <div key={idx} className="text-gray-600">
-                                {p.product_name} x {p.quantity}
-                              </div>
-                            ))}
-                          </div>
-                        </TableCell>
-                        <TableCell className="font-semibold">
-                          {formatCurrency(order.total_amount)}
-                        </TableCell>
-                        <TableCell>{getStatusBadge(order.status)}</TableCell>
-                        <TableCell>
-                          {new Date(order.created_at).toLocaleDateString('en-IN')}
-                        </TableCell>
+                    {customers.slice(0, 120).map((customer) => {
+                      const primaryId = customerOwnerPrimaryById[customer._id] || '';
+                      const secondaryOptions = filteredSecondariesForPrimary(primaryId);
+                      return (
+                        <TableRow key={customer._id}>
+                          <TableCell>{customer.name}</TableCell>
+                          <TableCell>{customer.phone}</TableCell>
+                          <TableCell>
+                            <Select
+                              value={primaryId}
+                              onValueChange={(value) => {
+                                setCustomerOwnerPrimaryById((prev) => ({ ...prev, [customer._id]: value }));
+                                setCustomerOwnerSecondaryById((prev) => ({ ...prev, [customer._id]: '' }));
+                              }}
+                            >
+                              <SelectTrigger className="w-[240px]"><SelectValue placeholder="Select primary" /></SelectTrigger>
+                              <SelectContent>
+                                {primaryExecutives.map((p) => (
+                                  <SelectItem key={p._id} value={p._id}>{p.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            <Select
+                              value={customerOwnerSecondaryById[customer._id] || ''}
+                              onValueChange={(value) => setCustomerOwnerSecondaryById((prev) => ({ ...prev, [customer._id]: value }))}
+                              disabled={!primaryId}
+                            >
+                              <SelectTrigger className="w-[240px]"><SelectValue placeholder="Optional secondary" /></SelectTrigger>
+                              <SelectContent>
+                                {secondaryOptions.map((s) => (
+                                  <SelectItem key={s._id} value={s._id}>{s.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            <Button size="sm" onClick={() => assignCustomerOwner(customer._id)}>Save</Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {customers.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-gray-500 py-8">No customers found.</TableCell>
                       </TableRow>
-                    ))}
+                    )}
                   </TableBody>
                 </Table>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-        {/* Edit Salesman Dialog */}
-        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent className="bg-white">
-            <DialogHeader>
-              <DialogTitle>Edit Salesman</DialogTitle>
-              <DialogDescription>
-                Update salesman information.
-              </DialogDescription>
-            </DialogHeader>
-            {editingSalesman && (
-              <form onSubmit={handleEditSalesman} className="space-y-4">
-                <div>
-                  <Label htmlFor="edit-name">Full Name *</Label>
-                  <Input
-                    id="edit-name"
-                    value={editingSalesman.name}
-                    onChange={(e) => setEditingSalesman({ ...editingSalesman, name: e.target.value })}
-                    placeholder="Enter full name"
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="edit-email">Email Address *</Label>
-                  <Input
-                    id="edit-email"
-                    type="email"
-                    value={editingSalesman.email}
-                    onChange={(e) => setEditingSalesman({ ...editingSalesman, email: e.target.value })}
-                    placeholder="Enter email address"
-                    required
-                  />
-                </div>
-                
-                <div className="flex justify-end space-x-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setIsEditDialogOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button type="submit" className="bg-green-600 hover:bg-green-700">
-                    Update Salesman
-                  </Button>
-                </div>
-              </form>
-            )}
-          </DialogContent>
-        </Dialog>
+          <TabsContent value="manage" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Manage Executives</CardTitle>
+                <CardDescription>Edit executive profiles, manager mappings, and delete users.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Role</TableHead>
+                      <TableHead>Manager</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {users
+                      .filter((u) => ['primary_executive', 'secondary_executive'].includes(normalizeRoleId(u.role) || ''))
+                      .map((u) => (
+                        <TableRow key={u._id}>
+                          <TableCell>{u.name}</TableCell>
+                          <TableCell>{u.email}</TableCell>
+                          <TableCell><Badge>{u.role}</Badge></TableCell>
+                          <TableCell>{getManagerName(u)}</TableCell>
+                          <TableCell><Badge variant="outline">{u.approval_status || '-'}</Badge></TableCell>
+                          <TableCell className="space-x-2">
+                            <Button size="icon" variant="outline" onClick={() => openEditDialog(u)}><Pencil className="h-4 w-4" /></Button>
+                            <Button size="icon" variant="destructive" onClick={() => deleteExecutive(u)}><Trash2 className="h-4 w-4" /></Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </div>
+
+      <Dialog open={Boolean(editingUser)} onOpenChange={(open) => { if (!open) setEditingUser(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Executive</DialogTitle>
+            <DialogDescription>Update profile details, role mapping, and optional password reset.</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div>
+              <Label>Name</Label>
+              <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+            </div>
+            <div>
+              <Label>Email</Label>
+              <Input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} type="email" />
+            </div>
+            <div>
+              <Label>Role</Label>
+              <Select value={editRole} onValueChange={(v: 'PrimaryExecutive' | 'SecondaryExecutive') => setEditRole(v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="PrimaryExecutive">Primary Executive</SelectItem>
+                  <SelectItem value="SecondaryExecutive">Secondary Executive</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {editRole === 'SecondaryExecutive' && (
+              <div>
+                <Label>Primary Manager</Label>
+                <Select value={editManagerId} onValueChange={setEditManagerId}>
+                  <SelectTrigger><SelectValue placeholder="Select primary" /></SelectTrigger>
+                  <SelectContent>
+                    {primaryExecutives.map((p) => (
+                      <SelectItem key={p._id} value={p._id}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div>
+              <Label>Reset Password (optional)</Label>
+              <Input value={editPassword} onChange={(e) => setEditPassword(e.target.value)} placeholder="Leave empty to keep existing" type="password" />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingUser(null)}>Cancel</Button>
+            <Button onClick={saveEditedUser} disabled={savingEdit}>{savingEdit ? 'Saving...' : 'Save Changes'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

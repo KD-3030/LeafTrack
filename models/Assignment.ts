@@ -1,6 +1,7 @@
 import mongoose, { Document, Schema, Model } from 'mongoose';
 
 export interface IAssignment extends Document {
+  // Backward-compatible field name; now represents the primary executive who owns this pool.
   salesman_id: mongoose.Types.ObjectId;
   productId: mongoose.Types.ObjectId; // Changed from batchId to productId
   quantity: number;
@@ -13,7 +14,7 @@ const AssignmentSchema = new Schema<IAssignment>({
   salesman_id: {
     type: Schema.Types.ObjectId,
     ref: 'User',
-    required: [true, 'Salesman ID is required'],
+    required: [true, 'Primary Executive ID is required'],
   },
   productId: {
     type: Schema.Types.ObjectId,

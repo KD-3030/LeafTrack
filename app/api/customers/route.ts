@@ -3,6 +3,8 @@ import connectDB from '@/lib/mongodb';
 import Customer, { ICustomer } from '@/models/Customer';
 import { requireUserAuth } from '@/lib/authMiddleware';
 import { Model } from 'mongoose';
+import User from '@/models/User';
+import { normalizeRoleId } from '@/lib/roles';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +18,12 @@ export async function GET(request: NextRequest) {
     if (authResult instanceof NextResponse) {
       return authResult;
     }
+
+    const currentUser = await User.findById(authResult.userId).select('role managerId');
+    if (!currentUser) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+    const roleId = normalizeRoleId(currentUser.role);
 
     // Get query parameters for filtering
     const { searchParams } = new URL(request.url);
@@ -32,6 +40,8 @@ export async function GET(request: NextRequest) {
       state?: RegExp;
       'address.state'?: string;
       business_type?: string;
+      primary_executive_id?: string;
+      secondary_executive_id?: string;
       $or?: Array<Record<string, RegExp>>;
     }
     const filter: CustomerFilter = {};
@@ -48,6 +58,16 @@ export async function GET(request: NextRequest) {
         { business_name: new RegExp(search, 'i') },
         { gstin: new RegExp(search, 'i') },
       ];
+    }
+
+    if (roleId === 'primary_executive') {
+      filter.primary_executive_id = authResult.userId;
+    } else if (roleId === 'secondary_executive') {
+      if (!currentUser.managerId) {
+        return NextResponse.json({ error: 'Secondary executive is not assigned to a primary executive' }, { status: 400 });
+      }
+      filter.primary_executive_id = currentUser.managerId.toString();
+      filter.secondary_executive_id = authResult.userId;
     }
 
     const CustomerModel = Customer as Model<ICustomer>;
@@ -110,6 +130,12 @@ export async function POST(request: NextRequest) {
       return authResult;
     }
 
+    const currentUser = await User.findById(authResult.userId).select('role managerId');
+    if (!currentUser) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+    const roleId = normalizeRoleId(currentUser.role);
+
     const customerData = await request.json();
 
     // Validate required fields
@@ -138,13 +164,56 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    let primaryExecutiveId: string | undefined;
+    let secondaryExecutiveId: string | undefined;
+
+    if (roleId === 'primary_executive') {
+      primaryExecutiveId = authResult.userId;
+      if (customerData.secondary_executive_id) {
+        const subordinate = await User.findById(customerData.secondary_executive_id).select('managerId role');
+        if (!subordinate || normalizeRoleId(subordinate.role) !== 'secondary_executive' || subordinate.managerId?.toString() !== authResult.userId) {
+          return NextResponse.json({ error: 'secondary_executive_id must belong to your team' }, { status: 400 });
+        }
+        secondaryExecutiveId = customerData.secondary_executive_id;
+      }
+    } else if (roleId === 'secondary_executive') {
+      if (!currentUser.managerId) {
+        return NextResponse.json({ error: 'Secondary executive is not assigned to a primary executive' }, { status: 400 });
+      }
+      primaryExecutiveId = currentUser.managerId.toString();
+      secondaryExecutiveId = authResult.userId;
+    } else if (roleId === 'admin') {
+      if (customerData.primary_executive_id) {
+        const primary = await User.findById(customerData.primary_executive_id).select('role');
+        if (!primary || normalizeRoleId(primary.role) !== 'primary_executive') {
+          return NextResponse.json({ error: 'primary_executive_id must belong to a primary executive' }, { status: 400 });
+        }
+        primaryExecutiveId = customerData.primary_executive_id;
+      }
+
+      if (customerData.secondary_executive_id) {
+        const secondary = await User.findById(customerData.secondary_executive_id).select('role managerId');
+        if (!secondary || normalizeRoleId(secondary.role) !== 'secondary_executive') {
+          return NextResponse.json({ error: 'secondary_executive_id must belong to a secondary executive' }, { status: 400 });
+        }
+        if (primaryExecutiveId && secondary.managerId?.toString() !== primaryExecutiveId) {
+          return NextResponse.json({ error: 'Secondary executive is not mapped to selected primary executive' }, { status: 400 });
+        }
+        secondaryExecutiveId = customerData.secondary_executive_id;
+      }
+    }
+
     // Create customer with defaults
     const customer = new CustomerModel({
       ...customerData,
       credit_limit: customerData.credit_limit || 0,
       credit_days: customerData.credit_days || 30,
+      outstanding_balance: customerData.outstanding_balance || 0,
       status: customerData.status || 'Active',
       business_type: customerData.business_type || 'Individual',
+      primary_executive_id: primaryExecutiveId,
+      secondary_executive_id: secondaryExecutiveId,
+      created_by: authResult.userId,
     });
 
     await customer.save();
