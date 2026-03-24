@@ -11,6 +11,7 @@ import QRCode from 'qrcode';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 interface JwtPayload {
   userId: string;
@@ -104,6 +105,39 @@ function getBrowserExecutablePath(): string | undefined {
   }
 
   return undefined;
+}
+
+type LaunchConfig = {
+  executablePath?: string;
+  args?: string[];
+  headless?: boolean | 'shell';
+};
+
+async function resolveLaunchConfig(): Promise<LaunchConfig> {
+  if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+    try {
+      const chromium = await import('@sparticuz/chromium');
+      const executablePath = await chromium.default.executablePath();
+      return {
+        executablePath,
+        args: chromium.default.args,
+        headless: true,
+      };
+    } catch (error) {
+      console.warn('Falling back to local browser detection for PDF generation:', error);
+    }
+  }
+
+  const executablePath = getBrowserExecutablePath();
+  if (!executablePath) {
+    throw new Error('No browser executable found. Configure @sparticuz/chromium for Vercel or set PUPPETEER_EXECUTABLE_PATH.');
+  }
+
+  return {
+    executablePath,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    headless: true,
+  };
 }
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
@@ -453,21 +487,12 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 </body>
 </html>`;
 
-    const executablePath = getBrowserExecutablePath();
-    if (!executablePath) {
-      return NextResponse.json(
-        {
-          error: 'No Chrome/Edge executable found for puppeteer-core. Set PUPPETEER_EXECUTABLE_PATH.',
-        },
-        { status: 500 },
-      );
-    }
-
+    const launchConfig = await resolveLaunchConfig();
     const puppeteer = await import('puppeteer-core');
     const browser = await puppeteer.default.launch({
-      headless: true,
-      executablePath,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      headless: launchConfig.headless,
+      executablePath: launchConfig.executablePath,
+      args: launchConfig.args,
     });
 
     try {
