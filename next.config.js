@@ -3,6 +3,15 @@ const nextConfig = {
   // App directory is enabled by default in Next.js 13+
   experimental: {
     serverComponentsExternalPackages: ['mongoose'],
+    // Ensure serverless traces include chromium assets used by invoice PDF route.
+    outputFileTracingIncludes: {
+      '/api/invoices/[id]/pdf': [
+        './node_modules/@sparticuz/chromium/**',
+      ],
+      '/app/api/invoices/[id]/pdf/route': [
+        './node_modules/@sparticuz/chromium/**',
+      ],
+    },
   },
   // Optimize for serverless deployment
   output: 'standalone',
