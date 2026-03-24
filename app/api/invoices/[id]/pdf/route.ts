@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
+import path from 'path';
 import { connectDB } from '@/lib/mongodb';
 import Invoice from '@/models/Invoice';
 import Customer from '@/models/Customer';
@@ -117,7 +118,22 @@ async function resolveLaunchConfig(): Promise<LaunchConfig> {
   if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
     try {
       const chromium = await import('@sparticuz/chromium');
-      const executablePath = await chromium.default.executablePath();
+      const chromiumBinCandidates = [
+        path.join(process.cwd(), 'node_modules', '@sparticuz', 'chromium', 'bin'),
+        '/var/task/node_modules/@sparticuz/chromium/bin',
+      ];
+
+      let executablePath: string | null = null;
+      for (const binPath of chromiumBinCandidates) {
+        if (!fs.existsSync(binPath)) continue;
+        executablePath = await chromium.default.executablePath(binPath);
+        break;
+      }
+
+      if (!executablePath) {
+        executablePath = await chromium.default.executablePath();
+      }
+
       return {
         executablePath,
         args: chromium.default.args,
