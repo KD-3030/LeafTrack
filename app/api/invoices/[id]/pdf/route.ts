@@ -119,6 +119,8 @@ async function resolveLaunchConfig(): Promise<LaunchConfig> {
     try {
       const chromium = await import('@sparticuz/chromium');
       const chromiumBinCandidates = [
+        path.join(process.cwd(), '.next', 'server', 'bin'),
+        '/var/task/.next/server/bin',
         path.join(process.cwd(), 'node_modules', '@sparticuz', 'chromium', 'bin'),
         '/var/task/node_modules/@sparticuz/chromium/bin',
       ];
