@@ -4,11 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "migrate": "node scripts/migrate-data-working.js",
-    "build": "next build && node scripts/copy-chromium-assets.js",
+    "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "production-setup": "node scripts/prepare-production.mjs"
+    "lint": "next lint"
   },
   "dependencies": {
     "@sparticuz/chromium": "^126.0.0",

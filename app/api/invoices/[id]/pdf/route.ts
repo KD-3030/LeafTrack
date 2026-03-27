@@ -115,7 +115,9 @@ type LaunchConfig = {
 };
 
 async function resolveLaunchConfig(): Promise<LaunchConfig> {
-  if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+  // @sparticuz/chromium is only compatible with Vercel/Lambda serverless environments.
+  // On bare-metal (Ubuntu + PM2), PUPPETEER_EXECUTABLE_PATH points to system chromium.
+  if (process.env.VERCEL) {
     try {
       const chromium = await import('@sparticuz/chromium');
       const chromiumBinCandidates = [

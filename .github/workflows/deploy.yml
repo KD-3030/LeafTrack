@@ -1,0 +1,60 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_TAILSCALE_IP }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          timeout: 10m
+          script: |
+            set -e
+
+            APP_DIR="/var/www/leaftrack"
+
+            # Clone on first deploy, pull on subsequent deploys
+            if [ ! -d "$APP_DIR/.git" ]; then
+              git clone https://github.com/KD-3030/LeafTrack.git "$APP_DIR"
+              cd "$APP_DIR"
+            else
+              cd "$APP_DIR"
+              git fetch origin main
+              git reset --hard origin/main
+            fi
+
+            # Ensure NVM is loaded
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
+            # Install dependencies (production only)
+            npm ci --omit=dev
+
+            # Build
+            npm run build
+
+            # Reload PM2 (zero-downtime), start if not running yet
+            if pm2 describe leaftrack > /dev/null 2>&1; then
+              pm2 reload leaftrack --update-env
+            else
+              pm2 start npm --name leaftrack -- run start
+              pm2 save
+            fi
+
+            echo "Deploy complete."
