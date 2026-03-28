@@ -1,76 +1,72 @@
 import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import Customer, { ICustomer } from '@/models/Customer';
+import { supabaseAdmin } from '@/lib/supabase-server';
 import { requireUserAuth } from '@/lib/authMiddleware';
-import { Model } from 'mongoose';
-import User from '@/models/User';
 import { normalizeRoleId } from '@/lib/roles';
+import { withId } from '@/lib/supabase-helpers';
+
+export const dynamic = 'force-dynamic';
 
 interface RouteParams {
-  params: {
-    id: string;
-  };
+  params: { id: string };
 }
 
-function canAccessCustomer(customer: ICustomer, roleId: string | null, userId: string, managerId?: string): boolean {
+function canAccessCustomer(
+  customer: Record<string, unknown>,
+  roleId: string | null,
+  userId: string
+): boolean {
   if (roleId === 'admin') return true;
   if (roleId === 'primary_executive') {
-    return customer.primary_executive_id?.toString() === userId;
+    return customer.primary_executive_id === userId;
   }
   if (roleId === 'secondary_executive') {
-    return customer.primary_executive_id?.toString() === managerId && customer.secondary_executive_id?.toString() === userId;
+    return customer.secondary_executive_id === userId;
   }
   return false;
 }
 
-// GET - Get single customer
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    await connectDB();
-    
-    // Use the proper authentication middleware
     const authResult = requireUserAuth(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
-    }
+    if (authResult instanceof NextResponse) return authResult;
+    const roleId = normalizeRoleId(authResult.role);
 
-    const currentUser = await User.findById(authResult.userId).select('role managerId');
-    if (!currentUser) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-    const roleId = normalizeRoleId(currentUser.role);
+    const { data: customer, error } = await supabaseAdmin
+      .from('customers')
+      .select('*')
+      .eq('id', params.id)
+      .single();
 
-    const CustomerModel = Customer as Model<ICustomer>;
-    const customer = await CustomerModel.findById(params.id);
-
-    if (!customer) {
+    if (error || !customer) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
     }
 
-    if (!canAccessCustomer(customer, roleId, authResult.userId, currentUser.managerId?.toString())) {
+    if (!canAccessCustomer(customer, roleId, authResult.userId)) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    // Keep outstanding balance synchronized from invoices (source of truth)
-    const Invoice = (await import('@/models/Invoice')).default;
-    const invoices = await Invoice.find({
-      customer_id: customer._id,
-      status: { $ne: 'Cancelled' },
-    }).select('balance_due').lean();
+    // Sync outstanding balance from invoices
+    const { data: invoices } = await supabaseAdmin
+      .from('invoices')
+      .select('balance_due')
+      .eq('customer_id', params.id)
+      .neq('status', 'Cancelled');
 
-    const outstandingBalance = invoices.reduce((sum, inv) => sum + (inv.balance_due || 0), 0);
+    const outstandingBalance = (invoices || []).reduce(
+      (sum: number, inv: Record<string, unknown>) => sum + Number(inv.balance_due || 0),
+      0
+    );
 
-    if ((customer.outstanding_balance || 0) !== outstandingBalance) {
-      customer.outstanding_balance = outstandingBalance;
-      await customer.save();
+    if (Number(customer.outstanding_balance || 0) !== outstandingBalance) {
+      await supabaseAdmin
+        .from('customers')
+        .update({ outstanding_balance: outstandingBalance })
+        .eq('id', params.id);
     }
 
     return NextResponse.json({
       success: true,
-      customer: {
-        ...customer.toObject(),
-        outstanding_balance: outstandingBalance,
-      },
+      customer: withId({ ...customer, outstanding_balance: outstandingBalance }),
     });
   } catch (error) {
     console.error('Error fetching customer:', error);
@@ -78,40 +74,30 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-// PUT - Update customer
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
-    await connectDB();
-    
-    // Use the proper authentication middleware
     const authResult = requireUserAuth(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
-    }
+    if (authResult instanceof NextResponse) return authResult;
+    const roleId = normalizeRoleId(authResult.role);
 
-    const currentUser = await User.findById(authResult.userId).select('role managerId');
-    if (!currentUser) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-    const roleId = normalizeRoleId(currentUser.role);
+    const { data: existingCustomer, error: fetchError } = await supabaseAdmin
+      .from('customers')
+      .select('*')
+      .eq('id', params.id)
+      .single();
 
-    const updateData = await request.json();
-    const CustomerModel = Customer as Model<ICustomer>;
-
-    // Convert empty email to undefined to work with sparse index
-    if (updateData.email === '' || updateData.email === null) {
-      console.log('Converting empty email to undefined for customer:', params.id);
-      updateData.email = undefined;
-    }
-
-    // Check if customer exists
-    const existingCustomer = await CustomerModel.findById(params.id);
-    if (!existingCustomer) {
+    if (fetchError || !existingCustomer) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
     }
 
-    if (!canAccessCustomer(existingCustomer, roleId, authResult.userId, currentUser.managerId?.toString())) {
+    if (!canAccessCustomer(existingCustomer, roleId, authResult.userId)) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
+
+    const updateData = await request.json();
+
+    if (updateData.email === '' || updateData.email === null) {
+      updateData.email = null;
     }
 
     if (roleId === 'secondary_executive') {
@@ -121,162 +107,99 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     if (roleId === 'primary_executive' && updateData.secondary_executive_id) {
-      const subordinate = await User.findById(updateData.secondary_executive_id).select('role managerId');
-      if (!subordinate || normalizeRoleId(subordinate.role) !== 'secondary_executive' || subordinate.managerId?.toString() !== authResult.userId) {
+      const { data: sub } = await supabaseAdmin
+        .from('users')
+        .select('role, manager_id')
+        .eq('id', updateData.secondary_executive_id)
+        .single();
+      if (!sub || normalizeRoleId(sub.role) !== 'secondary_executive' || sub.manager_id !== authResult.userId) {
         return NextResponse.json({ error: 'secondary_executive_id must belong to your team' }, { status: 400 });
       }
       updateData.primary_executive_id = authResult.userId;
     }
 
     if (roleId === 'admin') {
-      const requestedPrimaryId = updateData.primary_executive_id as string | undefined;
-      const requestedSecondaryId = updateData.secondary_executive_id as string | undefined;
-
-      if (requestedPrimaryId) {
-        const primary = await User.findById(requestedPrimaryId).select('role');
-        if (!primary || normalizeRoleId(primary.role) !== 'primary_executive') {
+      if (updateData.primary_executive_id) {
+        const { data: pe } = await supabaseAdmin
+          .from('users').select('role').eq('id', updateData.primary_executive_id).single();
+        if (!pe || normalizeRoleId(pe.role) !== 'primary_executive') {
           return NextResponse.json({ error: 'primary_executive_id must belong to a primary executive' }, { status: 400 });
         }
       }
-
-      if (requestedSecondaryId) {
-        const secondary = await User.findById(requestedSecondaryId).select('role managerId');
-        if (!secondary || normalizeRoleId(secondary.role) !== 'secondary_executive') {
+      if (updateData.secondary_executive_id) {
+        const { data: se } = await supabaseAdmin
+          .from('users').select('role, manager_id').eq('id', updateData.secondary_executive_id).single();
+        if (!se || normalizeRoleId(se.role) !== 'secondary_executive') {
           return NextResponse.json({ error: 'secondary_executive_id must belong to a secondary executive' }, { status: 400 });
         }
-
-        const effectivePrimaryId = requestedPrimaryId || existingCustomer.primary_executive_id?.toString();
-        if (effectivePrimaryId && secondary.managerId?.toString() !== effectivePrimaryId) {
+        const effectivePrimaryId = updateData.primary_executive_id || existingCustomer.primary_executive_id;
+        if (effectivePrimaryId && se.manager_id !== effectivePrimaryId) {
           return NextResponse.json({ error: 'Secondary executive is not mapped to selected primary executive' }, { status: 400 });
         }
       }
     }
 
-    // If phone is being updated, check for conflicts
     if (updateData.phone && updateData.phone !== existingCustomer.phone) {
-      const phoneConflict = await CustomerModel.findOne({ 
-        phone: updateData.phone,
-        _id: { $ne: params.id }
-      });
-      
-      if (phoneConflict) {
-        return NextResponse.json({ 
-          error: 'Phone number already exists' 
-        }, { status: 409 });
+      const { data: phoneConflict } = await supabaseAdmin
+        .from('customers').select('id').eq('phone', updateData.phone).neq('id', params.id).limit(1);
+      if (phoneConflict && phoneConflict.length > 0) {
+        return NextResponse.json({ error: 'Phone number already exists' }, { status: 409 });
       }
     }
 
-    // Handle email update carefully due to sparse unique index
-    // If email is being cleared (set to undefined), first unset it to avoid null conflicts
-    if (updateData.email === undefined && existingCustomer.email) {
-      // Remove the email field entirely from this customer first
-      await CustomerModel.findByIdAndUpdate(
-        params.id,
-        { $unset: { email: '' } }
-      );
-    }
-    
-    // If email is being updated to a non-empty value, check for conflicts
-    if (updateData.email && updateData.email !== undefined) {
-      // Only check for conflicts if email is actually changing
-      const existingEmail = existingCustomer.email || undefined;
-      if (updateData.email !== existingEmail) {
-        const emailConflict = await CustomerModel.findOne({ 
-          email: updateData.email,
-          _id: { $ne: params.id }
-        });
-        
-        if (emailConflict) {
-          return NextResponse.json(
-            { error: 'Customer with this email already exists' },
-            { status: 400 }
-          );
-        }
+    if (updateData.email && updateData.email !== existingCustomer.email) {
+      const { data: emailConflict } = await supabaseAdmin
+        .from('customers').select('id').eq('email', updateData.email).neq('id', params.id).limit(1);
+      if (emailConflict && emailConflict.length > 0) {
+        return NextResponse.json({ error: 'Customer with this email already exists' }, { status: 400 });
       }
     }
 
-    // Update customer
-    // Separate fields into $set and $unset operations
-    const updateOperation: Record<string, unknown> = {};
-    const unsetOperation: Record<string, string> = {};
-    
-    for (const [key, value] of Object.entries(updateData)) {
-      if (value === undefined) {
-        unsetOperation[key] = '';
-      } else {
-        updateOperation[key] = value;
-      }
-    }
-    
-    const updateQuery: Record<string, unknown> = {};
-    if (Object.keys(updateOperation).length > 0) {
-      updateQuery.$set = updateOperation;
-    }
-    if (Object.keys(unsetOperation).length > 0) {
-      updateQuery.$unset = unsetOperation;
-    }
-    
-    // Only run the update if there's something to update
-    let updatedCustomer;
-    if (Object.keys(updateQuery).length > 0) {
-      updatedCustomer = await CustomerModel.findByIdAndUpdate(
-        params.id,
-        updateQuery,
-        { new: true, runValidators: true }
-      );
-    } else {
-      // If nothing to update (email was already unset), just fetch the current customer
-      updatedCustomer = await CustomerModel.findById(params.id);
-    }
+    delete updateData._id;
+    delete updateData.id;
+    delete updateData.created_at;
+    delete updateData.createdAt;
 
-    console.log('Customer updated successfully:', params.id, 'Email:', updatedCustomer?.email);
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from('customers')
+      .update(updateData)
+      .eq('id', params.id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
 
     return NextResponse.json({
       success: true,
       message: 'Customer updated successfully',
-      customer: updatedCustomer,
+      customer: withId(updated),
     });
   } catch (error) {
     console.error('Error updating customer:', error);
-    
-    if (error instanceof Error && error.name === 'ValidationError') {
-      return NextResponse.json({ 
-        error: 'Validation failed', 
-        details: error.message 
-      }, { status: 400 });
-    }
-    
     return NextResponse.json({ error: 'Failed to update customer' }, { status: 500 });
   }
 }
 
-// DELETE - Delete customer
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
-    await connectDB();
-    
-    // Use the proper authentication middleware (Admin only for deletion)
     const authResult = requireUserAuth(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
-    }
+    if (authResult instanceof NextResponse) return authResult;
 
-    // Check if user has admin role for deletion
     if (normalizeRoleId(authResult.role) !== 'admin') {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
-    const CustomerModel = Customer as Model<ICustomer>;
-    
-    // Check if customer exists
-    const customer = await CustomerModel.findById(params.id);
-    if (!customer) {
+    const { data: customer, error } = await supabaseAdmin
+      .from('customers').select('id').eq('id', params.id).single();
+
+    if (error || !customer) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
     }
 
-    // TODO: Check if customer has any active invoices/transactions before deleting
-    // For now, we'll just set status to Inactive instead of deleting
-    await CustomerModel.findByIdAndUpdate(params.id, { status: 'Inactive' });
+    await supabaseAdmin
+      .from('customers')
+      .update({ status: 'Inactive' })
+      .eq('id', params.id);
 
     return NextResponse.json({
       success: true,
@@ -287,5 +210,3 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: 'Failed to delete customer' }, { status: 500 });
   }
 }
-
-export const dynamic = 'force-dynamic';

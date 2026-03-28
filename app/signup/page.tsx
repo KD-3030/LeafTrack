@@ -87,7 +87,7 @@ function SignupPageContent() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F5F5DC]">
+    <div className="min-h-screen bg-background">
       <Navigation />
       
       <main className="max-w-md mx-auto px-6 py-16">
@@ -165,7 +165,7 @@ function SignupPageContent() {
               
               <Button
                 type="submit"
-                className="w-full bg-green-600 hover:bg-green-700"
+                className="w-full"
                 disabled={isLoading || inviteStatus !== 'valid'}
               >
                 {isLoading ? (
@@ -196,7 +196,7 @@ function SignupPageContent() {
 
 export default function SignupPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-[#F5F5DC]" />}>
+    <Suspense fallback={<div className="min-h-screen bg-background" />}>
       <SignupPageContent />
     </Suspense>
   );

@@ -1,113 +1,66 @@
-import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import User, { IUser } from '@/models/User';
-import Invitation from '@/models/Invitation';
+﻿import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase-server';
 import { hashPassword } from '@/lib/auth';
-import { Model, Types } from 'mongoose';
-import { roleIdToDbRole, normalizeRoleId } from '@/lib/roles';
+import { normalizeRoleId, roleIdToDbRole } from '@/lib/roles';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    await connectDB();
-    
     const { name, email, password, invitationToken } = await request.json();
 
-    // Validate input
     if (!name || !email || !password || !invitationToken) {
-      return NextResponse.json(
-        { error: 'All fields are required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'All fields are required' }, { status: 400 });
     }
 
-    const invitation = await Invitation.findOne({
-      token: invitationToken,
-      used: false,
-      expires_at: { $gt: new Date() },
-    });
-
-    if (!invitation) {
-      return NextResponse.json(
-        { error: 'Invalid or expired invitation link' },
-        { status: 400 }
-      );
+    // Validate invitation
+    const { data: invitation, error: invErr } = await supabaseAdmin.from('invitations')
+      .select('*').eq('token', invitationToken).eq('used', false).gt('expires_at', new Date().toISOString()).single();
+    if (invErr || !invitation) {
+      return NextResponse.json({ error: 'Invalid or expired invitation link' }, { status: 400 });
     }
 
     if (invitation.email.toLowerCase() !== String(email).toLowerCase()) {
-      return NextResponse.json(
-        { error: 'Email does not match invitation' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Email does not match invitation' }, { status: 400 });
     }
 
     const invitedRole = normalizeRoleId(invitation.role);
     if (!invitedRole || invitedRole === 'admin' || invitedRole === 'customer') {
-      return NextResponse.json(
-        { error: 'Invitation role is invalid' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Invitation role is invalid' }, { status: 400 });
+    }
+    if (invitedRole === 'secondary_executive' && !invitation.manager_id) {
+      return NextResponse.json({ error: 'Secondary executive invitations require a primary manager assignment' }, { status: 400 });
     }
 
-    if (invitedRole === 'secondary_executive' && !invitation.managerId) {
-      return NextResponse.json(
-        { error: 'Secondary executive invitations require a primary manager assignment' },
-        { status: 400 }
-      );
-    }
-
-    // Check if user already exists
-    const UserModel = User as Model<IUser>;
-    const existingUser = await UserModel.findOne({ email });
+    // Check existing user
+    const { data: existingUser } = await supabaseAdmin.from('users').select('id').eq('email', email).single();
     if (existingUser) {
-      return NextResponse.json(
-        { error: 'User already exists with this email' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'User already exists with this email' }, { status: 400 });
     }
 
-    // Hash password
     const hashedPassword = await hashPassword(password);
 
-    // Create user from invitation with pending approval.
-    const user = await UserModel.create({
-      name,
-      email,
-      password: hashedPassword,
+    const { data: user, error: createErr } = await supabaseAdmin.from('users').insert({
+      name, email, password: hashedPassword,
       role: roleIdToDbRole(invitedRole),
-      managerId: invitation.managerId,
-      invited_by: invitation.invited_by,
+      manager_id: invitation.manager_id || null,
+      invited_by: invitation.invited_by || null,
       approval_status: 'pending',
-    });
+    }).select().single();
+    if (createErr) throw createErr;
 
-    invitation.used = true;
-    invitation.used_at = new Date();
-    invitation.user_id = user._id as Types.ObjectId;
-    await invitation.save();
-
-    // Return user data (without password)
-    const userData = {
-      id: (user._id as string).toString(),
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      managerId: user.managerId,
-      approval_status: user.approval_status,
-      created_at: user.createdAt,
-    };
+    // Mark invitation as used
+    await supabaseAdmin.from('invitations').update({
+      used: true, used_at: new Date().toISOString(), user_id: user.id,
+    }).eq('id', invitation.id);
 
     return NextResponse.json({
       success: true,
-      user: userData,
+      user: { id: user.id, _id: user.id, name: user.name, email: user.email, role: user.role, managerId: user.manager_id, approval_status: user.approval_status, created_at: user.created_at },
       message: 'Account created. Awaiting admin approval.',
     });
-
   } catch (error) {
     console.error('Signup error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

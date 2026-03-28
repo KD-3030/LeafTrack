@@ -1,7 +1,8 @@
 -- =============================================================================
 -- LeafTrack: MongoDB → Supabase Migration DDL
 -- Schema: sohag
--- Run this in Supabase SQL Editor (Dashboard → SQL Editor → New Query)
+-- Run this in Supabase SQL Editor (Dashboard > SQL Editor > New Query)
+-- IDEMPOTENT: Safe to re-run without affecting existing schema or data.
 -- =============================================================================
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -9,6 +10,9 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 
 CREATE SCHEMA IF NOT EXISTS sohag;
+
+-- Force all unqualified object creation into sohag, not public
+SET search_path TO sohag, public;
 
 -- Grant usage so PostgREST (anon/authenticated) can reach the schema
 GRANT USAGE ON SCHEMA sohag TO anon, authenticated, service_role;
@@ -40,7 +44,7 @@ $$ LANGUAGE plpgsql;
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ===================== USERS =====================
-CREATE TABLE sohag.users (
+CREATE TABLE IF NOT EXISTS sohag.users (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   mongo_id      TEXT UNIQUE,  -- for migration mapping, can drop later
   name          TEXT NOT NULL,
@@ -61,16 +65,17 @@ CREATE TABLE sohag.users (
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_users_email ON sohag.users(email);
-CREATE INDEX idx_users_role ON sohag.users(role);
-CREATE INDEX idx_users_approval ON sohag.users(approval_status);
+CREATE INDEX IF NOT EXISTS idx_users_email ON sohag.users(email);
+CREATE INDEX IF NOT EXISTS idx_users_role ON sohag.users(role);
+CREATE INDEX IF NOT EXISTS idx_users_approval ON sohag.users(approval_status);
 
+DROP TRIGGER IF EXISTS trg_users_updated_at ON sohag.users;
 CREATE TRIGGER trg_users_updated_at
   BEFORE UPDATE ON sohag.users
   FOR EACH ROW EXECUTE FUNCTION sohag.set_updated_at();
 
 -- ===================== PRODUCTS =====================
-CREATE TABLE sohag.products (
+CREATE TABLE IF NOT EXISTS sohag.products (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   mongo_id            TEXT UNIQUE,
   name                TEXT NOT NULL,
@@ -82,12 +87,13 @@ CREATE TABLE sohag.products (
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+DROP TRIGGER IF EXISTS trg_products_updated_at ON sohag.products;
 CREATE TRIGGER trg_products_updated_at
   BEFORE UPDATE ON sohag.products
   FOR EACH ROW EXECUTE FUNCTION sohag.set_updated_at();
 
 -- ===================== CUSTOMERS =====================
-CREATE TABLE sohag.customers (
+CREATE TABLE IF NOT EXISTS sohag.customers (
   id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   mongo_id                TEXT UNIQUE,
   name                    TEXT NOT NULL,
@@ -114,20 +120,21 @@ CREATE TABLE sohag.customers (
   updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_customers_name ON sohag.customers(name);
-CREATE INDEX idx_customers_state ON sohag.customers(state);
-CREATE INDEX idx_customers_status ON sohag.customers(status);
-CREATE INDEX idx_customers_primary_exec ON sohag.customers(primary_executive_id);
-CREATE INDEX idx_customers_secondary_exec ON sohag.customers(secondary_executive_id);
-CREATE UNIQUE INDEX idx_customers_email_unique ON sohag.customers(email) WHERE email IS NOT NULL;
-CREATE UNIQUE INDEX idx_customers_phone_unique ON sohag.customers(phone);
+CREATE INDEX IF NOT EXISTS idx_customers_name ON sohag.customers(name);
+CREATE INDEX IF NOT EXISTS idx_customers_state ON sohag.customers(state);
+CREATE INDEX IF NOT EXISTS idx_customers_status ON sohag.customers(status);
+CREATE INDEX IF NOT EXISTS idx_customers_primary_exec ON sohag.customers(primary_executive_id);
+CREATE INDEX IF NOT EXISTS idx_customers_secondary_exec ON sohag.customers(secondary_executive_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email_unique ON sohag.customers(email) WHERE email IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_phone_unique ON sohag.customers(phone);
 
+DROP TRIGGER IF EXISTS trg_customers_updated_at ON sohag.customers;
 CREATE TRIGGER trg_customers_updated_at
   BEFORE UPDATE ON sohag.customers
   FOR EACH ROW EXECUTE FUNCTION sohag.set_updated_at();
 
 -- ===================== SELLERS =====================
-CREATE TABLE sohag.sellers (
+CREATE TABLE IF NOT EXISTS sohag.sellers (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   mongo_id        TEXT UNIQUE,
   name            TEXT NOT NULL,
@@ -149,16 +156,17 @@ CREATE TABLE sohag.sellers (
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_sellers_name ON sohag.sellers(name);
-CREATE INDEX idx_sellers_gstin ON sohag.sellers(gstin);
-CREATE INDEX idx_sellers_active ON sohag.sellers(is_active);
+CREATE INDEX IF NOT EXISTS idx_sellers_name ON sohag.sellers(name);
+CREATE INDEX IF NOT EXISTS idx_sellers_gstin ON sohag.sellers(gstin);
+CREATE INDEX IF NOT EXISTS idx_sellers_active ON sohag.sellers(is_active);
 
+DROP TRIGGER IF EXISTS trg_sellers_updated_at ON sohag.sellers;
 CREATE TRIGGER trg_sellers_updated_at
   BEFORE UPDATE ON sohag.sellers
   FOR EACH ROW EXECUTE FUNCTION sohag.set_updated_at();
 
 -- ===================== RAW MATERIALS =====================
-CREATE TABLE sohag.raw_materials (
+CREATE TABLE IF NOT EXISTS sohag.raw_materials (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   mongo_id            TEXT UNIQUE,
   name                TEXT NOT NULL UNIQUE,
@@ -173,14 +181,15 @@ CREATE TABLE sohag.raw_materials (
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_raw_materials_active ON sohag.raw_materials(is_active);
+CREATE INDEX IF NOT EXISTS idx_raw_materials_active ON sohag.raw_materials(is_active);
 
+DROP TRIGGER IF EXISTS trg_raw_materials_updated_at ON sohag.raw_materials;
 CREATE TRIGGER trg_raw_materials_updated_at
   BEFORE UPDATE ON sohag.raw_materials
   FOR EACH ROW EXECUTE FUNCTION sohag.set_updated_at();
 
 -- ===================== COMPANY SETTINGS =====================
-CREATE TABLE sohag.company_settings (
+CREATE TABLE IF NOT EXISTS sohag.company_settings (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   mongo_id              TEXT UNIQUE,
   company_name          TEXT NOT NULL,
@@ -211,12 +220,13 @@ CREATE TABLE sohag.company_settings (
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+DROP TRIGGER IF EXISTS trg_company_settings_updated_at ON sohag.company_settings;
 CREATE TRIGGER trg_company_settings_updated_at
   BEFORE UPDATE ON sohag.company_settings
   FOR EACH ROW EXECUTE FUNCTION sohag.set_updated_at();
 
 -- ===================== BOMS (Bill of Materials) =====================
-CREATE TABLE sohag.boms (
+CREATE TABLE IF NOT EXISTS sohag.boms (
   id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   mongo_id                  TEXT UNIQUE,
   product_id                UUID NOT NULL REFERENCES sohag.products(id),
@@ -234,18 +244,19 @@ CREATE TABLE sohag.boms (
   updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_boms_product ON sohag.boms(product_id);
-CREATE INDEX idx_boms_status ON sohag.boms(status);
-CREATE INDEX idx_boms_current ON sohag.boms(is_current);
-CREATE UNIQUE INDEX idx_boms_product_version ON sohag.boms(product_id, version);
-CREATE INDEX idx_boms_product_current ON sohag.boms(product_id, is_current);
+CREATE INDEX IF NOT EXISTS idx_boms_product ON sohag.boms(product_id);
+CREATE INDEX IF NOT EXISTS idx_boms_status ON sohag.boms(status);
+CREATE INDEX IF NOT EXISTS idx_boms_current ON sohag.boms(is_current);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_boms_product_version ON sohag.boms(product_id, version);
+CREATE INDEX IF NOT EXISTS idx_boms_product_current ON sohag.boms(product_id, is_current);
 
+DROP TRIGGER IF EXISTS trg_boms_updated_at ON sohag.boms;
 CREATE TRIGGER trg_boms_updated_at
   BEFORE UPDATE ON sohag.boms
   FOR EACH ROW EXECUTE FUNCTION sohag.set_updated_at();
 
 -- ===================== BOM MATERIALS (extracted from embedded array) =====================
-CREATE TABLE sohag.bom_materials (
+CREATE TABLE IF NOT EXISTS sohag.bom_materials (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bom_id          UUID NOT NULL REFERENCES sohag.boms(id) ON DELETE CASCADE,
   material_id     UUID NOT NULL REFERENCES sohag.raw_materials(id),
@@ -256,15 +267,15 @@ CREATE TABLE sohag.bom_materials (
   total_cost      NUMERIC(12,2) NOT NULL CHECK (total_cost >= 0)
 );
 
-CREATE INDEX idx_bom_materials_bom ON sohag.bom_materials(bom_id);
+CREATE INDEX IF NOT EXISTS idx_bom_materials_bom ON sohag.bom_materials(bom_id);
 
 -- ===================== ORDERS =====================
-CREATE TABLE sohag.orders (
+CREATE TABLE IF NOT EXISTS sohag.orders (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   mongo_id          TEXT UNIQUE,
   order_number      TEXT UNIQUE,
   order_date        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  salesman_id       UUID NOT NULL REFERENCES sohag.users(id),
+  salesman_id       UUID REFERENCES sohag.users(id),
   salesman_name     TEXT NOT NULL,
   salesman_contact  TEXT,
   customer_id       UUID REFERENCES sohag.customers(id),
@@ -294,18 +305,19 @@ CREATE TABLE sohag.orders (
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_orders_salesman ON sohag.orders(salesman_id);
-CREATE INDEX idx_orders_customer_name ON sohag.orders(customer_name);
-CREATE INDEX idx_orders_status ON sohag.orders(status);
-CREATE INDEX idx_orders_order_number ON sohag.orders(order_number);
-CREATE INDEX idx_orders_created ON sohag.orders(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_salesman ON sohag.orders(salesman_id);
+CREATE INDEX IF NOT EXISTS idx_orders_customer_name ON sohag.orders(customer_name);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON sohag.orders(status);
+CREATE INDEX IF NOT EXISTS idx_orders_order_number ON sohag.orders(order_number);
+CREATE INDEX IF NOT EXISTS idx_orders_created ON sohag.orders(created_at DESC);
 
+DROP TRIGGER IF EXISTS trg_orders_updated_at ON sohag.orders;
 CREATE TRIGGER trg_orders_updated_at
   BEFORE UPDATE ON sohag.orders
   FOR EACH ROW EXECUTE FUNCTION sohag.set_updated_at();
 
 -- ===================== ORDER ITEMS (extracted from embedded array) =====================
-CREATE TABLE sohag.order_items (
+CREATE TABLE IF NOT EXISTS sohag.order_items (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id        UUID NOT NULL REFERENCES sohag.orders(id) ON DELETE CASCADE,
   product_id      UUID REFERENCES sohag.products(id),
@@ -316,14 +328,14 @@ CREATE TABLE sohag.order_items (
   total_price     NUMERIC(12,2) NOT NULL CHECK (total_price >= 0)
 );
 
-CREATE INDEX idx_order_items_order ON sohag.order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_items_order ON sohag.order_items(order_id);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- STEP 4: Empty tables for fresh FY use (no data migration)
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ===================== INVOICES =====================
-CREATE TABLE sohag.invoices (
+CREATE TABLE IF NOT EXISTS sohag.invoices (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   invoice_number      TEXT NOT NULL UNIQUE,
   sale_id             UUID,   -- FK added after sales table created
@@ -368,20 +380,21 @@ CREATE TABLE sohag.invoices (
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_invoices_customer ON sohag.invoices(customer_id);
-CREATE INDEX idx_invoices_salesman ON sohag.invoices(salesman_id);
-CREATE INDEX idx_invoices_status ON sohag.invoices(status);
-CREATE INDEX idx_invoices_payment_status ON sohag.invoices(payment_status);
-CREATE INDEX idx_invoices_due_date ON sohag.invoices(due_date);
-CREATE INDEX idx_invoices_customer_date ON sohag.invoices(customer_id, invoice_date DESC);
-CREATE INDEX idx_invoices_salesman_date ON sohag.invoices(salesman_id, invoice_date DESC);
+CREATE INDEX IF NOT EXISTS idx_invoices_customer ON sohag.invoices(customer_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_salesman ON sohag.invoices(salesman_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_status ON sohag.invoices(status);
+CREATE INDEX IF NOT EXISTS idx_invoices_payment_status ON sohag.invoices(payment_status);
+CREATE INDEX IF NOT EXISTS idx_invoices_due_date ON sohag.invoices(due_date);
+CREATE INDEX IF NOT EXISTS idx_invoices_customer_date ON sohag.invoices(customer_id, invoice_date DESC);
+CREATE INDEX IF NOT EXISTS idx_invoices_salesman_date ON sohag.invoices(salesman_id, invoice_date DESC);
 
+DROP TRIGGER IF EXISTS trg_invoices_updated_at ON sohag.invoices;
 CREATE TRIGGER trg_invoices_updated_at
   BEFORE UPDATE ON sohag.invoices
   FOR EACH ROW EXECUTE FUNCTION sohag.set_updated_at();
 
 -- ===================== INVOICE ITEMS =====================
-CREATE TABLE sohag.invoice_items (
+CREATE TABLE IF NOT EXISTS sohag.invoice_items (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   invoice_id            UUID NOT NULL REFERENCES sohag.invoices(id) ON DELETE CASCADE,
   product_id            UUID NOT NULL REFERENCES sohag.products(id),
@@ -398,10 +411,10 @@ CREATE TABLE sohag.invoice_items (
   total_amount          NUMERIC(12,2) NOT NULL
 );
 
-CREATE INDEX idx_invoice_items_invoice ON sohag.invoice_items(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON sohag.invoice_items(invoice_id);
 
 -- ===================== SALES =====================
-CREATE TABLE sohag.sales (
+CREATE TABLE IF NOT EXISTS sohag.sales (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   assignment_id         UUID,  -- FK added after assignments table
   salesman_id           UUID NOT NULL REFERENCES sohag.users(id),
@@ -420,20 +433,22 @@ CREATE TABLE sohag.sales (
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_sales_salesman ON sohag.sales(salesman_id);
-CREATE INDEX idx_sales_product ON sohag.sales(product_id);
-CREATE INDEX idx_sales_customer ON sohag.sales(customer_id);
-CREATE INDEX idx_sales_date ON sohag.sales(sale_date DESC);
+CREATE INDEX IF NOT EXISTS idx_sales_salesman ON sohag.sales(salesman_id);
+CREATE INDEX IF NOT EXISTS idx_sales_product ON sohag.sales(product_id);
+CREATE INDEX IF NOT EXISTS idx_sales_customer ON sohag.sales(customer_id);
+CREATE INDEX IF NOT EXISTS idx_sales_date ON sohag.sales(sale_date DESC);
 
+DROP TRIGGER IF EXISTS trg_sales_updated_at ON sohag.sales;
 CREATE TRIGGER trg_sales_updated_at
   BEFORE UPDATE ON sohag.sales
   FOR EACH ROW EXECUTE FUNCTION sohag.set_updated_at();
 
 -- Add FK from invoices to sales now that sales table exists
+ALTER TABLE sohag.invoices DROP CONSTRAINT IF EXISTS fk_invoices_sale;
 ALTER TABLE sohag.invoices ADD CONSTRAINT fk_invoices_sale FOREIGN KEY (sale_id) REFERENCES sohag.sales(id);
 
 -- ===================== SALE RETURNS =====================
-CREATE TABLE sohag.sale_returns (
+CREATE TABLE IF NOT EXISTS sohag.sale_returns (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   return_number         TEXT NOT NULL UNIQUE,
   original_invoice_id   UUID REFERENCES sohag.invoices(id),
@@ -462,17 +477,18 @@ CREATE TABLE sohag.sale_returns (
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_sale_returns_customer ON sohag.sale_returns(customer_id);
-CREATE INDEX idx_sale_returns_invoice ON sohag.sale_returns(original_invoice_id);
-CREATE INDEX idx_sale_returns_status ON sohag.sale_returns(status);
-CREATE INDEX idx_sale_returns_date ON sohag.sale_returns(return_date DESC);
+CREATE INDEX IF NOT EXISTS idx_sale_returns_customer ON sohag.sale_returns(customer_id);
+CREATE INDEX IF NOT EXISTS idx_sale_returns_invoice ON sohag.sale_returns(original_invoice_id);
+CREATE INDEX IF NOT EXISTS idx_sale_returns_status ON sohag.sale_returns(status);
+CREATE INDEX IF NOT EXISTS idx_sale_returns_date ON sohag.sale_returns(return_date DESC);
 
+DROP TRIGGER IF EXISTS trg_sale_returns_updated_at ON sohag.sale_returns;
 CREATE TRIGGER trg_sale_returns_updated_at
   BEFORE UPDATE ON sohag.sale_returns
   FOR EACH ROW EXECUTE FUNCTION sohag.set_updated_at();
 
 -- ===================== SALE RETURN ITEMS =====================
-CREATE TABLE sohag.sale_return_items (
+CREATE TABLE IF NOT EXISTS sohag.sale_return_items (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   sale_return_id    UUID NOT NULL REFERENCES sohag.sale_returns(id) ON DELETE CASCADE,
   product_id        UUID REFERENCES sohag.products(id),
@@ -488,10 +504,10 @@ CREATE TABLE sohag.sale_return_items (
   total_amount      NUMERIC(12,2) DEFAULT 0 CHECK (total_amount >= 0)
 );
 
-CREATE INDEX idx_sale_return_items_return ON sohag.sale_return_items(sale_return_id);
+CREATE INDEX IF NOT EXISTS idx_sale_return_items_return ON sohag.sale_return_items(sale_return_id);
 
 -- ===================== PAYMENTS =====================
-CREATE TABLE sohag.payments (
+CREATE TABLE IF NOT EXISTS sohag.payments (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   invoice_id        UUID NOT NULL REFERENCES sohag.invoices(id),
   customer_id       UUID NOT NULL REFERENCES sohag.customers(id),
@@ -514,18 +530,19 @@ CREATE TABLE sohag.payments (
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_payments_invoice ON sohag.payments(invoice_id);
-CREATE INDEX idx_payments_customer ON sohag.payments(customer_id, payment_date DESC);
-CREATE INDEX idx_payments_date ON sohag.payments(payment_date DESC);
-CREATE INDEX idx_payments_status ON sohag.payments(status);
-CREATE INDEX idx_payments_reconciled ON sohag.payments(reconciled);
+CREATE INDEX IF NOT EXISTS idx_payments_invoice ON sohag.payments(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_payments_customer ON sohag.payments(customer_id, payment_date DESC);
+CREATE INDEX IF NOT EXISTS idx_payments_date ON sohag.payments(payment_date DESC);
+CREATE INDEX IF NOT EXISTS idx_payments_status ON sohag.payments(status);
+CREATE INDEX IF NOT EXISTS idx_payments_reconciled ON sohag.payments(reconciled);
 
+DROP TRIGGER IF EXISTS trg_payments_updated_at ON sohag.payments;
 CREATE TRIGGER trg_payments_updated_at
   BEFORE UPDATE ON sohag.payments
   FOR EACH ROW EXECUTE FUNCTION sohag.set_updated_at();
 
 -- ===================== PURCHASES (clean schema, normalized) =====================
-CREATE TABLE sohag.purchases (
+CREATE TABLE IF NOT EXISTS sohag.purchases (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   serial_number       SERIAL,
   purchase_number     TEXT UNIQUE,
@@ -564,16 +581,17 @@ CREATE TABLE sohag.purchases (
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_purchases_seller ON sohag.purchases(seller_id);
-CREATE INDEX idx_purchases_payment ON sohag.purchases(payment_status);
-CREATE INDEX idx_purchases_date ON sohag.purchases(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_purchases_seller ON sohag.purchases(seller_id);
+CREATE INDEX IF NOT EXISTS idx_purchases_payment ON sohag.purchases(payment_status);
+CREATE INDEX IF NOT EXISTS idx_purchases_date ON sohag.purchases(created_at DESC);
 
+DROP TRIGGER IF EXISTS trg_purchases_updated_at ON sohag.purchases;
 CREATE TRIGGER trg_purchases_updated_at
   BEFORE UPDATE ON sohag.purchases
   FOR EACH ROW EXECUTE FUNCTION sohag.set_updated_at();
 
 -- ===================== PURCHASE ITEMS (normalized from dual-format) =====================
-CREATE TABLE sohag.purchase_items (
+CREATE TABLE IF NOT EXISTS sohag.purchase_items (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   purchase_id     UUID NOT NULL REFERENCES sohag.purchases(id) ON DELETE CASCADE,
   product_name    TEXT NOT NULL,
@@ -587,10 +605,10 @@ CREATE TABLE sohag.purchase_items (
   expiry_date     TIMESTAMPTZ
 );
 
-CREATE INDEX idx_purchase_items_purchase ON sohag.purchase_items(purchase_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase ON sohag.purchase_items(purchase_id);
 
 -- ===================== PURCHASE RETURNS =====================
-CREATE TABLE sohag.purchase_returns (
+CREATE TABLE IF NOT EXISTS sohag.purchase_returns (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   return_number         TEXT UNIQUE,
   return_date           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -634,18 +652,19 @@ CREATE TABLE sohag.purchase_returns (
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_purchase_returns_date ON sohag.purchase_returns(return_date DESC);
-CREATE INDEX idx_purchase_returns_supplier ON sohag.purchase_returns(supplier_name);
-CREATE INDEX idx_purchase_returns_product ON sohag.purchase_returns(product_name);
-CREATE INDEX idx_purchase_returns_refund ON sohag.purchase_returns(refund_status);
-CREATE INDEX idx_purchase_returns_approval ON sohag.purchase_returns(approval_status);
+CREATE INDEX IF NOT EXISTS idx_purchase_returns_date ON sohag.purchase_returns(return_date DESC);
+CREATE INDEX IF NOT EXISTS idx_purchase_returns_supplier ON sohag.purchase_returns(supplier_name);
+CREATE INDEX IF NOT EXISTS idx_purchase_returns_product ON sohag.purchase_returns(product_name);
+CREATE INDEX IF NOT EXISTS idx_purchase_returns_refund ON sohag.purchase_returns(refund_status);
+CREATE INDEX IF NOT EXISTS idx_purchase_returns_approval ON sohag.purchase_returns(approval_status);
 
+DROP TRIGGER IF EXISTS trg_purchase_returns_updated_at ON sohag.purchase_returns;
 CREATE TRIGGER trg_purchase_returns_updated_at
   BEFORE UPDATE ON sohag.purchase_returns
   FOR EACH ROW EXECUTE FUNCTION sohag.set_updated_at();
 
 -- ===================== ASSIGNMENTS =====================
-CREATE TABLE sohag.assignments (
+CREATE TABLE IF NOT EXISTS sohag.assignments (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   salesman_id           UUID NOT NULL REFERENCES sohag.users(id),
   product_id            UUID NOT NULL REFERENCES sohag.products(id),
@@ -655,14 +674,16 @@ CREATE TABLE sohag.assignments (
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_assignments_salesman ON sohag.assignments(salesman_id);
-CREATE INDEX idx_assignments_product ON sohag.assignments(product_id);
+CREATE INDEX IF NOT EXISTS idx_assignments_salesman ON sohag.assignments(salesman_id);
+CREATE INDEX IF NOT EXISTS idx_assignments_product ON sohag.assignments(product_id);
 
+DROP TRIGGER IF EXISTS trg_assignments_updated_at ON sohag.assignments;
 CREATE TRIGGER trg_assignments_updated_at
   BEFORE UPDATE ON sohag.assignments
   FOR EACH ROW EXECUTE FUNCTION sohag.set_updated_at();
 
 -- Add FK from sales to assignments now that assignments table exists
+ALTER TABLE sohag.sales DROP CONSTRAINT IF EXISTS fk_sales_assignment;
 ALTER TABLE sohag.sales ADD CONSTRAINT fk_sales_assignment FOREIGN KEY (assignment_id) REFERENCES sohag.assignments(id);
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -690,6 +711,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_orders_auto_number ON sohag.orders;
 CREATE TRIGGER trg_orders_auto_number
   BEFORE INSERT ON sohag.orders
   FOR EACH ROW EXECUTE FUNCTION sohag.generate_order_number();
@@ -705,6 +727,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_purchases_auto_number ON sohag.purchases;
 CREATE TRIGGER trg_purchases_auto_number
   BEFORE INSERT ON sohag.purchases
   FOR EACH ROW EXECUTE FUNCTION sohag.generate_purchase_number();
@@ -722,6 +745,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_sale_returns_auto_number ON sohag.sale_returns;
 CREATE TRIGGER trg_sale_returns_auto_number
   BEFORE INSERT ON sohag.sale_returns
   FOR EACH ROW EXECUTE FUNCTION sohag.generate_sale_return_number();
@@ -739,6 +763,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_purchase_returns_auto_number ON sohag.purchase_returns;
 CREATE TRIGGER trg_purchase_returns_auto_number
   BEFORE INSERT ON sohag.purchase_returns
   FOR EACH ROW EXECUTE FUNCTION sohag.generate_purchase_return_number();
@@ -777,6 +802,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_invoices_auto_number ON sohag.invoices;
 CREATE TRIGGER trg_invoices_auto_number
   BEFORE INSERT ON sohag.invoices
   FOR EACH ROW EXECUTE FUNCTION sohag.generate_invoice_number();

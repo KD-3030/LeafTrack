@@ -1,72 +1,35 @@
-import { NextRequest, NextResponse } from 'next/server';
-import mongoose from 'mongoose';
-import { connectDB } from '@/lib/mongodb';
-import Payment from '@/models/Payment';
-import Invoice from '@/models/Invoice';
-import Customer from '@/models/Customer'; // Import Customer model for populate
+﻿import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase-server';
 import { requireUserAuth } from '@/lib/authMiddleware';
+import { withId, withIds } from '@/lib/supabase-helpers';
 
 export const dynamic = 'force-dynamic';
 
-// Helper function to recalculate invoice balance based on all confirmed payments
 async function recalculateInvoiceBalance(invoiceId: string) {
-  const invoice = await Invoice.findById(invoiceId).lean();
-  if (!invoice) {
-    throw new Error('Invoice not found');
-  }
+  const { data: invoice } = await supabaseAdmin.from('invoices').select('grand_total').eq('id', invoiceId).single();
+  if (!invoice) throw new Error('Invoice not found');
 
-  // Get all confirmed payments for this invoice
-  const confirmedPayments = await Payment.find({
-    invoice_id: invoiceId,
-    status: { $in: ['Confirmed', 'Pending'] } // Include pending as they're recorded
-  }).lean();
+  const { data: payments } = await supabaseAdmin.from('payments').select('amount_paid').eq('invoice_id', invoiceId).in('status', ['Confirmed', 'Pending']);
+  const totalPaid = (payments || []).reduce((sum, p) => sum + Number(p.amount_paid || 0), 0);
+  const balanceDue = Number(invoice.grand_total) - totalPaid;
 
-  // Calculate total paid amount
-  const totalPaid = confirmedPayments.reduce((sum, payment) => sum + (payment.amount_paid || 0), 0);
-  const balanceDue = invoice.grand_total - totalPaid;
-
-  // Determine payment status
   let paymentStatus: 'Pending' | 'Partial' | 'Paid' = 'Pending';
-  if (balanceDue <= 0) {
-    paymentStatus = 'Paid';
-  } else if (totalPaid > 0) {
-    paymentStatus = 'Partial';
-  }
+  if (balanceDue <= 0) paymentStatus = 'Paid';
+  else if (totalPaid > 0) paymentStatus = 'Partial';
 
-  // Update invoice
-  await Invoice.findByIdAndUpdate(invoiceId, {
-    $set: {
-      paid_amount: totalPaid,
-      balance_due: Math.max(0, balanceDue),
-      payment_status: paymentStatus,
-    }
-  });
-
-  console.log('Invoice balance recalculated:', {
-    invoiceId,
-    totalPaid,
-    balanceDue: Math.max(0, balanceDue),
-    paymentStatus
-  });
+  await supabaseAdmin.from('invoices').update({
+    paid_amount: totalPaid,
+    balance_due: Math.max(0, balanceDue),
+    payment_status: paymentStatus,
+  }).eq('id', invoiceId);
 
   return { totalPaid, balanceDue: Math.max(0, balanceDue), paymentStatus };
 }
 
 export async function GET(request: NextRequest) {
   try {
-    // Use standardized authentication
     const authResult = requireUserAuth(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
-    }
-
-    await connectDB();
-    
-    // Ensure Customer model is registered before populate
-    // This forces the model to be registered in mongoose
-    if (!Customer) {
-      throw new Error('Customer model not loaded');
-    }
+    if (authResult instanceof NextResponse) return authResult;
 
     const { searchParams } = new URL(request.url);
     const limit = parseInt(searchParams.get('limit') || '20');
@@ -78,332 +41,156 @@ export async function GET(request: NextRequest) {
     const dateFrom = searchParams.get('dateFrom');
     const dateTo = searchParams.get('dateTo');
 
-    // Build filter
-    interface PaymentFilter {
-      status?: string;
-      payment_method?: string;
-      reconciled?: boolean;
-      payment_date?: {
-        $gte?: Date;
-        $lte?: Date;
-      };
-    }
-    const filter: PaymentFilter = {};
-    
-    if (status) {
-      filter.status = status;
-    }
-    
-    if (method) {
-      filter.payment_method = method;
-    }
-    
-    if (reconciled !== null && reconciled !== undefined) {
-      filter.reconciled = reconciled === 'true';
-    }
-    
-    if (dateFrom || dateTo) {
-      filter.payment_date = {};
-      if (dateFrom) {
-        filter.payment_date.$gte = new Date(dateFrom);
-      }
-      if (dateTo) {
-        filter.payment_date.$lte = new Date(dateTo);
-      }
-    }
+    let query = supabaseAdmin.from('payments').select('*', { count: 'exact' });
 
-    // Get payments with populated invoice and customer data
-    const payments = await Payment.find(filter)
-      .populate({
-        path: 'invoice_id',
-        select: 'invoice_number grand_total due_date',
-        options: { strictPopulate: false }
-      })
-      .populate({
-        path: 'customer_id',
-        select: 'name email phone',
-        options: { strictPopulate: false }
-      })
-      .sort(getSortObject(sortBy))
-      .skip((page - 1) * limit)
-      .limit(limit)
-      .lean();
+    if (status) query = query.eq('status', status);
+    if (method) query = query.eq('payment_method', method);
+    if (reconciled !== null && reconciled !== undefined && reconciled !== '') {
+      query = query.eq('reconciled', reconciled === 'true');
+    }
+    if (dateFrom) query = query.gte('payment_date', new Date(dateFrom).toISOString());
+    if (dateTo) query = query.lte('payment_date', new Date(dateTo).toISOString());
 
-    // Get total count for pagination
-    const total = await Payment.countDocuments(filter);
+    // Sort
+    const sortMap: Record<string, { col: string; asc: boolean }> = {
+      '-payment_date': { col: 'payment_date', asc: false },
+      'payment_date': { col: 'payment_date', asc: true },
+      '-amount_paid': { col: 'amount_paid', asc: false },
+      'amount_paid': { col: 'amount_paid', asc: true },
+      'status': { col: 'status', asc: true },
+      '-status': { col: 'status', asc: false },
+      'method': { col: 'payment_method', asc: true },
+      '-method': { col: 'payment_method', asc: false },
+      'reconciled': { col: 'reconciled', asc: true },
+      '-reconciled': { col: 'reconciled', asc: false },
+    };
+    const sort = sortMap[sortBy] || { col: 'payment_date', asc: false };
+    const offset = (page - 1) * limit;
+
+    const { data: rawPayments, count, error } = await query
+      .order(sort.col, { ascending: sort.asc })
+      .range(offset, offset + limit - 1);
+    if (error) throw error;
+    const payments = rawPayments || [];
+    const total = count || 0;
     const totalPages = Math.ceil(total / limit);
 
-    // Calculate summary statistics for current filter
-    const summaryStats = await Payment.aggregate([
-      { $match: filter },
-      {
-        $group: {
-          _id: null,
-          total_amount: { $sum: '$amount_paid' },
-          count: { $sum: 1 },
-          confirmed_amount: {
-            $sum: {
-              $cond: [
-                { $eq: ['$status', 'Confirmed'] },
-                '$amount_paid',
-                0
-              ]
-            }
-          },
-          pending_amount: {
-            $sum: {
-              $cond: [
-                { $eq: ['$status', 'Pending'] },
-                '$amount_paid',
-                0
-              ]
-            }
-          },
-          reconciled_amount: {
-            $sum: {
-              $cond: [
-                '$reconciled',
-                '$amount_paid',
-                0
-              ]
-            }
-          },
-          unreconciled_count: {
-            $sum: {
-              $cond: [
-                { $eq: ['$reconciled', false] },
-                1,
-                0
-              ]
-            }
-          }
-        }
-      }
+    // Enrich with invoice and customer data
+    const invIds = [...new Set(payments.map(p => p.invoice_id).filter(Boolean))];
+    const custIds = [...new Set(payments.map(p => p.customer_id).filter(Boolean))];
+    const [invRes, custRes] = await Promise.all([
+      invIds.length ? supabaseAdmin.from('invoices').select('id, invoice_number, grand_total, due_date').in('id', invIds) : { data: [] },
+      custIds.length ? supabaseAdmin.from('customers').select('id, name, email, phone').in('id', custIds) : { data: [] },
     ]);
+    const invMap = new Map((invRes.data || []).map(i => [i.id, i]));
+    const custMap = new Map((custRes.data || []).map(c => [c.id, c]));
 
-    const summary = summaryStats[0] || {
-      total_amount: 0,
-      count: 0,
-      confirmed_amount: 0,
-      pending_amount: 0,
-      reconciled_amount: 0,
-      unreconciled_count: 0
+    const enriched = payments.map(p => ({
+      ...withId(p),
+      invoice_id: p.invoice_id && invMap.has(p.invoice_id) ? { _id: p.invoice_id, ...invMap.get(p.invoice_id) } : p.invoice_id,
+      customer_id: p.customer_id && custMap.has(p.customer_id) ? { _id: p.customer_id, ...custMap.get(p.customer_id) } : p.customer_id,
+    }));
+
+    // Summary statistics - fetch all matching payments for summary
+    let summaryQuery = supabaseAdmin.from('payments').select('amount_paid, status, reconciled');
+    if (status) summaryQuery = summaryQuery.eq('status', status);
+    if (method) summaryQuery = summaryQuery.eq('payment_method', method);
+    if (reconciled !== null && reconciled !== undefined && reconciled !== '') {
+      summaryQuery = summaryQuery.eq('reconciled', reconciled === 'true');
+    }
+    if (dateFrom) summaryQuery = summaryQuery.gte('payment_date', new Date(dateFrom).toISOString());
+    if (dateTo) summaryQuery = summaryQuery.lte('payment_date', new Date(dateTo).toISOString());
+
+    const { data: allPayments } = await summaryQuery;
+    const all = allPayments || [];
+    const summary = {
+      total_amount: all.reduce((s, p) => s + Number(p.amount_paid || 0), 0),
+      count: all.length,
+      confirmed_amount: all.filter(p => p.status === 'Confirmed').reduce((s, p) => s + Number(p.amount_paid || 0), 0),
+      pending_amount: all.filter(p => p.status === 'Pending').reduce((s, p) => s + Number(p.amount_paid || 0), 0),
+      reconciled_amount: all.filter(p => p.reconciled).reduce((s, p) => s + Number(p.amount_paid || 0), 0),
+      unreconciled_count: all.filter(p => !p.reconciled).length,
     };
 
     return NextResponse.json({
       success: true,
-      payments,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages,
-        hasNext: page < totalPages,
-        hasPrev: page > 1
-      },
-      summary
+      payments: enriched,
+      pagination: { page, limit, total, totalPages, hasNext: page < totalPages, hasPrev: page > 1 },
+      summary,
     });
   } catch (error) {
     console.error('Payments GET error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    // Use standardized authentication
     const authResult = requireUserAuth(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
-    }
-
-    await connectDB();
+    if (authResult instanceof NextResponse) return authResult;
 
     const body = await request.json();
-    const {
-      invoice_id,
-      customer_id,
-      amount_paid,
-      payment_method,
-      payment_date,
-      transaction_id,
-      bank_reference,
-      cheque_number,
-      cheque_date,
-      bank_name,
-      notes
-    } = body;
+    const { invoice_id, customer_id, amount_paid, payment_method, payment_date, transaction_id, bank_reference, cheque_number, cheque_date, bank_name, notes } = body;
 
-    // Validate required fields
     if (!invoice_id || !amount_paid || !payment_method) {
-      return NextResponse.json(
-        { error: 'Missing required fields: invoice_id, amount_paid, payment_method' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Missing required fields: invoice_id, amount_paid, payment_method' }, { status: 400 });
     }
-
     if (amount_paid <= 0) {
-      return NextResponse.json(
-        { error: 'Amount paid must be greater than 0' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Amount paid must be greater than 0' }, { status: 400 });
     }
 
-    // Verify invoice exists and get customer info
-    const invoice = await Invoice.findById(invoice_id).lean();
-    if (!invoice) {
-      return NextResponse.json(
-        { error: 'Invoice not found' },
-        { status: 404 }
-      );
-    }
+    const { data: invoice } = await supabaseAdmin.from('invoices').select('grand_total, customer_id').eq('id', invoice_id).single();
+    if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
 
-    // Calculate current balance
-    const existingPayments = await Payment.find({
-      invoice_id,
-      status: 'Confirmed'
-    }).lean();
-
-    const totalPaid = existingPayments.reduce((sum, payment) => sum + payment.amount_paid, 0);
-    const remainingBalance = invoice.grand_total - totalPaid;
+    const { data: existingPayments } = await supabaseAdmin.from('payments').select('amount_paid').eq('invoice_id', invoice_id).eq('status', 'Confirmed');
+    const totalPaid = (existingPayments || []).reduce((sum, p) => sum + Number(p.amount_paid), 0);
+    const remainingBalance = Number(invoice.grand_total) - totalPaid;
 
     if (amount_paid > remainingBalance) {
-      return NextResponse.json(
-        { error: `Payment amount (₹${amount_paid}) exceeds remaining balance (₹${remainingBalance})` },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: `Payment amount exceeds remaining balance (${remainingBalance})` }, { status: 400 });
     }
 
-    // Create payment record
-    interface PaymentData {
-      invoice_id: string;
-      customer_id: string | mongoose.Types.ObjectId;
-      amount_paid: number;
-      payment_method: string;
-      payment_date: Date;
-      status: string;
-      reconciled: boolean;
-      created_by: string;
-      notes?: string;
-      transaction_id?: string;
-      reference_number?: string;
-      bank_reference?: string;
-      cheque_number?: string;
-      cheque_date?: Date;
-      bank_name?: string;
-    }
-    
-    // Ensure customer_id is set correctly
     const finalCustomerId = customer_id || invoice.customer_id;
-    if (!finalCustomerId) {
-      return NextResponse.json(
-        { error: 'Customer ID is required' },
-        { status: 400 }
-      );
-    }
-    
-    const paymentData: PaymentData = {
+    if (!finalCustomerId) return NextResponse.json({ error: 'Customer ID is required' }, { status: 400 });
+
+    const paymentData: Record<string, unknown> = {
       invoice_id,
-      customer_id: finalCustomerId, // Use the actual ObjectId, not customer_details
+      customer_id: finalCustomerId,
       amount_paid: parseFloat(amount_paid),
       payment_method,
-      payment_date: payment_date ? new Date(payment_date) : new Date(),
-      status: 'Pending', // Start as pending for review
-      reconciled: false,
+      payment_date: payment_date ? new Date(payment_date).toISOString() : new Date().toISOString(),
+      status: payment_method === 'Cash' ? 'Confirmed' : 'Pending',
+      reconciled: payment_method === 'Cash',
       created_by: authResult.userId,
-      notes
+      notes,
     };
 
-    // Add method-specific fields
-    if (payment_method === 'Bank Transfer' || payment_method === 'UPI') {
-      if (transaction_id) paymentData.transaction_id = transaction_id;
-      if (bank_reference) paymentData.bank_reference = bank_reference;
-    }
+    if (transaction_id) paymentData.transaction_id = transaction_id;
+    if (bank_reference) paymentData.bank_reference = bank_reference;
+    if (cheque_number) paymentData.cheque_number = cheque_number;
+    if (cheque_date) paymentData.cheque_date = new Date(cheque_date).toISOString();
+    if (bank_name) paymentData.bank_name = bank_name;
 
-    if (payment_method === 'Cheque') {
-      if (cheque_number) paymentData.cheque_number = cheque_number;
-      if (cheque_date) paymentData.cheque_date = new Date(cheque_date);
-      if (bank_name) paymentData.bank_name = bank_name;
-    }
+    const { data: payment, error: payErr } = await supabaseAdmin.from('payments').insert(paymentData).select().single();
+    if (payErr) throw payErr;
 
-    // Auto-confirm cash payments
-    if (payment_method === 'Cash') {
-      paymentData.status = 'Confirmed';
-      paymentData.reconciled = true;
-    }
-
-    const payment = new Payment(paymentData);
-    await payment.save();
-
-    // UPDATE INVOICE: Recalculate invoice balance based on all payments
     await recalculateInvoiceBalance(invoice_id);
 
-    // Debug: Check if customer exists
-    const Customer = (await import('@/models/Customer')).default;
-    const customerExists = await Customer.findById(finalCustomerId).lean();
-    console.log('Customer check:', {
-      customerId: finalCustomerId,
-      customerExists: !!customerExists,
-      customerData: customerExists ? { name: customerExists.name, email: customerExists.email, phone: customerExists.phone } : null
-    });
-
-    // Populate the response with the same options as GET
-    const populatedPayment = await Payment.findById(payment._id)
-      .populate({
-        path: 'invoice_id',
-        select: 'invoice_number grand_total due_date',
-        options: { strictPopulate: false }
-      })
-      .populate({
-        path: 'customer_id',
-        select: 'name email phone',
-        options: { strictPopulate: false }
-      })
-      .lean();
-
-    console.log('Payment created successfully:', {
-      paymentId: payment._id,
-      customerId: finalCustomerId,
-      populatedCustomer: populatedPayment?.customer_id,
-      invoicePopulated: !!populatedPayment?.invoice_id
-    });
+    // Enrich response
+    const invInfo = { _id: invoice_id, grand_total: invoice.grand_total };
+    const { data: custInfo } = await supabaseAdmin.from('customers').select('id, name, email, phone').eq('id', finalCustomerId).single();
 
     return NextResponse.json({
       success: true,
       message: 'Payment recorded successfully',
-      payment: populatedPayment
+      payment: {
+        ...withId(payment),
+        invoice_id: invInfo,
+        customer_id: custInfo ? { _id: custInfo.id, ...custInfo } : finalCustomerId,
+      },
     }, { status: 201 });
   } catch (error) {
     console.error('Payment creation error:', error);
-    if (error instanceof Error) {
-      console.error('Error details:', error.message, error.stack);
-    }
-    return NextResponse.json(
-      { 
-        error: 'Internal server error',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-}
-
-function getSortObject(sortBy: string) {
-  const sortMap: Record<string, { [key: string]: 1 | -1 }> = {
-    '-payment_date': { payment_date: -1 },
-    'payment_date': { payment_date: 1 },
-    '-amount_paid': { amount_paid: -1 },
-    'amount_paid': { amount_paid: 1 },
-    'status': { status: 1 },
-    '-status': { status: -1 },
-    'method': { payment_method: 1 },
-    '-method': { payment_method: -1 },
-    'reconciled': { reconciled: 1 },
-    '-reconciled': { reconciled: -1 }
-  };
-
-  return sortMap[sortBy] || { payment_date: -1 };
 }

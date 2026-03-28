@@ -1,23 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import BOM from '@/models/BOM';
-import Product from '@/models/Product';
-import { verifyToken } from '@/lib/auth';
+﻿import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAdminAuth } from '@/lib/authMiddleware';
+import { withId, withIds } from '@/lib/supabase-helpers';
 
-// GET /api/boms - Get all BOMs
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
-    await connectDB();
-
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const decoded = verifyToken(token);
-    if (!decoded || decoded.role?.toLowerCase() !== 'admin') {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
+    const authResult = requireAdminAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
     const { searchParams } = new URL(request.url);
     const product_id = searchParams.get('product_id');
@@ -25,163 +16,101 @@ export async function GET(request: NextRequest) {
     const is_current = searchParams.get('is_current');
     const search = searchParams.get('search');
 
-    interface QueryType {
-      product_id?: string;
-      status?: string;
-      is_current?: boolean;
-      $or?: Array<{ [key: string]: { $regex: string; $options: string } }>;
-    }
-    const query: QueryType = {};
+    let query = supabaseAdmin.from('boms').select('*');
+    if (product_id) query = query.eq('product_id', product_id);
+    if (status && status !== 'all') query = query.eq('status', status);
+    if (is_current !== null && is_current !== undefined && is_current !== 'all') query = query.eq('is_current', is_current === 'true');
+    if (search) query = query.or(`product_name.ilike.%${search}%,notes.ilike.%${search}%,created_by_name.ilike.%${search}%`);
 
-    if (product_id) {
-      query.product_id = product_id;
-    }
+    const { data: boms, error } = await query.order('created_at', { ascending: false });
+    if (error) throw error;
 
-    if (status && status !== 'all') {
-      query.status = status;
-    }
-
-    if (is_current !== null && is_current !== undefined && is_current !== 'all') {
-      query.is_current = is_current === 'true';
-    }
-
-    if (search) {
-      query.$or = [
-        { product_name: { $regex: search, $options: 'i' } },
-        { notes: { $regex: search, $options: 'i' } },
-        { created_by_name: { $regex: search, $options: 'i' } },
-      ];
-    }
-
-    const boms = await BOM.find(query)
-      .sort({ created_at: -1 })
-      .lean();
-
-    // Get summary statistics
-    const summary = {
-      total_boms: boms.length,
-      active_boms: boms.filter(b => b.status === 'active').length,
-      draft_boms: boms.filter(b => b.status === 'draft').length,
-      archived_boms: boms.filter(b => b.status === 'archived').length,
-      current_boms: boms.filter(b => b.is_current).length,
-    };
-
-    return NextResponse.json({
-      success: true,
-      boms,
-      summary,
-    });
-  } catch (error) {
-    console.error('Error fetching BOMs:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch BOMs' },
-      { status: 500 }
-    );
-  }
-}
-
-// POST /api/boms - Create new BOM
-export async function POST(request: NextRequest) {
-  try {
-    await connectDB();
-
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const decoded = verifyToken(token);
-    if (!decoded || decoded.role?.toLowerCase() !== 'admin') {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
-
-    const body = await request.json();
-
-    // Validate required fields
-    const requiredFields = ['product_id', 'materials'];
-    for (const field of requiredFields) {
-      if (!body[field]) {
-        return NextResponse.json(
-          { error: `Missing required field: ${field}` },
-          { status: 400 }
-        );
+    // Fetch materials for each BOM
+    const bomIds = (boms || []).map(b => b.id);
+    let materialsMap: Record<string, unknown[]> = {};
+    if (bomIds.length > 0) {
+      const { data: allMaterials } = await supabaseAdmin.from('bom_materials').select('*').in('bom_id', bomIds);
+      if (allMaterials) {
+        for (const m of allMaterials) {
+          if (!materialsMap[m.bom_id]) materialsMap[m.bom_id] = [];
+          materialsMap[m.bom_id].push({ ...withId(m), createdAt: m.bom_id });
+        }
       }
     }
 
-    // Validate materials array
-    if (!Array.isArray(body.materials) || body.materials.length === 0) {
-      return NextResponse.json(
-        { error: 'BOM must have at least one material' },
-        { status: 400 }
-      );
+    const bomsWithMaterials = withIds(boms || []).map(b => ({
+      ...b, materials: materialsMap[b.id] || [], createdAt: b.created_at, updatedAt: b.updated_at,
+    }));
+
+    const summary = {
+      total_boms: bomsWithMaterials.length,
+      active_boms: bomsWithMaterials.filter(b => b.status === 'active').length,
+      draft_boms: bomsWithMaterials.filter(b => b.status === 'draft').length,
+      archived_boms: bomsWithMaterials.filter(b => b.status === 'archived').length,
+      current_boms: bomsWithMaterials.filter(b => b.is_current).length,
+    };
+
+    return NextResponse.json({ success: true, boms: bomsWithMaterials, summary });
+  } catch (error) {
+    console.error('Error fetching BOMs:', error);
+    return NextResponse.json({ error: 'Failed to fetch BOMs' }, { status: 500 });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const authResult = requireAdminAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+
+    const body = await request.json();
+    if (!body.product_id || !body.materials || !Array.isArray(body.materials) || body.materials.length === 0) {
+      return NextResponse.json({ error: 'product_id and materials array are required' }, { status: 400 });
     }
 
-    // Get product details
-    const product = await Product.findById(body.product_id);
-    if (!product) {
-      return NextResponse.json(
-        { error: 'Product not found' },
-        { status: 404 }
-      );
+    const { data: product } = await supabaseAdmin.from('products').select('id, name').eq('id', body.product_id).single();
+    if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+
+    // Get next version
+    const { data: lastBom } = await supabaseAdmin.from('boms').select('version')
+      .eq('product_id', body.product_id).order('version', { ascending: false }).limit(1).maybeSingle();
+    const nextVersion = lastBom ? lastBom.version + 1 : 1;
+
+    const shouldBeCurrent = body.is_current || body.status === 'active';
+    if (shouldBeCurrent) {
+      await supabaseAdmin.from('boms').update({ is_current: false }).eq('product_id', body.product_id).eq('is_current', true);
     }
 
-    // Get the next version number for this product
-    const lastBOM = await BOM.findOne({ product_id: body.product_id })
-      .sort({ version: -1 })
-      .lean();
-    
-    const nextVersion = lastBOM ? lastBOM.version + 1 : 1;
-
-    // If this is being set as current, unset other current BOMs for this product
-    if (body.is_current || body.status === 'active') {
-      await BOM.updateMany(
-        { product_id: body.product_id, is_current: true },
-        { is_current: false }
-      );
-    }
-
-    // Calculate costs from materials
-    const total_manufacturing_cost = body.materials.reduce((sum: number, material: { total_cost?: number }) => {
-      return sum + (material.total_cost || 0);
-    }, 0);
-
+    const total_manufacturing_cost = body.materials.reduce((s: number, m: { total_cost?: number }) => s + (m.total_cost || 0), 0);
     const overhead_percentage = body.overhead_percentage || 0;
-    const overhead_amount = (total_manufacturing_cost * overhead_percentage) / 100;
-    const final_cost = total_manufacturing_cost + overhead_amount;
+    const final_cost = total_manufacturing_cost + (total_manufacturing_cost * overhead_percentage / 100);
 
-    // Create BOM
-    const bom = new BOM({
-      ...body,
-      product_name: product.name,
-      version: nextVersion,
-      total_manufacturing_cost,
-      final_cost,
-      overhead_percentage,
-      created_by: decoded.userId,
-      created_by_name: decoded.name || 'Admin',
-      is_current: body.is_current || body.status === 'active',
-    });
+    const { data: bom, error } = await supabaseAdmin.from('boms').insert({
+      product_id: body.product_id, product_name: product.name, version: nextVersion,
+      total_manufacturing_cost, overhead_percentage, final_cost,
+      notes: body.notes || null, status: body.status || 'draft',
+      created_by: authResult.userId, created_by_name: authResult.name || 'Admin',
+      is_current: shouldBeCurrent,
+    }).select().single();
+    if (error) throw error;
 
-    await bom.save();
+    // Insert materials
+    const materialRows = body.materials.map((m: Record<string, unknown>) => ({
+      bom_id: bom.id, material_id: m.material_id, material_name: m.material_name,
+      quantity: m.quantity, unit: m.unit, cost_per_unit: m.cost_per_unit, total_cost: m.total_cost,
+    }));
+    const { data: materials } = await supabaseAdmin.from('bom_materials').insert(materialRows).select();
 
-    // Update product manufacturing cost if this is the current BOM
-    if (bom.is_current) {
-      product.manufacturingCost = bom.final_cost;
-      await product.save();
-      
-      console.log(`✅ Updated product ${product.name} manufacturing cost to ₹${bom.final_cost}`);
+    if (shouldBeCurrent) {
+      await supabaseAdmin.from('products').update({ manufacturing_cost: final_cost }).eq('id', body.product_id);
     }
 
     return NextResponse.json({
       success: true,
-      message: 'BOM created successfully' + (bom.is_current ? ' and product cost updated' : ''),
-      bom,
+      message: 'BOM created successfully' + (shouldBeCurrent ? ' and product cost updated' : ''),
+      bom: { ...withId(bom), materials: materials || [], createdAt: bom.created_at, updatedAt: bom.updated_at },
     });
   } catch (error) {
     console.error('Error creating BOM:', error);
-    return NextResponse.json(
-      { error: 'Failed to create BOM', details: error instanceof Error ? error.message : String(error) },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to create BOM' }, { status: 500 });
   }
 }

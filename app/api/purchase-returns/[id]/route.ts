@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import PurchaseReturn from '@/models/PurchaseReturn';
-import { verifyToken } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAuth } from '@/lib/authMiddleware';
+import { withId } from '@/lib/supabase-helpers';
 
 // Force dynamic rendering for this route
 export const dynamic = 'force-dynamic';
@@ -12,27 +12,22 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const { data: purchaseReturn, error } = await supabaseAdmin
+      .from('purchase_returns')
+      .select('*')
+      .eq('id', params.id)
+      .single();
 
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
-
-    const purchaseReturn = await PurchaseReturn.findById(params.id).lean();
-
-    if (!purchaseReturn) {
+    if (error || !purchaseReturn) {
       return NextResponse.json({ error: 'Purchase return not found' }, { status: 404 });
     }
 
     return NextResponse.json({
       success: true,
-      return: purchaseReturn,
+      return: withId(purchaseReturn),
     });
   } catch (error) {
     console.error('Error fetching purchase return:', error);
@@ -49,23 +44,19 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
-
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
     const body = await request.json();
 
     // Find existing purchase return
-    const existingReturn = await PurchaseReturn.findById(params.id);
-    if (!existingReturn) {
+    const { data: existingReturn, error: fetchError } = await supabaseAdmin
+      .from('purchase_returns')
+      .select('*')
+      .eq('id', params.id)
+      .single();
+
+    if (fetchError || !existingReturn) {
       return NextResponse.json({ error: 'Purchase return not found' }, { status: 404 });
     }
 
@@ -84,17 +75,28 @@ export async function PUT(
       body.final_return_amount = total + tax - discount;
     }
 
-    // Update the purchase return
-    const updatedReturn = await PurchaseReturn.findByIdAndUpdate(
-      params.id,
-      { ...body, updated_at: new Date() },
-      { new: true, runValidators: true }
-    );
+    // Remove fields that shouldn't be directly updated
+    const { id: _, _id: __, ...updateFields } = body;
+
+    const { data: updatedReturn, error: updateError } = await supabaseAdmin
+      .from('purchase_returns')
+      .update(updateFields)
+      .eq('id', params.id)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error('Purchase return update error:', updateError);
+      return NextResponse.json(
+        { error: updateError.message || 'Failed to update purchase return' },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
       message: 'Purchase return updated successfully',
-      return: updatedReturn,
+      return: withId(updatedReturn),
     });
   } catch (error) {
     console.error('Error updating purchase return:', error);
@@ -111,22 +113,16 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const { error } = await supabaseAdmin
+      .from('purchase_returns')
+      .delete()
+      .eq('id', params.id);
 
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
-
-    const purchaseReturn = await PurchaseReturn.findByIdAndDelete(params.id);
-
-    if (!purchaseReturn) {
-      return NextResponse.json({ error: 'Purchase return not found' }, { status: 404 });
+    if (error) {
+      return NextResponse.json({ error: 'Purchase return not found or could not be deleted' }, { status: 404 });
     }
 
     return NextResponse.json({

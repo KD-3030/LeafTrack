@@ -198,7 +198,7 @@ export default function ProductsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F5F5DC] p-6">
+    <div className="min-h-screen bg-background p-6">
       <div className="max-w-7xl mx-auto">
         <div className="flex items-center justify-between mb-8">
           <div>
@@ -213,7 +213,7 @@ export default function ProductsPage() {
           
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-              <Button className="bg-green-600 hover:bg-green-700 text-white">
+              <Button className="">
                 <Plus className="h-4 w-4 mr-2" />
                 Add New Product
               </Button>
@@ -303,7 +303,7 @@ export default function ProductsPage() {
                   >
                     Cancel
                   </Button>
-                  <Button type="submit" className="bg-green-600 hover:bg-green-700">
+                  <Button type="submit" className="">
                     Create Product
                   </Button>
                 </div>
@@ -494,7 +494,7 @@ export default function ProductsPage() {
                   >
                     Cancel
                   </Button>
-                  <Button type="submit" className="bg-green-600 hover:bg-green-700">
+                  <Button type="submit" className="">
                     Update Product
                   </Button>
                 </div>

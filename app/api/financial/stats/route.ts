@@ -1,235 +1,97 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { connectDB } from '@/lib/mongodb';
-import Invoice from '@/models/Invoice';
-import Payment from '@/models/Payment';
-import jwt from 'jsonwebtoken';
+﻿import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAuth } from '@/lib/authMiddleware';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify authentication
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json(
-        { error: 'Unauthorized - No token provided' },
-        { status: 401 }
-      );
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString();
+
+    // Fetch all invoices and payments in parallel
+    const [invoicesRes, paymentsRes] = await Promise.all([
+      supabaseAdmin.from('invoices').select('id, grand_total, balance_due, payment_status, due_date, created_at'),
+      supabaseAdmin.from('payments').select('id, amount, status, payment_date, created_at'),
+    ]);
+
+    const invoices = invoicesRes.data || [];
+    const payments = (paymentsRes.data || []).filter(p => p.status === 'confirmed');
+
+    // Invoice stats
+    const totalRevenue = invoices.reduce((sum, inv) => sum + Number(inv.grand_total || 0), 0);
+    const totalOutstanding = invoices
+      .filter(inv => inv.payment_status !== 'paid')
+      .reduce((sum, inv) => sum + Number(inv.balance_due || 0), 0);
+    const totalOverdue = invoices
+      .filter(inv => inv.payment_status !== 'paid' && inv.due_date && new Date(inv.due_date) < now)
+      .reduce((sum, inv) => sum + Number(inv.balance_due || 0), 0);
+    const overdueCount = invoices
+      .filter(inv => inv.payment_status !== 'paid' && inv.due_date && new Date(inv.due_date) < now).length;
+
+    // Payment stats
+    const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const paymentsToday = payments
+      .filter(p => p.payment_date && p.payment_date >= todayStart && p.payment_date <= todayEnd)
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const paymentsThisMonth = payments
+      .filter(p => p.payment_date && p.payment_date >= monthStart)
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const paymentsTodayCount = payments
+      .filter(p => p.payment_date && p.payment_date >= todayStart && p.payment_date <= todayEnd).length;
+
+    // Collection rate
+    const collectionRate = totalRevenue > 0 ? Math.round((totalPaid / totalRevenue) * 100) : 0;
+
+    // Average payment time (days between invoice creation and payment)
+    let avgPaymentDays = 0;
+    const paidInvoices = invoices.filter(inv => inv.payment_status === 'paid');
+    if (paidInvoices.length > 0) {
+      const totalDays = paidInvoices.reduce((sum, inv) => {
+        const relatedPayments = payments.filter(p => p.created_at >= inv.created_at);
+        if (relatedPayments.length > 0) {
+          const lastPayment = relatedPayments.sort((a, b) => new Date(b.payment_date || b.created_at).getTime() - new Date(a.payment_date || a.created_at).getTime())[0];
+          const days = Math.ceil((new Date(lastPayment.payment_date || lastPayment.created_at).getTime() - new Date(inv.created_at).getTime()) / (1000 * 60 * 60 * 24));
+          return sum + Math.max(0, days);
+        }
+        return sum;
+      }, 0);
+      avgPaymentDays = Math.round(totalDays / paidInvoices.length);
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
-    if (!decoded) {
-      return NextResponse.json(
-        { error: 'Unauthorized - Invalid token' },
-        { status: 401 }
-      );
-    }
-
-    await connectDB();
-
-    // Calculate financial statistics
-    const stats = await calculateFinancialStats();
+    // Invoice status breakdown
+    const statusBreakdown = {
+      paid: invoices.filter(i => i.payment_status === 'paid').length,
+      partial: invoices.filter(i => i.payment_status === 'partial').length,
+      unpaid: invoices.filter(i => i.payment_status === 'unpaid').length,
+      overdue: overdueCount,
+    };
 
     return NextResponse.json({
       success: true,
-      stats,
+      stats: {
+        totalRevenue,
+        totalPaid,
+        totalOutstanding,
+        totalOverdue,
+        overdueCount,
+        paymentsToday,
+        paymentsTodayCount,
+        paymentsThisMonth,
+        collectionRate,
+        avgPaymentDays,
+        totalInvoices: invoices.length,
+        totalPayments: payments.length,
+        statusBreakdown,
+      },
     });
   } catch (error) {
-    console.error('Financial stats error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('Error fetching financial stats:', error);
+    return NextResponse.json({ error: 'Failed to fetch financial stats' }, { status: 500 });
   }
-}
-
-async function calculateFinancialStats() {
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-
-  // Aggregate invoice totals
-  const invoiceStats = await Invoice.aggregate([
-    {
-      $group: {
-        _id: null,
-        total_revenue: { $sum: '$grand_total' },
-        invoice_count: { $sum: 1 },
-        average_invoice_value: { $avg: '$grand_total' },
-      }
-    }
-  ]);
-
-  // Aggregate payment totals
-  const paymentStats = await Payment.aggregate([
-    {
-      $group: {
-        _id: null,
-        total_paid: { $sum: '$amount_paid' },
-        payment_count: { $sum: 1 },
-        average_payment_value: { $avg: '$amount_paid' },
-      }
-    }
-  ]);
-
-  // Payments today
-  const paymentsToday = await Payment.aggregate([
-    {
-      $match: {
-        payment_date: { $gte: startOfToday },
-        status: 'Confirmed'
-      }
-    },
-    {
-      $group: {
-        _id: null,
-        payments_today: { $sum: '$amount_paid' },
-        count_today: { $sum: 1 }
-      }
-    }
-  ]);
-
-  // Payments this month
-  const paymentsThisMonth = await Payment.aggregate([
-    {
-      $match: {
-        payment_date: { $gte: startOfMonth },
-        status: 'Confirmed'
-      }
-    },
-    {
-      $group: {
-        _id: null,
-        payments_this_month: { $sum: '$amount_paid' },
-        count_this_month: { $sum: 1 }
-      }
-    }
-  ]);
-
-  // Calculate outstanding amounts with overdue information
-  const outstandingStats = await Invoice.aggregate([
-    {
-      $lookup: {
-        from: 'payments',
-        localField: '_id',
-        foreignField: 'invoice_id',
-        as: 'payments'
-      }
-    },
-    {
-      $addFields: {
-        paid_amount: {
-          $sum: {
-            $map: {
-              input: {
-                $filter: {
-                  input: '$payments',
-                  cond: { $eq: ['$$this.status', 'Confirmed'] }
-                }
-              },
-              as: 'payment',
-              in: '$$payment.amount_paid'
-            }
-          }
-        }
-      }
-    },
-    {
-      $addFields: {
-        balance_due: { $subtract: ['$grand_total', '$paid_amount'] },
-        is_overdue: { $lt: ['$due_date', new Date()] }
-      }
-    },
-    {
-      $match: {
-        balance_due: { $gt: 0 }
-      }
-    },
-    {
-      $group: {
-        _id: null,
-        total_pending: { $sum: '$balance_due' },
-        overdue_amount: {
-          $sum: {
-            $cond: [
-              '$is_overdue',
-              '$balance_due',
-              0
-            ]
-          }
-        },
-        pending_count: { $sum: 1 },
-        overdue_count: {
-          $sum: {
-            $cond: [
-              '$is_overdue',
-              1,
-              0
-            ]
-          }
-        }
-      }
-    }
-  ]);
-
-  // Calculate average payment time
-  const paymentTimeStats = await Payment.aggregate([
-    {
-      $match: {
-        status: 'Confirmed'
-      }
-    },
-    {
-      $lookup: {
-        from: 'invoices',
-        localField: 'invoice_id',
-        foreignField: '_id',
-        as: 'invoice'
-      }
-    },
-    {
-      $unwind: '$invoice'
-    },
-    {
-      $addFields: {
-        payment_delay_days: {
-          $divide: [
-            { $subtract: ['$payment_date', '$invoice.invoice_date'] },
-            1000 * 60 * 60 * 24 // Convert milliseconds to days
-          ]
-        }
-      }
-    },
-    {
-      $group: {
-        _id: null,
-        average_payment_time: { $avg: '$payment_delay_days' }
-      }
-    }
-  ]);
-
-  // Compile results
-  const totalRevenue = invoiceStats[0]?.total_revenue || 0;
-  const totalPaid = paymentStats[0]?.total_paid || 0;
-  const totalPending = outstandingStats[0]?.total_pending || 0;
-  const overdueAmount = outstandingStats[0]?.overdue_amount || 0;
-  const paymentsToday_amount = paymentsToday[0]?.payments_today || 0;
-  const paymentsThisMonth_amount = paymentsThisMonth[0]?.payments_this_month || 0;
-  const averagePaymentTime = Math.round(paymentTimeStats[0]?.average_payment_time || 0);
-
-  return {
-    total_revenue: totalRevenue,
-    total_paid: totalPaid,
-    total_pending: totalPending,
-    overdue_amount: overdueAmount,
-    payments_today: paymentsToday_amount,
-    payments_this_month: paymentsThisMonth_amount,
-    average_payment_time: averagePaymentTime,
-    collection_rate: totalRevenue > 0 ? (totalPaid / totalRevenue) * 100 : 0,
-    overdue_ratio: totalPending > 0 ? (overdueAmount / totalPending) * 100 : 0,
-    invoice_count: invoiceStats[0]?.invoice_count || 0,
-    payment_count: paymentStats[0]?.payment_count || 0,
-    pending_invoice_count: outstandingStats[0]?.pending_count || 0,
-    overdue_invoice_count: outstandingStats[0]?.overdue_count || 0,
-  };
 }

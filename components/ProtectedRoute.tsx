@@ -17,7 +17,8 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
   const getDefaultRouteForRole = (role?: string) => {
     const roleId = normalizeRoleId(role || '');
     if (roleId === 'admin') return '/admin/dashboard';
-    if (roleId === 'primary_executive' || roleId === 'secondary_executive') return '/salesman/dashboard';
+    if (roleId === 'primary_executive') return '/executive/dashboard';
+    if (roleId === 'secondary_executive') return '/salesman/dashboard';
     return '/login';
   };
 
@@ -28,7 +29,6 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
         return;
       }
       
-      // Case-insensitive role check
       const normalizedUserRole = normalizeRoleId(user.role);
       const normalizedAllowedRoles = allowedRoles.map((r) => normalizeRoleId(r));
       
@@ -41,13 +41,12 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F5F5DC] flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-2 border-brand-600 border-t-transparent"></div>
       </div>
     );
   }
 
-  // Case-insensitive role check
   const normalizedUserRole = normalizeRoleId(user?.role || '');
   const normalizedAllowedRoles = allowedRoles.map((r) => normalizeRoleId(r));
   

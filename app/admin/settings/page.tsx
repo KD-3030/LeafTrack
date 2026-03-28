@@ -145,7 +145,7 @@ export default function CompanySettingsPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#F5F5DC] flex items-center justify-center">
+      <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading company settings...</p>
@@ -155,7 +155,7 @@ export default function CompanySettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F5F5DC] p-6">
+    <div className="min-h-screen bg-background p-6">
       <div className="max-w-4xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -175,7 +175,7 @@ export default function CompanySettingsPage() {
             <Button
               onClick={saveSettings}
               disabled={isSaving}
-              className="bg-green-600 hover:bg-green-700"
+              className=""
             >
               <Save className={`h-4 w-4 mr-2 ${isSaving ? 'animate-spin' : ''}`} />
               {isSaving ? 'Saving...' : 'Save Settings'}
@@ -474,7 +474,7 @@ export default function CompanySettingsPage() {
           <Button
             onClick={saveSettings}
             disabled={isSaving}
-            className="bg-green-600 hover:bg-green-700 min-w-32"
+            className="min-w-32"
           >
             <Save className={`h-4 w-4 mr-2 ${isSaving ? 'animate-spin' : ''}`} />
             {isSaving ? 'Saving...' : 'Save Settings'}

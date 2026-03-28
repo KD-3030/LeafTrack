@@ -44,7 +44,7 @@ export interface Assignment {
 export interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string, role: string) => Promise<{ success: boolean; error?: string }>;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   signup: (name: string, email: string, password: string, invitationToken: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
 }

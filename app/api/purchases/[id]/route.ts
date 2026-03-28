@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import Purchase from '@/models/Purchase';
-import { verifyToken } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAuth } from '@/lib/authMiddleware';
+import { withId } from '@/lib/supabase-helpers';
+
+export const dynamic = 'force-dynamic';
 
 // GET /api/purchases/[id] - Get a single purchase
 export async function GET(
@@ -9,27 +11,28 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const { data: purchase, error } = await supabaseAdmin
+      .from('purchases')
+      .select('*')
+      .eq('id', params.id)
+      .single();
 
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
-
-    const purchase = await Purchase.findById(params.id).lean();
-
-    if (!purchase) {
+    if (error || !purchase) {
       return NextResponse.json({ error: 'Purchase not found' }, { status: 404 });
     }
 
+    // Fetch purchase items
+    const { data: items } = await supabaseAdmin
+      .from('purchase_items')
+      .select('*')
+      .eq('purchase_id', params.id);
+
     return NextResponse.json({
       success: true,
-      purchase,
+      purchase: withId({ ...purchase, items: items || [] }),
     });
   } catch (error) {
     console.error('Error fetching purchase:', error);
@@ -46,23 +49,19 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
-
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
     const body = await request.json();
 
     // Find existing purchase
-    const existingPurchase = await Purchase.findById(params.id);
-    if (!existingPurchase) {
+    const { data: existingPurchase, error: fetchError } = await supabaseAdmin
+      .from('purchases')
+      .select('*')
+      .eq('id', params.id)
+      .single();
+
+    if (fetchError || !existingPurchase) {
       return NextResponse.json({ error: 'Purchase not found' }, { status: 404 });
     }
 
@@ -81,17 +80,28 @@ export async function PUT(
       body.final_amount = total + tax - discount;
     }
 
-    // Update the purchase
-    const updatedPurchase = await Purchase.findByIdAndUpdate(
-      params.id,
-      { ...body, updated_at: new Date() },
-      { new: true, runValidators: true }
-    );
+    // Remove fields that shouldn't be directly updated
+    const { id: _, _id: __, items, ...updateFields } = body;
+
+    const { data: updatedPurchase, error: updateError } = await supabaseAdmin
+      .from('purchases')
+      .update(updateFields)
+      .eq('id', params.id)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error('Purchase update error:', updateError);
+      return NextResponse.json(
+        { error: updateError.message || 'Failed to update purchase' },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
       message: 'Purchase updated successfully',
-      purchase: updatedPurchase,
+      purchase: withId(updatedPurchase),
     });
   } catch (error) {
     console.error('Error updating purchase:', error);
@@ -108,22 +118,22 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    // Delete purchase items first (cascade should handle this, but be explicit)
+    await supabaseAdmin
+      .from('purchase_items')
+      .delete()
+      .eq('purchase_id', params.id);
 
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+    const { error } = await supabaseAdmin
+      .from('purchases')
+      .delete()
+      .eq('id', params.id);
 
-    const purchase = await Purchase.findByIdAndDelete(params.id);
-
-    if (!purchase) {
-      return NextResponse.json({ error: 'Purchase not found' }, { status: 404 });
+    if (error) {
+      return NextResponse.json({ error: 'Purchase not found or could not be deleted' }, { status: 404 });
     }
 
     return NextResponse.json({

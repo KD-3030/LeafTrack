@@ -1,450 +1,258 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { connectDB } from '@/lib/mongodb';
-import SaleReturn from '@/models/SaleReturn';
-import Invoice from '@/models/Invoice';
-import Product from '@/models/Product';
-import Customer from '@/models/Customer'; // Import Customer model for populate
-import User from '@/models/User'; // Import User model for populate (salesman, approved_by)
-import { requireUserAuth, requireAdminAuth, DecodedToken } from '@/lib/authMiddleware';
+﻿import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAuth, requireAdminAuth } from '@/lib/authMiddleware';
+import { withId, withIds } from '@/lib/supabase-helpers';
 import { normalizeRoleId } from '@/lib/roles';
-import mongoose from 'mongoose';
-
-interface ManualReturnItemInput {
-  product_name: string;
-  quantity_returned?: number;
-  quantity?: number;
-  unit_price: number;
-  total_amount: number;
-  reason?: string;
-}
-
-interface InvoiceReturnItemInput {
-  product_id: string;
-  product_name: string;
-  return_quantity: number;
-  unit_price: number;
-  total_refund?: number;
-}
-
-interface InvoiceItemShape {
-  product_id: mongoose.Types.ObjectId | string;
-  quantity: number;
-  gst_rate?: number;
-}
 
 export const dynamic = 'force-dynamic';
 
-// GET - List all sale returns
 export async function GET(request: NextRequest) {
   try {
-    await connectDB();
-    
-    // Ensure models are registered before populate
-    if (!Customer || !User) {
-      throw new Error('Required models not loaded');
-    }
-    
-    // Use standardized authentication
-    const authResult = requireUserAuth(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
-    }
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+    const decoded = authResult;
 
-    const decoded = authResult as DecodedToken;
+    const { data: currentUser } = await supabaseAdmin.from('users').select('id, role, manager_id').eq('id', decoded.userId).single();
+    if (!currentUser) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    const roleId = normalizeRoleId(currentUser.role);
+
     const { searchParams } = new URL(request.url);
-    
-    // Build filter based on user role and query parameters
-    const filter: Record<string, string | object> = {};
-    
-    const roleId = normalizeRoleId(decoded.role);
-
-    // Secondary executives can only see their own returns.
-    if (roleId === 'secondary_executive') {
-      filter.salesman_id = decoded.userId;
-    } else if (roleId === 'primary_executive') {
-      const secondaries = await User.find({
-        managerId: decoded.userId,
-        role: 'SecondaryExecutive',
-        approval_status: 'approved',
-      }).select('_id').lean();
-
-      filter.salesman_id = {
-        $in: [decoded.userId, ...secondaries.map((s) => s._id.toString())],
-      };
-    }
-    
-    // Add additional filters from query params
-    const status = searchParams.get('status');
-    if (status) filter.status = status;
-    
-    const refund_status = searchParams.get('refund_status');
-    if (refund_status) filter.refund_status = refund_status;
-    
-    const customer_id = searchParams.get('customer_id');
-    if (customer_id) filter.customer_id = customer_id;
-    
-    // Date range filtering
-    const start_date = searchParams.get('start_date');
-    const end_date = searchParams.get('end_date');
-    if (start_date && end_date) {
-      filter.return_date = {
-        $gte: new Date(start_date),
-        $lte: new Date(end_date)
-      };
-    }
-    
-    // Pagination
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '20');
-    const skip = (page - 1) * limit;
-    
-    // Get returns with populated references
-    const returns = await SaleReturn.find(filter)
-      .populate('customer_id', 'name email phone')
-      .populate('salesman_id', 'name email')
-      .populate('original_invoice_id', 'invoice_number invoice_date')
-      .populate('original_sale_id', 'createdAt')
-      .populate('approved_by', 'name')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
-    
-    // Get total count for pagination
-    const total = await SaleReturn.countDocuments(filter);
-    
-    // Calculate summary statistics
-    const summary = await SaleReturn.aggregate([
-      { $match: filter },
-      {
-        $group: {
-          _id: null,
-          total_returns: { $sum: 1 },
-          total_refund_amount: { $sum: '$total_refund' },
-          pending_returns: {
-            $sum: { $cond: [{ $eq: ['$status', 'Pending'] }, 1, 0] }
-          },
-          completed_returns: {
-            $sum: { $cond: [{ $eq: ['$status', 'Completed'] }, 1, 0] }
-          },
-          pending_refunds: {
-            $sum: { $cond: [{ $eq: ['$refund_status', 'Pending'] }, '$total_refund', 0] }
-          }
-        }
-      }
-    ]);
-    
-    return NextResponse.json({
-      success: true,
-      returns,
-      pagination: {
-        current_page: page,
-        per_page: limit,
-        total: total,
-        total_pages: Math.ceil(total / limit)
-      },
-      summary: summary[0] || {
-        total_returns: 0,
-        total_refund_amount: 0,
-        pending_returns: 0,
-        completed_returns: 0,
-        pending_refunds: 0
-      }
-    });
+    const status = searchParams.get('status');
+    const customer_id = searchParams.get('customer_id');
+    const from_date = searchParams.get('from_date');
+    const to_date = searchParams.get('to_date');
 
-  } catch (error) {
-    console.error('Error fetching sale returns:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch sale returns' },
-      { status: 500 }
-    );
-  }
-}
+    let query = supabaseAdmin.from('sale_returns').select('*, sale_return_items(*)', { count: 'exact' });
 
-// POST - Create a new sale return
-export async function POST(request: NextRequest) {
-  try {
-    await connectDB();
-    
-    // Use standardized authentication  
-    const authResult = requireUserAuth(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
+    // Role-based filtering
+    if (roleId === 'secondary_executive') {
+      query = query.eq('salesman_id', decoded.userId);
+    } else if (roleId === 'primary_executive') {
+      const { data: teamMembers } = await supabaseAdmin.from('users').select('id').eq('manager_id', decoded.userId);
+      const teamIds = [decoded.userId, ...(teamMembers || []).map(m => m.id)];
+      query = query.in('salesman_id', teamIds);
     }
 
-    const decoded = authResult as DecodedToken;
-    
-    const {
-      original_invoice_id,
-      return_items,
-      refund_method,
-      notes,
-      is_manual_entry,
-      customer_details,
-      return_date,
-      total_refund_amount,
-      return_reason
-    } = await request.json() as {
-      original_invoice_id?: string;
-      return_items: ManualReturnItemInput[] | InvoiceReturnItemInput[];
-      refund_method?: string;
-      notes?: string;
-      is_manual_entry?: boolean;
-      customer_details?: { name?: string; email?: string; phone?: string };
-      return_date?: string | Date;
-      total_refund_amount?: number;
-      return_reason?: string;
+    if (status) query = query.eq('status', status);
+    if (customer_id) query = query.eq('customer_id', customer_id);
+    if (from_date) query = query.gte('return_date', new Date(from_date).toISOString());
+    if (to_date) query = query.lte('return_date', new Date(to_date).toISOString());
+
+    const offset = (page - 1) * limit;
+    const { data: rawReturns, count, error } = await query
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    if (error) throw error;
+
+    const returns = rawReturns || [];
+    const total = count || 0;
+
+    // Enrich with customer, salesman, and invoice data
+    const customerIds = [...new Set(returns.map(r => r.customer_id).filter(Boolean))];
+    const salesmanIds = [...new Set(returns.map(r => r.salesman_id).filter(Boolean))];
+    const invoiceIds = [...new Set(returns.map(r => r.original_invoice_id).filter(Boolean))];
+
+    const [customersRes, salesmenRes, invoicesRes] = await Promise.all([
+      customerIds.length ? supabaseAdmin.from('customers').select('id, name, email, phone').in('id', customerIds) : { data: [] },
+      salesmanIds.length ? supabaseAdmin.from('users').select('id, name, email').in('id', salesmanIds) : { data: [] },
+      invoiceIds.length ? supabaseAdmin.from('invoices').select('id, invoice_number, grand_total').in('id', invoiceIds) : { data: [] },
+    ]);
+
+    const customersMap = new Map((customersRes.data || []).map(c => [c.id, c]));
+    const salesmenMap = new Map((salesmenRes.data || []).map(s => [s.id, s]));
+    const invoicesMap = new Map((invoicesRes.data || []).map(i => [i.id, i]));
+
+    const enriched = returns.map(r => ({
+      ...withId(r),
+      customer_id: r.customer_id && customersMap.has(r.customer_id)
+        ? { _id: r.customer_id, ...customersMap.get(r.customer_id) }
+        : r.customer_id,
+      salesman_id: r.salesman_id && salesmenMap.has(r.salesman_id)
+        ? { _id: r.salesman_id, ...salesmenMap.get(r.salesman_id) }
+        : r.salesman_id,
+      original_invoice_id: r.original_invoice_id && invoicesMap.has(r.original_invoice_id)
+        ? { _id: r.original_invoice_id, ...invoicesMap.get(r.original_invoice_id) }
+        : r.original_invoice_id,
+      items: (r.sale_return_items || []).map((item: Record<string, unknown>) => withId(item)),
+    }));
+
+    // Summary
+    const { data: allReturns } = await supabaseAdmin.from('sale_returns').select('status, total_refund_amount');
+    const summary = {
+      total_returns: total,
+      total_refund_amount: (allReturns || []).reduce((sum, r) => sum + Number(r.total_refund_amount || 0), 0),
+      pending: (allReturns || []).filter(r => r.status === 'pending').length,
+      approved: (allReturns || []).filter(r => r.status === 'approved').length,
+      rejected: (allReturns || []).filter(r => r.status === 'rejected').length,
+      completed: (allReturns || []).filter(r => r.status === 'completed').length,
     };
 
-    // Handle manual entry vs invoice-based returns
-    if (is_manual_entry) {
-      // Manual entry validation
-      if (!customer_details?.name || !return_items || return_items.length === 0) {
-        return NextResponse.json(
-          { success: false, error: 'Customer details and return items are required for manual entries' },
-          { status: 400 }
-        );
-      }
-
-      // Generate return number
-      const returnCount = await SaleReturn.countDocuments();
-      const return_number = `RTN${String(returnCount + 1).padStart(6, '0')}`;
-
-      // Create manual sale return record
-      const manualReturnItems = return_items as ManualReturnItemInput[];
-
-      const saleReturn = new SaleReturn({
-        return_number,
-        customer_details: {
-          name: customer_details.name,
-          email: customer_details.email || '',
-          phone: customer_details.phone || ''
-        },
-        return_date: return_date || new Date(),
-        return_items: manualReturnItems.map((item) => ({
-          product_name: item.product_name,
-          quantity_returned: item.quantity_returned || item.quantity,
-          unit_price: item.unit_price,
-          total_amount: item.total_amount,
-          condition: 'Good',
-          reason: item.reason || return_reason || 'Manual entry return'
-        })),
-        total_refund_amount: total_refund_amount || manualReturnItems.reduce((sum, item) => sum + (item.total_amount || 0), 0),
-        refund_method: refund_method || 'Cash',
-        return_reason: return_reason || 'Manual entry return',
-        notes: notes || '',
-        status: 'Pending',
-        refund_status: 'Pending',
-        is_manual_entry: true,
-        created_by: decoded.userId
-      });
-
-      const savedReturn = await saleReturn.save();
-
-      return NextResponse.json({
-        success: true,
-        message: 'Manual sale return created successfully',
-        data: savedReturn
-      });
-    } else {
-      // Original invoice-based return logic
-      if (!original_invoice_id || !return_items || return_items.length === 0) {
-        return NextResponse.json(
-          { success: false, error: 'Invoice ID and return items are required' },
-          { status: 400 }
-        );
-      }
-
-      const invoiceReturnItems = return_items as InvoiceReturnItemInput[];
-
-      // Start transaction to ensure data consistency
-      const session = await mongoose.startSession();
-      let savedReturn: typeof SaleReturn.prototype | null = null;
-      
-      try {
-        await session.withTransaction(async () => {
-          // Find and validate the original invoice
-          const invoice = await Invoice.findById(original_invoice_id)
-            .populate('sale_id')
-            .session(session);
-          
-          if (!invoice) {
-            throw new Error('Original invoice not found');
-          }
-
-          // Validate return items against invoice items
-          const invoiceItemsMap = new Map();
-          invoice.items.forEach((item) => {
-            const typedItem = item as unknown as InvoiceItemShape;
-            invoiceItemsMap.set(typedItem.product_id.toString(), typedItem);
-          });
-
-          let subtotal = 0;
-          let tax_amount = 0;
-          
-          for (const returnItem of invoiceReturnItems) {
-            const invoiceItem = invoiceItemsMap.get(returnItem.product_id);
-            if (!invoiceItem) {
-              throw new Error(`Product ${returnItem.product_id} not found in original invoice`);
-            }
-            
-            if (returnItem.return_quantity > invoiceItem.quantity) {
-              throw new Error(`Cannot return more than originally purchased for product ${returnItem.product_name}`);
-            }
-            
-            // Calculate refund amounts
-            const itemSubtotal = returnItem.return_quantity * returnItem.unit_price;
-            const itemTax = (itemSubtotal * (invoiceItem.gst_rate || 0)) / 100;
-            
-            subtotal += itemSubtotal;
-            tax_amount += itemTax;
-            
-            returnItem.total_refund = itemSubtotal + itemTax;
-          }
-
-          // Generate return number before creating the sale return
-          const returnCount = await SaleReturn.countDocuments();
-          const return_number = `RET${String(returnCount + 1).padStart(6, '0')}`;
-
-          // Create the sale return record
-          const saleReturn = new SaleReturn({
-            return_number,
-            original_invoice_id,
-            original_sale_id: invoice.sale_id,
-            customer_id: invoice.customer_id,
-            salesman_id: invoice.salesman_id,
-            return_items: invoiceReturnItems,
-            subtotal,
-            tax_amount,
-            total_refund: subtotal + tax_amount,
-            refund_method,
-            notes,
-            status: 'Pending',
-            refund_status: 'Pending'
-          });
-
-          savedReturn = await saleReturn.save({ session });
-
-          // If items are in good condition, restore to inventory
-          for (const returnItem of return_items) {
-            if (returnItem.condition === 'Good') {
-              await Product.findByIdAndUpdate(
-                returnItem.product_id,
-                { $inc: { totalStock: returnItem.return_quantity } },
-                { session }
-              );
-            }
-          }
-        });
-
-        await session.endSession();
-
-        return NextResponse.json({
-          success: true,
-          message: 'Sale return created successfully',
-          return_number: savedReturn?.return_number,
-          data: savedReturn
-        });
-
-      } catch (transactionError) {
-        await session.endSession();
-        console.error('Transaction failed:', transactionError);
-        
-        return NextResponse.json(
-          { 
-            success: false, 
-            error: transactionError instanceof Error ? transactionError.message : 'Failed to create sale return'
-          },
-          { status: 400 }
-        );
-      }
-    }
-
+    return NextResponse.json({
+      success: true,
+      saleReturns: enriched,
+      summary,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(total / limit),
+        totalCount: total,
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPrevPage: page > 1,
+      },
+    });
   } catch (error) {
-    console.error('Error creating sale return:', error);
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('Error fetching sale returns:', error);
+    return NextResponse.json({ error: 'Failed to fetch sale returns' }, { status: 500 });
   }
 }
 
-// PATCH - Update sale return status (admin approval)
-export async function PATCH(request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
-    await connectDB();
-    
-    // Require admin authentication for status updates
-    const authResult = requireAdminAuth(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+    const decoded = authResult;
+
+    const body = await request.json();
+
+    // Validate
+    if (!body.items || !Array.isArray(body.items) || body.items.length === 0) {
+      return NextResponse.json({ error: 'At least one return item is required' }, { status: 400 });
+    }
+    if (!body.return_reason) {
+      return NextResponse.json({ error: 'Return reason is required' }, { status: 400 });
     }
 
-    const decoded = authResult as DecodedToken;
-    const {
-      return_id,
-      status,
-      refund_status,
-      admin_notes
-    } = await request.json();
+    // Calculate totals from items
+    let subtotal = 0;
+    const processedItems = body.items.map((item: Record<string, unknown>) => {
+      const qty = Number(item.return_quantity || item.quantity_returned || 0);
+      const price = Number(item.unit_price || 0);
+      const itemTotal = qty * price;
+      subtotal += itemTotal;
+      return {
+        product_id: item.product_id || null,
+        product_name: item.product_name || '',
+        original_quantity: Number(item.original_quantity || 0),
+        return_quantity: qty,
+        quantity_returned: qty,
+        return_reason: item.return_reason || item.reason || body.return_reason,
+        reason: item.return_reason || item.reason || body.return_reason,
+        condition: item.condition || 'used',
+        unit_price: price,
+        total_refund: itemTotal,
+        total_amount: itemTotal,
+      };
+    });
 
-    if (!return_id) {
-      return NextResponse.json(
-        { success: false, error: 'Return ID is required' },
-        { status: 400 }
-      );
+    const taxAmount = Number(body.tax_amount || 0);
+    const totalRefundAmount = subtotal + taxAmount;
+
+    // Build sale return record
+    const saleReturnData: Record<string, unknown> = {
+      original_invoice_id: body.original_invoice_id || body.invoice_id || null,
+      original_sale_id: body.original_sale_id || null,
+      customer_id: body.customer_id || null,
+      salesman_id: body.salesman_id || decoded.userId,
+      is_manual_entry: body.is_manual_entry || !body.original_invoice_id,
+      customer_name: body.customer_name || '',
+      customer_email: body.customer_email || '',
+      customer_phone: body.customer_phone || '',
+      created_by: decoded.userId,
+      return_reason: body.return_reason,
+      return_date: body.return_date || new Date().toISOString(),
+      subtotal,
+      tax_amount: taxAmount,
+      total_refund: totalRefundAmount,
+      total_refund_amount: totalRefundAmount,
+      status: 'pending',
+      refund_method: body.refund_method || null,
+      refund_status: 'pending',
+      notes: body.notes || '',
+      admin_approval: 'pending',
+    };
+
+    // If invoice-based, validate invoice exists
+    if (saleReturnData.original_invoice_id) {
+      const { data: invoice } = await supabaseAdmin
+        .from('invoices')
+        .select('id, customer_id, salesman_id')
+        .eq('id', saleReturnData.original_invoice_id)
+        .single();
+      if (!invoice) {
+        return NextResponse.json({ error: 'Original invoice not found' }, { status: 404 });
+      }
+      if (!saleReturnData.customer_id) saleReturnData.customer_id = invoice.customer_id;
+      if (!saleReturnData.salesman_id) saleReturnData.salesman_id = invoice.salesman_id;
     }
 
-    const updateData: Partial<{
-      updatedAt: Date;
-      status: string;
-      admin_approval: boolean;
-      approved_by: string;
-      approval_date: Date;
-      refund_status: string;
-      notes: string;
-    }> = { updatedAt: new Date() };
-    
-    if (status) {
-      updateData.status = status;
-      if (status === 'Completed' || status === 'Rejected') {
-        updateData.admin_approval = status === 'Completed';
-        updateData.approved_by = decoded.userId;
-        updateData.approval_date = new Date();
+    // Enrich customer info if customer_id provided but no name
+    if (saleReturnData.customer_id && !saleReturnData.customer_name) {
+      const { data: customer } = await supabaseAdmin.from('customers').select('name, email, phone').eq('id', saleReturnData.customer_id).single();
+      if (customer) {
+        saleReturnData.customer_name = customer.name;
+        saleReturnData.customer_email = customer.email || '';
+        saleReturnData.customer_phone = customer.phone || '';
       }
     }
-    
-    if (refund_status) {
-      updateData.refund_status = refund_status;
-    }
-    
-    if (admin_notes) {
-      updateData.notes = admin_notes;
-    }
 
-    const updatedReturn = await SaleReturn.findByIdAndUpdate(
-      return_id,
-      updateData,
-      { new: true, runValidators: true }
-    ).populate('customer_id', 'name email');
+    // Create sale return (return_number auto-generated by DB trigger)
+    const { data: saleReturn, error: srError } = await supabaseAdmin
+      .from('sale_returns')
+      .insert(saleReturnData)
+      .select()
+      .single();
+    if (srError) throw srError;
 
-    if (!updatedReturn) {
-      return NextResponse.json(
-        { success: false, error: 'Sale return not found' },
-        { status: 404 }
-      );
+    // Insert sale return items
+    if (processedItems.length > 0) {
+      const itemsToInsert = processedItems.map((item: Record<string, unknown>) => ({
+        ...item,
+        sale_return_id: saleReturn.id,
+      }));
+      const { error: itemsError } = await supabaseAdmin.from('sale_return_items').insert(itemsToInsert);
+      if (itemsError) throw itemsError;
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Sale return updated successfully',
-      return: updatedReturn
+      message: 'Sale return created successfully',
+      saleReturn: withId(saleReturn),
     });
-
   } catch (error) {
-    console.error('Error updating sale return:', error);
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('Error creating sale return:', error);
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to create sale return' }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const authResult = requireAdminAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+    const decoded = authResult;
+
+    const body = await request.json();
+    const { id, status: newStatus, refund_status: newRefundStatus } = body;
+    if (!id) return NextResponse.json({ error: 'Sale return ID is required' }, { status: 400 });
+
+    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (newStatus) {
+      updateData.status = newStatus;
+      updateData.admin_approval = newStatus === 'approved' ? 'approved' : newStatus === 'rejected' ? 'rejected' : 'pending';
+      if (newStatus === 'approved' || newStatus === 'rejected') {
+        updateData.approved_by = decoded.userId;
+        updateData.approval_date = new Date().toISOString();
+      }
+    }
+    if (newRefundStatus) updateData.refund_status = newRefundStatus;
+
+    const { data: updated, error } = await supabaseAdmin.from('sale_returns').update(updateData).eq('id', id).select().single();
+    if (error) throw error;
+    if (!updated) return NextResponse.json({ error: 'Sale return not found' }, { status: 404 });
+
+    return NextResponse.json({ success: true, message: 'Sale return updated', saleReturn: withId(updated) });
+  } catch (error) {
+    console.error('Error updating sale return status:', error);
+    return NextResponse.json({ error: 'Failed to update sale return' }, { status: 500 });
   }
 }

@@ -1,6 +1,6 @@
 # LeafTrack - Workspace Instructions
 
-LeafTrack is an enterprise tea distribution management system built with Next.js 14, TypeScript, MongoDB, and React. It handles inventory, sales, financial management, GPS tracking, and GST-compliant reporting for tea distribution networks.
+LeafTrack is an enterprise tea distribution management system built with Next.js 14, TypeScript, Supabase (PostgreSQL), and React. It handles inventory, sales, financial management, GPS tracking, and GST-compliant reporting for tea distribution networks.
 
 ## Build and Test
 
@@ -9,19 +9,18 @@ LeafTrack is an enterprise tea distribution management system built with Next.js
 npm run dev              # Start dev server (http://localhost:3000)
 
 # Production
-npm run build            # Build production bundle
+npm run build            # Build production bundle (output: standalone)
 npm run start            # Start production server
-
-# Database
-npm run migrate          # Run database migrations
-npm run production-setup # Prepare for production deployment
 
 # Code Quality
 npm run lint             # Check for linting issues
 ```
 
+**Deployment**: Self-hosted on a physical server using Next.js standalone output mode (`output: 'standalone'` in next.config.js). Not deployed on Vercel.
+
 **Environment Variables Required:**
-- `MONGODB_URI` - MongoDB connection string
+- `NEXT_PUBLIC_SUPABASE_URL` - Supabase project URL
+- `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key (server-side only)
 - `JWT_SECRET` - Secret for JWT token signing
 - `NEXT_PUBLIC_*` - Client-side environment variables
 
@@ -30,8 +29,8 @@ npm run lint             # Check for linting issues
 ### Tech Stack
 - **Frontend**: Next.js 14 (App Router), React 18, TypeScript, Tailwind CSS
 - **UI Components**: shadcn/ui (Radix UI primitives + Tailwind)
-- **Database**: MongoDB with Mongoose ODM
-- **Authentication**: JWT-based with role-based access control (Admin, Salesman, Customer)
+- **Database**: Supabase (PostgreSQL) with `sohag` schema, accessed via `@supabase/supabase-js`
+- **Authentication**: JWT-based with role-based access control (Admin, Primary Executive, Secondary Executive)
 - **State Management**: React Context API + custom hooks
 - **Forms**: react-hook-form + Zod validation
 - **Maps**: Leaflet + react-leaflet for GPS tracking
@@ -41,6 +40,7 @@ npm run lint             # Check for linting issues
 app/              # Next.js App Router pages and API routes
   api/            # RESTful API endpoints (Next.js Route Handlers)
   admin/          # Admin-only pages
+  executive/      # Executive-specific pages
   salesman/       # Salesman-specific pages
 components/       # React components (domain-specific and UI)
   ui/             # shadcn/ui components
@@ -48,21 +48,24 @@ components/       # React components (domain-specific and UI)
 contexts/         # React Context providers (AuthContext, etc.)
 hooks/            # Custom React hooks
 lib/              # Utilities and core logic
-  mongodb.ts      # Database connection with pooling
-  dbTypes.ts      # Type-safe model accessors
-  validation.ts   # Zod schemas for input validation
-models/           # Mongoose schemas and TypeScript interfaces
+  supabase-server.ts  # Server-side Supabase client (supabaseAdmin)
+  supabase-helpers.ts # Response helpers (withId, withIds, mapProductToFrontend)
+  authMiddleware.ts   # Auth middleware (requireAuth, requireAdminAuth, etc.)
+  auth.ts             # Auth primitives (hashPassword, comparePassword, generateToken, verifyToken)
+  roles.ts            # Role normalization and permission checks
+  validation.ts       # Zod schemas for input validation
 types/            # Shared TypeScript type definitions
 docs/             # Feature documentation and guides
 ```
 
 ### Key Design Decisions
 1. **App Router**: Uses Next.js 14 App Router (not Pages Router)
-2. **Database Connection**: Connection pooling via `lib/mongodb.ts` - always call `connectDB()` at API route start
-3. **Type Safety**: TypeScript interfaces for models + Mongoose schemas + Zod validation (triple validation layer)
+2. **Database**: Supabase with `sohag` schema — use `supabaseAdmin` from `@/lib/supabase-server` for all DB operations
+3. **Type Safety**: TypeScript interfaces + Zod validation (dual validation layer)
 4. **Authentication Flow**: JWT tokens stored in localStorage, AuthContext manages global auth state
-5. **Role-Based Access**: Middleware functions (`requireAdminAuth`, `requireUserAuth`) enforce permissions
-6. **Import Aliases**: Use `@/` prefix for absolute imports (e.g., `@/lib/mongodb`)
+5. **Role-Based Access**: Middleware functions from `@/lib/authMiddleware` enforce permissions
+6. **Import Aliases**: Use `@/` prefix for absolute imports (e.g., `@/lib/supabase-server`)
+7. **Self-Hosted**: `output: 'standalone'` for deployment on physical server (no Vercel)
 
 ## Code Conventions
 
@@ -71,33 +74,26 @@ docs/             # Feature documentation and guides
 **Pattern to Follow:**
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { connectDB } from '@/lib/mongodb';
-import Model from '@/models/ModelName';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAuth, requireAdminAuth } from '@/lib/authMiddleware';
+import { withIds } from '@/lib/supabase-helpers';
 
 export const dynamic = 'force-dynamic'; // Always include for API routes
 
+// Any authenticated user
 export async function GET(req: NextRequest) {
   try {
-    await connectDB(); // Always connect first
+    const decoded = requireAuth(req);
+    if (decoded instanceof NextResponse) return decoded;
     
-    // Verify authentication
-    const token = req.headers.get('authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    // Business logic — query Supabase
+    const { data, error } = await supabaseAdmin
+      .from('table_name')
+      .select('*, related_table(*)');
     
-    // Decode and verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
+    if (error) throw error;
     
-    // Admin-only check if needed
-    if (decoded.role !== 'admin') {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
-    
-    // Business logic here
-    const data = await Model.find().populate('relatedField');
-    
-    return NextResponse.json(data);
+    return NextResponse.json(withIds(data || []));
   } catch (error) {
     console.error('Error in GET /api/route:', error);
     return NextResponse.json(
@@ -106,14 +102,53 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+
+// Admin-only route
+export async function POST(req: NextRequest) {
+  try {
+    const decoded = requireAdminAuth(req);
+    if (decoded instanceof NextResponse) return decoded;
+    
+    const body = await req.json();
+    
+    const { data, error } = await supabaseAdmin
+      .from('table_name')
+      .insert(body)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    return NextResponse.json(data, { status: 201 });
+  } catch (error) {
+    console.error('Error in POST /api/route:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' }, 
+      { status: 500 }
+    );
+  }
+}
 ```
 
+**Auth Middleware Functions** (from `@/lib/authMiddleware`):
+- `requireAuth(request, allowedRoles?)` — Any authenticated user (optionally restrict to roles)
+- `requireAdminAuth(request)` — Admin only
+- `requirePrimaryExecutiveAuth(request)` — Primary executive only
+- `requireSalesmanAuth(request)` — Secondary executive only
+- `requireUserAuth(request)` — Admin + primary + secondary executives
+- `requireAuthWithUserFilter(request, allowedRoles?)` — Returns `{ decoded, userFilter }` for role-based data filtering
+
+All return `DecodedToken | NextResponse`. Check `instanceof NextResponse` to detect auth failures.
+
 **Key Patterns:**
-- Always call `connectDB()` before database operations
+- Use `supabaseAdmin` from `@/lib/supabase-server` for all database operations (bypasses RLS)
+- Use auth middleware instead of manual JWT verification
 - Use try/catch for all async operations
 - Standardized error responses with appropriate status codes (401, 403, 500)
-- Use `.populate()` for related data to avoid N+1 queries
+- Use Supabase `.select('*, related_table(*)')` for joins
+- Use `withId()`/`withIds()` from `@/lib/supabase-helpers` to add `_id` field for frontend compatibility
 - Export `dynamic = 'force-dynamic'` to disable static optimization
+- All tables use the `sohag` schema (configured in supabaseAdmin client)
 
 ### Components
 
@@ -149,46 +184,53 @@ const { register, handleSubmit, formState: { errors } } = useForm<FormData>();
 - Use `FormField`, `FormItem`, `FormLabel`, `FormControl` wrappers from `components/ui/form`
 - Show validation errors inline with `FormMessage`
 
-### Database Models
+### Database Queries
 
-**Pattern:**
+**Supabase Query Patterns:**
 ```typescript
-// TypeScript Interface (for type safety)
-export interface IModel {
-  _id: string;
-  field: string;
-  relatedId: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { withId, withIds } from '@/lib/supabase-helpers';
 
-// Mongoose Schema
-const schema = new Schema<IModel>(
-  {
-    field: { 
-      type: String, 
-      required: [true, 'Field is required'],
-      trim: true 
-    },
-    relatedId: { 
-      type: Schema.Types.ObjectId, 
-      ref: 'RelatedModel',
-      required: true 
-    },
-  },
-  { timestamps: true } // Auto-add createdAt/updatedAt
-);
+// Select with joins
+const { data, error } = await supabaseAdmin
+  .from('orders')
+  .select('*, customer:customers(*), salesman:users(*)')
+  .eq('status', 'active')
+  .order('created_at', { ascending: false });
 
-export default mongoose.models.Model || mongoose.model<IModel>('Model', schema);
+// Insert
+const { data, error } = await supabaseAdmin
+  .from('orders')
+  .insert({ customer_id, salesman_id, total })
+  .select()
+  .single();
+
+// Update
+const { data, error } = await supabaseAdmin
+  .from('orders')
+  .update({ status: 'completed' })
+  .eq('id', orderId)
+  .select()
+  .single();
+
+// Delete
+const { error } = await supabaseAdmin
+  .from('orders')
+  .delete()
+  .eq('id', orderId);
+
+// RPC (stored procedures)
+const { data, error } = await supabaseAdmin
+  .rpc('function_name', { param: value });
 ```
 
 **Key Patterns:**
-- Use TypeScript interfaces for type safety
-- Always enable timestamps: `{ timestamps: true }`
-- Use `ObjectId` with `ref` for relationships
-- Provide custom validation error messages
-- Check `mongoose.models` before creating to avoid hot-reload issues
-- Use type-safe model accessors from `lib/dbTypes.ts` to avoid union type issues
+- All tables live in the `sohag` schema (configured in the supabaseAdmin client)
+- Use snake_case for column names (PostgreSQL convention)
+- Use `withId()`/`withIds()` helpers to add `_id` alias for frontend compatibility
+- Use `.select()` after `.insert()`/`.update()` to get the result back
+- Use `.single()` when expecting exactly one row
+- Check `error` from every Supabase call
 
 ### Authentication
 
@@ -199,30 +241,32 @@ export default mongoose.models.Model || mongoose.model<IModel>('Model', schema);
 
 **Server-Side:**
 - Use middleware functions: `requireAdminAuth()`, `requireUserAuth()`
-- Verify JWT with `jwt.verify(token, process.env.JWT_SECRET!)`
+- Never use `verifyToken()` directly in API routes — use `requireAuth()` from `@/lib/authMiddleware`
 - Normalize role strings: capitalize first letter for schema consistency
 
 ## Common Pitfalls
 
-❌ **Don't** forget to call `connectDB()` in API routes - will cause "MongooseError: Operation `model.find()` failed"
+❌ **Don't** use `verifyToken()` directly in API routes — use `requireAuth()`/`requireAdminAuth()` from `@/lib/authMiddleware`
 
 ❌ **Don't** use Pages Router patterns (`getServerSideProps`, `getStaticProps`) - this uses App Router
-
-❌ **Don't** create models without checking `mongoose.models` - causes duplicate model errors in dev
 
 ❌ **Don't** use CSS Modules or styled-components - use Tailwind CSS with `cn()` utility
 
 ❌ **Don't** store sensitive data in `NEXT_PUBLIC_` env vars - they're exposed to the client
 
+❌ **Don't** forget to check `if (decoded instanceof NextResponse) return decoded;` after auth middleware calls
+
 ✅ **Do** use `@/` import alias for cleaner imports
 
-✅ **Do** populate related data in API responses to reduce client-side requests
+✅ **Do** use Supabase joins (`.select('*, related_table(*)')`) to reduce client-side requests
 
-✅ **Do** use Zod for input validation in addition to Mongoose validation
+✅ **Do** use Zod for input validation on API request bodies
 
 ✅ **Do** handle errors with try/catch and return appropriate HTTP status codes
 
 ✅ **Do** use TypeScript strictly - enable all strict mode checks
+
+✅ **Do** use `withId()`/`withIds()` helpers for frontend compatibility
 
 ## Additional Resources
 

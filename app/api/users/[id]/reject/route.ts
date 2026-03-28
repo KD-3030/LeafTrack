@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import User from '@/models/User';
+import { supabaseAdmin } from '@/lib/supabase-server';
 import { requireAdminAuth } from '@/lib/authMiddleware';
 
 export const dynamic = 'force-dynamic';
@@ -10,8 +9,6 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
-
     const authResult = requireAdminAuth(request);
     if (authResult instanceof NextResponse) {
       return authResult;
@@ -26,8 +23,14 @@ export async function POST(
       );
     }
 
-    const user = await User.findById(params.id);
-    if (!user) {
+    // Fetch user
+    const { data: user, error: fetchError } = await supabaseAdmin
+      .from('users')
+      .select('id, approval_status')
+      .eq('id', params.id)
+      .single();
+
+    if (fetchError || !user) {
       return NextResponse.json(
         { success: false, error: 'User not found' },
         { status: 404 }
@@ -41,11 +44,23 @@ export async function POST(
       );
     }
 
-    user.approval_status = 'rejected';
-    user.approved_by = authResult.userId;
-    user.approval_date = new Date();
-    user.rejection_reason = rejectionReason;
-    await user.save();
+    const { error: updateError } = await supabaseAdmin
+      .from('users')
+      .update({
+        approval_status: 'rejected',
+        approved_by: authResult.userId,
+        approval_date: new Date().toISOString(),
+        rejection_reason: rejectionReason,
+      })
+      .eq('id', params.id);
+
+    if (updateError) {
+      console.error('Reject user update error:', updateError);
+      return NextResponse.json(
+        { success: false, error: 'Failed to reject user' },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,

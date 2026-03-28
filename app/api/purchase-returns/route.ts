@@ -1,31 +1,17 @@
-import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import PurchaseReturn from '@/models/PurchaseReturn';
-import { verifyToken } from '@/lib/auth';
+﻿import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAuth } from '@/lib/authMiddleware';
+import { withId, withIds } from '@/lib/supabase-helpers';
 
-// Force dynamic rendering for this route
 export const dynamic = 'force-dynamic';
 
-// GET /api/purchase-returns - Get all purchase returns with filters
 export async function GET(request: NextRequest) {
   try {
-    await connectDB();
-
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+    const decoded = authResult;
 
     const { searchParams } = new URL(request.url);
-    
-    // Filters
-    const supplier_name = searchParams.get('supplier_name');
-    const product_name = searchParams.get('product_name');
     const refund_status = searchParams.get('refund_status');
     const approval_status = searchParams.get('approval_status');
     const return_type = searchParams.get('return_type');
@@ -33,166 +19,87 @@ export async function GET(request: NextRequest) {
     const to_date = searchParams.get('to_date');
     const search = searchParams.get('search');
 
-    // Build query
-    interface QueryType {
-      supplier_name?: { $regex: string; $options: string };
-      product_name?: { $regex: string; $options: string };
-      refund_status?: string;
-      approval_status?: string;
-      return_type?: string;
-      return_date?: { $gte?: Date; $lte?: Date };
-      $or?: Array<{ [key: string]: { $regex: string; $options: string } }>;
-    }
-    const query: QueryType = {};
+    let query = supabaseAdmin.from('purchase_returns').select('*');
+    if (refund_status) query = query.eq('refund_status', refund_status);
+    if (approval_status) query = query.eq('approval_status', approval_status);
+    if (return_type) query = query.eq('return_type', return_type);
+    if (from_date) query = query.gte('return_date', new Date(from_date).toISOString());
+    if (to_date) query = query.lte('return_date', new Date(to_date).toISOString());
 
-    if (supplier_name) {
-      query.supplier_name = { $regex: supplier_name, $options: 'i' };
-    }
+    const { data: rawReturns, error } = await query.order('created_at', { ascending: false });
+    if (error) throw error;
+    let returns = withIds(rawReturns || []);
 
-    if (product_name) {
-      query.product_name = { $regex: product_name, $options: 'i' };
-    }
-
-    if (refund_status) {
-      query.refund_status = refund_status;
-    }
-
-    if (approval_status) {
-      query.approval_status = approval_status;
-    }
-
-    if (return_type) {
-      query.return_type = return_type;
-    }
-
-    if (from_date || to_date) {
-      query.return_date = {};
-      if (from_date) {
-        query.return_date.$gte = new Date(from_date);
-      }
-      if (to_date) {
-        query.return_date.$lte = new Date(to_date);
-      }
-    }
-
-    // Global search
+    // Text search filter
     if (search) {
-      query.$or = [
-        { return_number: { $regex: search, $options: 'i' } },
-        { product_name: { $regex: search, $options: 'i' } },
-        { supplier_name: { $regex: search, $options: 'i' } },
-        { batch_number: { $regex: search, $options: 'i' } },
-        { debit_note_number: { $regex: search, $options: 'i' } },
-        { original_purchase_number: { $regex: search, $options: 'i' } },
-      ];
+      const s = search.toLowerCase();
+      returns = returns.filter(r => {
+        const ret = r as Record<string, unknown>;
+        return (
+          String(ret.return_number || '').toLowerCase().includes(s) ||
+          String(ret.supplier_name || '').toLowerCase().includes(s) ||
+          String(ret.product_name || '').toLowerCase().includes(s) ||
+          String(ret.debit_note_number || '').toLowerCase().includes(s)
+        );
+      });
     }
 
-    const returns = await PurchaseReturn.find(query)
-      .sort({ return_date: -1, created_at: -1 })
-      .lean();
-
-    // Calculate summary statistics
     const summary = {
       total_returns: returns.length,
-      total_return_amount: returns.reduce((sum, r) => sum + r.final_return_amount, 0),
-      total_refunded: returns.reduce((sum, r) => sum + r.refunded_amount, 0),
-      total_pending_refund: returns.reduce((sum, r) => sum + r.pending_refund_amount, 0),
-      pending_count: returns.filter(r => r.refund_status === 'Pending').length,
-      partial_count: returns.filter(r => r.refund_status === 'Partial').length,
-      completed_count: returns.filter(r => r.refund_status === 'Completed').length,
-      rejected_count: returns.filter(r => r.refund_status === 'Rejected').length,
-      approval_pending_count: returns.filter(r => r.approval_status === 'Pending').length,
-      approved_count: returns.filter(r => r.approval_status === 'Approved').length,
-      rejected_approval_count: returns.filter(r => r.approval_status === 'Rejected').length,
+      total_return_amount: returns.reduce((sum, r) => sum + Number((r as Record<string, unknown>).final_return_amount || 0), 0),
+      total_refunded: returns.reduce((sum, r) => sum + Number((r as Record<string, unknown>).refunded_amount || 0), 0),
+      pending_refund: returns.reduce((sum, r) => sum + Number((r as Record<string, unknown>).pending_refund_amount || 0), 0),
+      pending_approval: returns.filter(r => (r as Record<string, unknown>).approval_status === 'Pending').length,
+      approved: returns.filter(r => (r as Record<string, unknown>).approval_status === 'Approved').length,
     };
 
-    return NextResponse.json({
-      success: true,
-      returns,
-      summary,
-    });
+    return NextResponse.json({ success: true, purchaseReturns: returns, summary });
   } catch (error) {
     console.error('Error fetching purchase returns:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch purchase returns' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to fetch purchase returns' }, { status: 500 });
   }
 }
 
-// POST /api/purchase-returns - Create a new purchase return
 export async function POST(request: NextRequest) {
   try {
-    await connectDB();
-
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+    const decoded = authResult;
 
     const body = await request.json();
 
-    // Validate required fields
-    const requiredFields = [
-      'product_name',
-      'returned_quantity',
-      'unit',
-      'batch_number',
-      'supplier_name',
-      'return_reason',
-      'return_type',
-      'unit_price',
-      'final_return_amount',
-    ];
-
+    const requiredFields = ['product_name', 'returned_quantity', 'unit_price', 'return_reason'];
     for (const field of requiredFields) {
       if (!body[field]) {
-        return NextResponse.json(
-          { error: `Missing required field: ${field}` },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: `${field} is required` }, { status: 400 });
       }
     }
 
-    // Calculate total_return_amount if not provided
-    if (!body.total_return_amount) {
-      body.total_return_amount = body.returned_quantity * body.unit_price;
-    }
-
-    // Calculate final_return_amount if not provided
-    if (!body.final_return_amount) {
-      const total = body.total_return_amount || (body.returned_quantity * body.unit_price);
-      const tax = body.tax_amount || 0;
-      const discount = body.discount_amount || 0;
-      body.final_return_amount = total + tax - discount;
-    }
-
-    // Set refunded_amount default
-    if (body.refunded_amount === undefined) {
-      body.refunded_amount = 0;
-    }
-
-    // Set created_by
+    // Calculate amounts
+    body.total_return_amount = (body.returned_quantity || 0) * (body.unit_price || 0);
+    body.tax_amount = body.tax_amount || 0;
+    body.tax_percentage = body.tax_percentage || 0;
+    body.discount_amount = body.discount_amount || 0;
+    body.final_return_amount = body.total_return_amount + body.tax_amount - body.discount_amount;
+    body.pending_refund_amount = body.final_return_amount - (body.refunded_amount || 0);
     body.created_by = decoded.userId;
+    if (!body.return_date) body.return_date = new Date().toISOString();
+    if (!body.refund_status) body.refund_status = 'Pending';
+    if (!body.approval_status) body.approval_status = 'Pending';
 
-    const purchaseReturn = new PurchaseReturn(body);
-    await purchaseReturn.save();
+    // Remove _id if sent from frontend
+    delete body._id;
+
+    const { data: purchaseReturn, error } = await supabaseAdmin.from('purchase_returns').insert(body).select().single();
+    if (error) throw error;
 
     return NextResponse.json({
       success: true,
       message: 'Purchase return created successfully',
-      return: purchaseReturn,
+      purchaseReturn: withId(purchaseReturn),
     });
   } catch (error) {
     console.error('Error creating purchase return:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to create purchase return' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to create purchase return' }, { status: 500 });
   }
 }

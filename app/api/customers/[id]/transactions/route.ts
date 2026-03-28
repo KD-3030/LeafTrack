@@ -1,100 +1,84 @@
 import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import Invoice, { IInvoice } from '@/models/Invoice';
-import Payment, { IPayment } from '@/models/Payment';
+import { supabaseAdmin } from '@/lib/supabase-server';
 import { requireUserAuth } from '@/lib/authMiddleware';
-import { Model } from 'mongoose';
 
 export const dynamic = 'force-dynamic';
 
-// GET - Fetch customer transactions (invoices and payments)
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
-    
-    // Use the proper authentication middleware
     const authResult = requireUserAuth(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
-    }
+    if (authResult instanceof NextResponse) return authResult;
 
     const customerId = params.id;
-    
     if (!customerId) {
       return NextResponse.json({ error: 'Customer ID is required' }, { status: 400 });
     }
 
-    const InvoiceModel = Invoice as Model<IInvoice>;
-    const PaymentModel = Payment as Model<IPayment>;
+    // Fetch invoices and payments in parallel
+    const [invoicesRes, paymentsRes] = await Promise.all([
+      supabaseAdmin
+        .from('invoices')
+        .select('id, invoice_number, invoice_date, grand_total, paid_amount, balance_due, payment_status, status, taxable_amount, total_tax')
+        .eq('customer_id', customerId)
+        .neq('status', 'Cancelled')
+        .order('invoice_date', { ascending: false }),
+      supabaseAdmin
+        .from('payments')
+        .select('id, invoice_id, amount_paid, payment_method, payment_date, status, transaction_id, bank_reference, cheque_number, notes')
+        .eq('customer_id', customerId)
+        .order('payment_date', { ascending: false }),
+    ]);
 
-    // Fetch all invoices for this customer
-    const invoices = await InvoiceModel.find({ 
-      customer_id: customerId,
-      status: { $ne: 'Cancelled' }
-    })
-      .sort({ invoice_date: -1 })
-      .select('invoice_number invoice_date grand_total paid_amount balance_due payment_status status items taxable_amount total_tax')
-      .lean();
+    if (invoicesRes.error) throw invoicesRes.error;
+    if (paymentsRes.error) throw paymentsRes.error;
 
-    // Fetch all payments for this customer
-    const rawPayments = await PaymentModel.find({ customer_id: customerId })
-      .populate('invoice_id', 'invoice_number')
-      .sort({ payment_date: -1 })
-      .lean();
-
-    // Map payment fields to match frontend interface (amount_paid -> amount)
-    const payments = rawPayments.map(payment => ({
-      ...payment,
-      amount: payment.amount_paid, // Map amount_paid to amount for frontend compatibility
-      reference_number: payment.transaction_id || payment.bank_reference || payment.cheque_number, // Combine reference fields
+    const invoices = (invoicesRes.data || []).map(inv => ({
+      ...inv,
+      _id: inv.id,
     }));
 
-    // Calculate summary statistics from invoices
-    const totalInvoiceAmount = invoices.reduce((sum, inv) => sum + (inv.grand_total || 0), 0);
-    const totalPaidAmount = invoices.reduce((sum, inv) => sum + (inv.paid_amount || 0), 0);
-    const totalDueAmount = invoices.reduce((sum, inv) => sum + (inv.balance_due || 0), 0);
-    
-    // Calculate actual payment total from payment records (for verification)
-    const totalPaymentAmount = rawPayments
-      .filter(p => p.status === 'Confirmed' || p.status === 'Pending')
-      .reduce((sum, payment) => sum + (payment.amount_paid || 0), 0);
-    
+    // Build invoice number map for payment enrichment
+    const invoiceMap = new Map(invoices.map(i => [i.id, i.invoice_number]));
+
+    const payments = (paymentsRes.data || []).map(p => ({
+      ...p,
+      _id: p.id,
+      amount_paid: p.amount_paid,
+      invoice_id: p.invoice_id ? { _id: p.invoice_id, invoice_number: invoiceMap.get(p.invoice_id) || '' } : null,
+      reference_number: p.transaction_id || p.bank_reference || p.cheque_number,
+    }));
+
+    // Summary statistics
+    const totalInvoiceAmount = invoices.reduce((sum, inv) => sum + Number(inv.grand_total || 0), 0);
+    const totalPaidAmount = invoices.reduce((sum, inv) => sum + Number(inv.paid_amount || 0), 0);
+    const totalDueAmount = invoices.reduce((sum, inv) => sum + Number(inv.balance_due || 0), 0);
+
+    const confirmedPayments = (paymentsRes.data || []).filter(
+      p => p.status === 'Confirmed' || p.status === 'Pending'
+    );
+    const totalPaymentAmount = confirmedPayments.reduce((sum, p) => sum + Number(p.amount_paid || 0), 0);
+
     const paidInvoices = invoices.filter(inv => inv.payment_status === 'Paid').length;
     const pendingInvoices = invoices.filter(inv => inv.payment_status === 'Pending').length;
     const partialInvoices = invoices.filter(inv => inv.payment_status === 'Partial').length;
-
-    // Get overdue invoices (invoices with outstanding balance)
-    const overdueInvoices = invoices.filter(inv => {
-      // Check if invoice is not fully paid and has outstanding balance
-      return inv.payment_status !== 'Paid' && inv.balance_due > 0;
-    }).length;
-
-    // Log for debugging if there's a mismatch
-    if (Math.abs(totalPaidAmount - totalPaymentAmount) > 0.01) {
-      console.warn('Payment amount mismatch detected:', {
-        customerId,
-        totalPaidFromInvoices: totalPaidAmount,
-        totalPaidFromPayments: totalPaymentAmount,
-        difference: totalPaidAmount - totalPaymentAmount
-      });
-    }
+    const overdueInvoices = invoices.filter(inv => inv.payment_status !== 'Paid' && Number(inv.balance_due) > 0).length;
 
     return NextResponse.json({
       success: true,
       summary: {
         total_invoices: invoices.length,
         total_invoice_amount: totalInvoiceAmount,
-        total_paid_amount: totalPaidAmount, // From invoices (should match payment records)
-        total_payment_records: totalPaymentAmount, // From actual payment records
+        total_paid_amount: totalPaidAmount,
+        total_payment_records: totalPaymentAmount,
         total_due_amount: totalDueAmount,
         paid_invoices: paidInvoices,
         pending_invoices: pendingInvoices,
         partial_invoices: partialInvoices,
         overdue_invoices: overdueInvoices,
-        payment_count: payments.length, // Number of payment records
+        payment_count: payments.length,
       },
       transactions: {
         invoices,
@@ -103,9 +87,9 @@ export async function GET(
     });
   } catch (error) {
     console.error('Error fetching customer transactions:', error);
-    return NextResponse.json({ 
+    return NextResponse.json({
       error: 'Failed to fetch customer transactions',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: error instanceof Error ? error.message : 'Unknown error',
     }, { status: 500 });
   }
 }

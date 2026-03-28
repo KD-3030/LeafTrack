@@ -528,7 +528,7 @@ export default function PurchasesPage() {
             Record purchases with OCR bill scanning
           </p>
         </div>
-        <Button onClick={openAddDialog} className="bg-green-600 hover:bg-green-700">
+        <Button onClick={openAddDialog} className="">
           <Plus className="h-4 w-4 mr-2" />
           New Purchase
         </Button>
@@ -1150,7 +1150,7 @@ export default function PurchasesPage() {
               <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" className="bg-green-600 hover:bg-green-700">
+              <Button type="submit" className="">
                 {isEditing ? 'Update Purchase' : 'Save Purchase'}
               </Button>
             </DialogFooter>

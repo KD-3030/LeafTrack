@@ -1,215 +1,173 @@
 import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import Location, { ILocation } from '@/models/Location';
-import User from '@/models/User'; // Import User model to ensure it's registered
-import { verifyToken } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAuth, requireAdminAuth } from '@/lib/authMiddleware';
 import { normalizeRoleId } from '@/lib/roles';
-import mongoose from 'mongoose';
+import { withId, withIds } from '@/lib/supabase-helpers';
 
 export const dynamic = 'force-dynamic';
 
 // GET - Retrieve locations (admin can get all, salesman can get own)
 export async function GET(request: NextRequest) {
   try {
-    await connectDB();
-    
-    // Ensure User model is registered for population
-    void User; // Force User model registration (avoiding unused expression warning)
-    
-    // Verify token
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
-    
-    if (!decoded) {
-      return NextResponse.json(
-        { error: 'Invalid token' },
-        { status: 401 }
-      );
-    }
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+    const decoded = authResult;
 
     const { searchParams } = new URL(request.url);
     const salesmanId = searchParams.get('salesman_id');
     const hours = searchParams.get('hours') || '24';
     const limit = parseInt(searchParams.get('limit') || '100');
 
-    // Calculate time filter (default last 24 hours)
     const timeFilter = new Date();
     timeFilter.setHours(timeFilter.getHours() - parseInt(hours));
 
-    const query: Record<string, unknown> = { timestamp: { $gte: timeFilter } };
+    let query = supabaseAdmin
+      .from('locations')
+      .select('*')
+      .gte('timestamp', timeFilter.toISOString())
+      .order('timestamp', { ascending: false })
+      .limit(limit);
 
     const roleId = normalizeRoleId(decoded.role);
 
-    // Secondary executives can only see their own locations.
     if (roleId === 'secondary_executive') {
-      query.salesman_id = decoded.userId;
+      query = query.eq('salesman_id', decoded.userId);
     } else if (roleId === 'primary_executive') {
-      const secondaries = await User.find({
-        managerId: decoded.userId,
-        role: 'SecondaryExecutive',
-        approval_status: 'approved',
-      }).select('_id').lean();
+      const { data: secondaries } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('manager_id', decoded.userId)
+        .eq('role', 'secondary_executive')
+        .eq('approval_status', 'approved');
 
-      const teamIds = [decoded.userId, ...secondaries.map((s) => s._id.toString())];
+      const teamIds = [decoded.userId, ...(secondaries || []).map(s => s.id)];
       if (salesmanId) {
         if (!teamIds.includes(salesmanId)) {
           return NextResponse.json({ error: 'Access denied' }, { status: 403 });
         }
-        query.salesman_id = salesmanId;
+        query = query.eq('salesman_id', salesmanId);
       } else {
-        query.salesman_id = { $in: teamIds };
+        query = query.in('salesman_id', teamIds);
       }
     } else if (salesmanId) {
-      // Admin can filter by specific executive.
-      query.salesman_id = salesmanId;
+      query = query.eq('salesman_id', salesmanId);
     }
 
-    const locations = await (Location as mongoose.Model<ILocation>).find(query)
-      .populate('salesman_id', 'name email')
-      .sort({ timestamp: -1 })
-      .limit(limit);
+    const { data: locations, error } = await query;
 
-    return NextResponse.json({
-      success: true,
-      locations,
-    });
+    if (error) {
+      console.error('Locations query error:', error);
+      return NextResponse.json({ error: 'Failed to fetch locations' }, { status: 500 });
+    }
 
+    // Enrich with salesman data
+    const salesmanIds = [...new Set((locations || []).map(l => l.salesman_id).filter(Boolean))];
+    const { data: salesmen } = salesmanIds.length > 0
+      ? await supabaseAdmin.from('users').select('id, name, email').in('id', salesmanIds)
+      : { data: [] };
+
+    const salesmanMap = new Map((salesmen || []).map(s => [s.id, { _id: s.id, name: s.name, email: s.email }]));
+
+    const enriched = (locations || []).map(loc => ({
+      ...withId(loc),
+      salesman_id: salesmanMap.get(loc.salesman_id) || loc.salesman_id,
+    }));
+
+    return NextResponse.json({ success: true, locations: enriched });
   } catch (error) {
     console.error('Get locations error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-// POST - Create new location (salesman only)
+// POST - Create new location (executives only)
 export async function POST(request: NextRequest) {
   try {
-    await connectDB();
-    
-    // Verify token
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+    const decoded = authResult;
 
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
-    
-    const roleId = normalizeRoleId(decoded?.role);
-    if (!decoded || (roleId !== 'secondary_executive' && roleId !== 'primary_executive')) {
-      return NextResponse.json(
-        { error: 'Only executives can submit locations' },
-        { status: 403 }
-      );
+    const roleId = normalizeRoleId(decoded.role);
+    if (roleId !== 'secondary_executive' && roleId !== 'primary_executive') {
+      return NextResponse.json({ error: 'Only executives can submit locations' }, { status: 403 });
     }
 
     const { latitude, longitude, accuracy, address } = await request.json();
 
-    // Validate input
     if (!latitude || !longitude) {
-      return NextResponse.json(
-        { error: 'Latitude and longitude are required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Latitude and longitude are required' }, { status: 400 });
     }
-
     if (latitude < -90 || latitude > 90) {
-      return NextResponse.json(
-        { error: 'Invalid latitude' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Invalid latitude' }, { status: 400 });
     }
-
     if (longitude < -180 || longitude > 180) {
-      return NextResponse.json(
-        { error: 'Invalid longitude' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Invalid longitude' }, { status: 400 });
     }
 
-    // Create location
-    const location = await (Location as mongoose.Model<ILocation>).create({
-      salesman_id: decoded.userId,
-      latitude: parseFloat(latitude),
-      longitude: parseFloat(longitude),
-      accuracy: accuracy ? parseFloat(accuracy) : undefined,
-      address,
-      timestamp: new Date(),
-    });
+    const { data: location, error } = await supabaseAdmin
+      .from('locations')
+      .insert({
+        salesman_id: decoded.userId,
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude),
+        accuracy: accuracy ? parseFloat(accuracy) : null,
+        address,
+        timestamp: new Date().toISOString(),
+      })
+      .select()
+      .single();
 
-    const populatedLocation = await (Location as mongoose.Model<ILocation>).findById(location._id)
-      .populate('salesman_id', 'name email');
+    if (error || !location) {
+      console.error('Create location error:', error);
+      return NextResponse.json({ error: 'Failed to create location' }, { status: 500 });
+    }
+
+    // Fetch salesman info
+    const { data: salesman } = await supabaseAdmin
+      .from('users')
+      .select('id, name, email')
+      .eq('id', decoded.userId)
+      .single();
 
     return NextResponse.json({
       success: true,
-      location: populatedLocation,
+      location: {
+        ...withId(location),
+        salesman_id: salesman ? { _id: salesman.id, name: salesman.name, email: salesman.email } : decoded.userId,
+      },
     });
-
   } catch (error) {
     console.error('Create location error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 // DELETE - Cleanup old locations (admin only)
 export async function DELETE(request: NextRequest) {
   try {
-    await connectDB();
-    
-    // Verify admin token
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
+    const authResult = requireAdminAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
-    
-    if (!decoded || decoded.role?.toLowerCase() !== 'admin') {
-      return NextResponse.json(
-        { error: 'Admin access required' },
-        { status: 403 }
-      );
-    }
-
-    // Delete locations older than 7 days
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    const result = await (Location as mongoose.Model<ILocation>).deleteMany({
-      timestamp: { $lt: sevenDaysAgo }
-    });
+    const { count, error } = await supabaseAdmin
+      .from('locations')
+      .delete({ count: 'exact' })
+      .lt('timestamp', sevenDaysAgo.toISOString());
+
+    if (error) {
+      console.error('Delete locations error:', error);
+      return NextResponse.json({ error: 'Failed to delete old locations' }, { status: 500 });
+    }
 
     return NextResponse.json({
       success: true,
-      deleted: result.deletedCount,
-      message: `Deleted ${result.deletedCount} old location records`
+      deleted: count || 0,
+      message: `Deleted ${count || 0} old location records`,
     });
-
   } catch (error) {
     console.error('Delete old locations error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

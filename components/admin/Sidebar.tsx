@@ -12,7 +12,6 @@ import {
   Package, 
   Users, 
   FileText, 
-  MapPin, 
   ShoppingCart, 
   PackageX, 
   Boxes, 
@@ -22,18 +21,20 @@ import {
   RotateCcw,
   ChevronLeft,
   ChevronRight,
-  Store
+  Store,
+  ClipboardCheck,
+  Leaf
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 const navigation = [
   { name: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard },
+  { name: 'Orders', href: '/admin/orders', icon: ClipboardCheck },
   { name: 'Products', href: '/admin/products', icon: Package },
   { name: 'Sellers', href: '/admin/sellers', icon: Store },
   { name: 'Purchases', href: '/admin/purchases', icon: ShoppingCart },
   { name: 'Purchase Returns', href: '/admin/purchase-returns', icon: PackageX },
-  { name: 'Salesmen', href: '/admin/salesmen', icon: Users },
-  { name: 'Location Tracking', href: '/admin/locations', icon: MapPin },
+  { name: 'Users', href: '/admin/salesmen', icon: Users },
 ];
 
 const bomNavigation = [
@@ -73,7 +74,7 @@ export function AdminSidebar() {
   const NavItem = ({ item, colorClass }: { item: typeof navigation[0], colorClass: string }) => {
     const isActive = pathname === item.href;
     const activeColors: Record<string, string> = {
-      green: 'bg-green-50 text-green-700 border-green-500',
+      green: 'bg-brand-50 text-brand-700 border-brand-500',
       purple: 'bg-purple-50 text-purple-700 border-purple-500',
       blue: 'bg-blue-50 text-blue-700 border-blue-500',
     };
@@ -89,7 +90,7 @@ export function AdminSidebar() {
             : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
         )}
       >
-        <item.icon className={cn("h-[18px] w-[18px] flex-shrink-0", isActive && `text-${colorClass}-600`)} />
+        <item.icon className={cn("h-[18px] w-[18px] flex-shrink-0", isActive && (colorClass === 'green' ? 'text-brand-600' : `text-${colorClass}-600`))} />
         {!isCollapsed && <span className="truncate">{item.name}</span>}
       </Link>
     );
@@ -141,8 +142,8 @@ export function AdminSidebar() {
         )}>
           {!isCollapsed && (
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-gradient-to-br from-green-500 to-green-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">ST</span>
+              <div className="w-8 h-8 bg-brand-600 rounded-lg flex items-center justify-center shadow-sm">
+                <Leaf className="h-4 w-4 text-white" />
               </div>
               <span className="font-semibold text-gray-800 text-sm">SohagTea</span>
             </div>
@@ -196,9 +197,9 @@ export function AdminSidebar() {
           isCollapsed && "flex justify-center"
         )}>
           {!isCollapsed ? (
-            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-gray-50">
-              <div className="w-7 h-7 bg-green-100 rounded-full flex items-center justify-center">
-                <span className="text-green-700 font-semibold text-xs">A</span>
+            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-brand-50">
+              <div className="w-7 h-7 bg-brand-100 rounded-full flex items-center justify-center">
+                <span className="text-brand-700 font-semibold text-xs">A</span>
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium text-gray-700 truncate">Admin</p>
@@ -206,8 +207,8 @@ export function AdminSidebar() {
               </div>
             </div>
           ) : (
-            <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-              <span className="text-green-700 font-semibold text-xs">A</span>
+            <div className="w-8 h-8 bg-brand-100 rounded-full flex items-center justify-center">
+              <span className="text-brand-700 font-semibold text-xs">A</span>
             </div>
           )}
         </div>

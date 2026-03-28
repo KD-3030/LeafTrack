@@ -1,29 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectDB } from '@/lib/mongodb';
-import Payment from '@/models/Payment';
-import Invoice from '@/models/Invoice';
-import jwt, { JwtPayload } from 'jsonwebtoken';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAuth, requireAdminAuth } from '@/lib/authMiddleware';
+import { withId } from '@/lib/supabase-helpers';
 
 export const dynamic = 'force-dynamic';
 
 // Helper function to recalculate invoice balance based on all confirmed payments
 async function recalculateInvoiceBalance(invoiceId: string) {
-  const invoice = await Invoice.findById(invoiceId).lean();
-  if (!invoice) {
+  const { data: invoice, error: invErr } = await supabaseAdmin
+    .from('invoices')
+    .select('grand_total')
+    .eq('id', invoiceId)
+    .single();
+
+  if (invErr || !invoice) {
     throw new Error('Invoice not found');
   }
 
   // Get all confirmed/pending payments for this invoice (excluding cancelled)
-  const confirmedPayments = await Payment.find({
-    invoice_id: invoiceId,
-    status: { $in: ['Confirmed', 'Pending'] }
-  }).lean();
+  const { data: confirmedPayments } = await supabaseAdmin
+    .from('payments')
+    .select('amount_paid')
+    .eq('invoice_id', invoiceId)
+    .in('status', ['Confirmed', 'Pending']);
 
-  // Calculate total paid amount
-  const totalPaid = confirmedPayments.reduce((sum, payment) => sum + (payment.amount_paid || 0), 0);
+  const totalPaid = (confirmedPayments || []).reduce((sum, p) => sum + (p.amount_paid || 0), 0);
   const balanceDue = invoice.grand_total - totalPaid;
 
-  // Determine payment status
   let paymentStatus: 'Pending' | 'Partial' | 'Paid' = 'Pending';
   if (balanceDue <= 0) {
     paymentStatus = 'Paid';
@@ -31,28 +34,16 @@ async function recalculateInvoiceBalance(invoiceId: string) {
     paymentStatus = 'Partial';
   }
 
-  // Update invoice
-  await Invoice.findByIdAndUpdate(invoiceId, {
-    $set: {
+  await supabaseAdmin
+    .from('invoices')
+    .update({
       paid_amount: totalPaid,
       balance_due: Math.max(0, balanceDue),
       payment_status: paymentStatus,
-    }
-  });
-
-  console.log('Invoice balance recalculated:', {
-    invoiceId,
-    totalPaid,
-    balanceDue: Math.max(0, balanceDue),
-    paymentStatus
-  });
+    })
+    .eq('id', invoiceId);
 
   return { totalPaid, balanceDue: Math.max(0, balanceDue), paymentStatus };
-}
-
-interface DecodedToken extends JwtPayload {
-  userId: string;
-  role: string;
 }
 
 export async function GET(
@@ -60,47 +51,41 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    // Verify authentication
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json(
-        { error: 'Unauthorized - No token provided' },
-        { status: 401 }
-      );
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+
+    const { id } = params;
+
+    const { data: payment, error } = await supabaseAdmin
+      .from('payments')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !payment) {
+      return NextResponse.json({ error: 'Payment not found' }, { status: 404 });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as DecodedToken;
-    if (!decoded) {
-      return NextResponse.json(
-        { error: 'Unauthorized - Invalid token' },
-        { status: 401 }
-      );
-    }
+    // Fetch related invoice and customer data
+    const [invoiceRes, customerRes] = await Promise.all([
+      payment.invoice_id
+        ? supabaseAdmin.from('invoices').select('id, invoice_number, grand_total, due_date, customer_details').eq('id', payment.invoice_id).single()
+        : Promise.resolve({ data: null }),
+      payment.customer_id
+        ? supabaseAdmin.from('customers').select('id, name, email, phone').eq('id', payment.customer_id).single()
+        : Promise.resolve({ data: null }),
+    ]);
 
-    await connectDB();
+    const enriched = {
+      ...withId(payment),
+      invoice_id: invoiceRes.data ? withId(invoiceRes.data) : payment.invoice_id,
+      customer_id: customerRes.data ? withId(customerRes.data) : payment.customer_id,
+    };
 
-    const payment = await Payment.findById(params.id)
-      .populate('invoice_id', 'invoice_number grand_total due_date customer_details')
-      .populate('customer_id', 'name email phone')
-      .lean();
-
-    if (!payment) {
-      return NextResponse.json(
-        { error: 'Payment not found' },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      payment
-    });
+    return NextResponse.json({ success: true, payment: enriched });
   } catch (error) {
     console.error('Payment GET error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -109,155 +94,78 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    // Verify authentication
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json(
-        { error: 'Unauthorized - No token provided' },
-        { status: 401 }
-      );
-    }
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+    const decoded = authResult;
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as DecodedToken;
-    if (!decoded) {
-      return NextResponse.json(
-        { error: 'Unauthorized - Invalid token' },
-        { status: 401 }
-      );
-    }
+    const { id } = params;
 
-    await connectDB();
+    // Find the payment first to get invoice_id for recalc
+    const { data: payment, error: fetchErr } = await supabaseAdmin
+      .from('payments')
+      .select('invoice_id')
+      .eq('id', id)
+      .single();
+
+    if (fetchErr || !payment) {
+      return NextResponse.json({ error: 'Payment not found' }, { status: 404 });
+    }
 
     const body = await request.json();
     const {
-      amount_paid,
-      payment_method,
-      payment_date,
-      status,
-      reconciled,
-      transaction_id,
-      bank_reference,
-      cheque_number,
-      cheque_date,
-      bank_name,
-      notes,
-      reconciliation_notes
+      amount_paid, payment_method, payment_date, status,
+      reconciled, transaction_id, bank_reference,
+      cheque_number, cheque_date, bank_name, notes, reconciliation_notes
     } = body;
 
-    // Find the payment
-    const payment = await Payment.findById(params.id);
-    if (!payment) {
-      return NextResponse.json(
-        { error: 'Payment not found' },
-        { status: 404 }
-      );
-    }
-
-    // Update fields
-    interface UpdateData {
-      updated_by: string;
-      updated_at: Date;
-      amount_paid?: number;
-      payment_method?: string;
-      payment_date?: Date;
-      status?: string;
-      reconciled?: boolean;
-      reconciled_date?: Date;
-      reconciled_by?: string;
-      transaction_id?: string;
-      bank_reference?: string;
-      cheque_number?: string;
-      cheque_date?: Date | null;
-      bank_name?: string;
-      notes?: string;
-      reconciliation_notes?: string;
-    }
-    const updateData: UpdateData = {
+    const updateData: Record<string, unknown> = {
       updated_by: decoded.userId,
-      updated_at: new Date()
+      updated_at: new Date().toISOString(),
     };
 
-    // Allow editing amount_paid
-    if (amount_paid !== undefined) {
-      updateData.amount_paid = amount_paid;
-    }
-
-    // Allow editing payment_method
-    if (payment_method !== undefined) {
-      updateData.payment_method = payment_method;
-    }
-
-    // Allow editing payment_date
-    if (payment_date !== undefined) {
-      updateData.payment_date = new Date(payment_date);
-    }
-
-    if (status !== undefined) {
-      updateData.status = status;
-    }
-
+    if (amount_paid !== undefined) updateData.amount_paid = amount_paid;
+    if (payment_method !== undefined) updateData.payment_method = payment_method;
+    if (payment_date !== undefined) updateData.payment_date = new Date(payment_date).toISOString();
+    if (status !== undefined) updateData.status = status;
     if (reconciled !== undefined) {
       updateData.reconciled = reconciled;
       if (reconciled) {
-        updateData.reconciled_date = new Date();
-        updateData.reconciled_by = decoded.userId || decoded.id;
+        updateData.reconciled_date = new Date().toISOString();
+        updateData.reconciled_by = decoded.userId;
       }
     }
+    if (transaction_id !== undefined) updateData.transaction_id = transaction_id;
+    if (bank_reference !== undefined) updateData.bank_reference = bank_reference;
+    if (cheque_number !== undefined) updateData.cheque_number = cheque_number;
+    if (cheque_date !== undefined) updateData.cheque_date = cheque_date ? new Date(cheque_date).toISOString() : null;
+    if (bank_name !== undefined) updateData.bank_name = bank_name;
+    if (notes !== undefined) updateData.notes = notes;
+    if (reconciliation_notes !== undefined) updateData.reconciliation_notes = reconciliation_notes;
 
-    if (transaction_id !== undefined) {
-      updateData.transaction_id = transaction_id;
+    const { data: updatedPayment, error: updateErr } = await supabaseAdmin
+      .from('payments')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateErr || !updatedPayment) {
+      return NextResponse.json({ error: 'Failed to update payment' }, { status: 500 });
     }
-
-    if (bank_reference !== undefined) {
-      updateData.bank_reference = bank_reference;
-    }
-
-    if (cheque_number !== undefined) {
-      updateData.cheque_number = cheque_number;
-    }
-
-    if (cheque_date !== undefined) {
-      updateData.cheque_date = cheque_date ? new Date(cheque_date) : null;
-    }
-
-    if (bank_name !== undefined) {
-      updateData.bank_name = bank_name;
-    }
-
-    if (notes !== undefined) {
-      updateData.notes = notes;
-    }
-
-    if (reconciliation_notes !== undefined) {
-      updateData.reconciliation_notes = reconciliation_notes;
-    }
-
-    // Update the payment
-    const updatedPayment = await Payment.findByIdAndUpdate(
-      params.id,
-      updateData,
-      { new: true, runValidators: true }
-    )
-      .populate('invoice_id', 'invoice_number grand_total due_date customer_details')
-      .populate('customer_id', 'name email phone')
-      .lean();
 
     // Recalculate invoice balance if payment amount or status changed
     if (payment.invoice_id && (amount_paid !== undefined || status !== undefined)) {
-      await recalculateInvoiceBalance(payment.invoice_id.toString());
+      await recalculateInvoiceBalance(payment.invoice_id);
     }
 
     return NextResponse.json({
       success: true,
       message: 'Payment updated successfully',
-      payment: updatedPayment
+      payment: withId(updatedPayment),
     });
   } catch (error) {
     console.error('Payment update error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -266,60 +174,33 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    // Verify authentication
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json(
-        { error: 'Unauthorized - No token provided' },
-        { status: 401 }
-      );
-    }
+    const authResult = requireAdminAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+    const decoded = authResult;
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as DecodedToken;
-    if (!decoded) {
-      return NextResponse.json(
-        { error: 'Unauthorized - Invalid token' },
-        { status: 401 }
-      );
-    }
+    const { id } = params;
 
-    // Check if user is admin
-    if (decoded.role?.toLowerCase() !== 'admin') {
-      return NextResponse.json(
-        { error: 'Only administrators can delete payments' },
-        { status: 403 }
-      );
-    }
-
-    await connectDB();
-
-    // Check if force delete is requested
     const { searchParams } = new URL(request.url);
     const forceDelete = searchParams.get('force') === 'true';
 
-    // Find the payment
-    const payment = await Payment.findById(params.id);
-    if (!payment) {
-      return NextResponse.json(
-        { error: 'Payment not found' },
-        { status: 404 }
-      );
+    const { data: payment, error: fetchErr } = await supabaseAdmin
+      .from('payments')
+      .select('invoice_id, reconciled, status')
+      .eq('id', id)
+      .single();
+
+    if (fetchErr || !payment) {
+      return NextResponse.json({ error: 'Payment not found' }, { status: 404 });
     }
 
-    // If force delete is requested, permanently delete the payment
     if (forceDelete) {
-      const invoiceId = payment.invoice_id;
-      await Payment.findByIdAndDelete(params.id);
-      
-      // Recalculate invoice balance after deleting payment
-      if (invoiceId) {
-        await recalculateInvoiceBalance(invoiceId.toString());
+      await supabaseAdmin.from('payments').delete().eq('id', id);
+
+      if (payment.invoice_id) {
+        await recalculateInvoiceBalance(payment.invoice_id);
       }
-      
-      return NextResponse.json({
-        success: true,
-        message: 'Payment permanently deleted',
-      });
+
+      return NextResponse.json({ success: true, message: 'Payment permanently deleted' });
     }
 
     // Check if payment is reconciled for soft delete
@@ -331,33 +212,30 @@ export async function DELETE(
     }
 
     // Soft delete by updating status to cancelled
-    const updatedPayment = await Payment.findByIdAndUpdate(
-      params.id,
-      {
+    const { data: updatedPayment } = await supabaseAdmin
+      .from('payments')
+      .update({
         status: 'Cancelled',
         reconciled: false,
-        cancelled_by: decoded.id,
-        cancelled_at: new Date(),
-        cancellation_reason: 'Deleted by administrator'
-      },
-      { new: true }
-    );
+        cancelled_by: decoded.userId,
+        cancelled_at: new Date().toISOString(),
+        cancellation_reason: 'Deleted by administrator',
+      })
+      .eq('id', id)
+      .select()
+      .single();
 
-    // Recalculate invoice balance after cancelling payment
     if (payment.invoice_id) {
-      await recalculateInvoiceBalance(payment.invoice_id.toString());
+      await recalculateInvoiceBalance(payment.invoice_id);
     }
 
     return NextResponse.json({
       success: true,
       message: 'Payment cancelled successfully',
-      payment: updatedPayment
+      payment: updatedPayment ? withId(updatedPayment) : null,
     });
   } catch (error) {
     console.error('Payment deletion error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

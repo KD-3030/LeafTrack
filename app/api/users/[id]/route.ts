@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import User, { IUser } from '@/models/User';
-import Customer from '@/models/Customer';
-import { verifyToken } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAdminAuth } from '@/lib/authMiddleware';
 import bcrypt from 'bcryptjs';
-import { Model } from 'mongoose';
 import { normalizeRoleId, roleIdToDbRole } from '@/lib/roles';
+import { withId } from '@/lib/supabase-helpers';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,35 +12,9 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
-    
-    // Verify admin token
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { error: 'Authorization token required' },
-        { status: 401 }
-      );
-    }
-
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
-    
-    if (!decoded) {
-      return NextResponse.json(
-        { error: 'Invalid token' },
-        { status: 401 }
-      );
-    }
-
-    // Check if user is admin
-    const UserModel = User as Model<IUser>;
-    const adminUser = await UserModel.findById(decoded.userId);
-    if (!adminUser || normalizeRoleId(adminUser.role) !== 'admin') {
-      return NextResponse.json(
-        { error: 'Admin access required' },
-        { status: 403 }
-      );
+    const authResult = requireAdminAuth(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
     }
 
     const { id } = params;
@@ -50,8 +22,13 @@ export async function PUT(
     const { name, email, role, password, managerId } = body;
 
     // Find the user to update
-    const existingUser = await UserModel.findById(id);
-    if (!existingUser) {
+    const { data: existingUser, error: fetchError } = await supabaseAdmin
+      .from('users')
+      .select('id, email, role')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !existingUser) {
       return NextResponse.json(
         { error: 'User not found' },
         { status: 404 }
@@ -60,10 +37,13 @@ export async function PUT(
 
     // Check if email is already taken by another user
     if (email && email !== existingUser.email) {
-      const emailExists = await UserModel.findOne({ 
-        email, 
-        _id: { $ne: id } 
-      });
+      const { data: emailExists } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('email', email)
+        .neq('id', id)
+        .maybeSingle();
+
       if (emailExists) {
         return NextResponse.json(
           { error: 'Email already exists' },
@@ -94,46 +74,62 @@ export async function PUT(
           );
         }
 
-        const manager = await UserModel.findById(managerId);
+        const { data: manager } = await supabaseAdmin
+          .from('users')
+          .select('id, role')
+          .eq('id', managerId)
+          .single();
+
         if (!manager || manager.role !== 'PrimaryExecutive') {
           return NextResponse.json(
             { error: 'managerId must belong to a Primary Executive' },
             { status: 400 }
           );
         }
-        updateData.managerId = managerId;
+        updateData.manager_id = managerId;
       } else {
-        updateData.managerId = undefined;
+        updateData.manager_id = null;
       }
     } else if (managerId) {
-      const manager = await UserModel.findById(managerId);
+      const { data: manager } = await supabaseAdmin
+        .from('users')
+        .select('id, role')
+        .eq('id', managerId)
+        .single();
+
       if (!manager || manager.role !== 'PrimaryExecutive') {
         return NextResponse.json(
           { error: 'managerId must belong to a Primary Executive' },
           { status: 400 }
         );
       }
-      updateData.managerId = managerId;
+      updateData.manager_id = managerId;
     }
-    
+
     // Hash new password if provided
     if (password) {
-      const saltRounds = 10;
-      updateData.password = await bcrypt.hash(password, saltRounds);
+      updateData.password = await bcrypt.hash(password, 10);
     }
 
-    updateData.updatedAt = new Date();
-
     // Update user
-    const updatedUser = await UserModel.findByIdAndUpdate(
-      id,
-      updateData,
-      { new: true, select: '-password' }
-    );
+    const { data: updatedUser, error: updateError } = await supabaseAdmin
+      .from('users')
+      .update(updateData)
+      .eq('id', id)
+      .select('id, name, email, role, manager_id, phone, address, state, gstin, approval_status, created_at, updated_at')
+      .single();
+
+    if (updateError) {
+      console.error('Update user error:', updateError);
+      return NextResponse.json(
+        { error: 'Failed to update user' },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      user: updatedUser,
+      user: withId(updatedUser),
       message: 'User updated successfully'
     });
 
@@ -151,63 +147,46 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
-    
-    // Verify admin token
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { error: 'Authorization token required' },
-        { status: 401 }
-      );
-    }
-
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
-    
-    if (!decoded) {
-      return NextResponse.json(
-        { error: 'Invalid token' },
-        { status: 401 }
-      );
-    }
-
-    // Check if user is admin
-    const UserModel = User as Model<IUser>;
-    const adminUser = await UserModel.findById(decoded.userId);
-    if (!adminUser || normalizeRoleId(adminUser.role) !== 'admin') {
-      return NextResponse.json(
-        { error: 'Admin access required' },
-        { status: 403 }
-      );
+    const authResult = requireAdminAuth(request);
+    if (authResult instanceof NextResponse) {
+      return authResult;
     }
 
     const { id } = params;
 
-    const targetUser = await UserModel.findById(id).select('role');
-    if (!targetUser) {
-      return NextResponse.json(
-        { error: 'User not found' },
-        { status: 404 }
-      );
-    }
-
-    if (decoded.userId === id) {
+    // Prevent self-deletion
+    if (authResult.userId === id) {
       return NextResponse.json(
         { error: 'You cannot delete your own account' },
         { status: 400 }
       );
     }
 
+    // Fetch target user
+    const { data: targetUser, error: fetchError } = await supabaseAdmin
+      .from('users')
+      .select('id, role')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !targetUser) {
+      return NextResponse.json(
+        { error: 'User not found' },
+        { status: 404 }
+      );
+    }
+
     const targetRoleId = normalizeRoleId(targetUser.role);
 
+    // If deleting a PE, check they have no assigned SEs
     if (targetRoleId === 'primary_executive') {
-      const secondaryCount = await UserModel.countDocuments({
-        role: 'SecondaryExecutive',
-        managerId: id,
-      });
+      const { count } = await supabaseAdmin
+        .from('users')
+        .select('id', { count: 'exact', head: true })
+        .eq('role', 'SecondaryExecutive')
+        .eq('manager_id', id);
 
-      if (secondaryCount > 0) {
+      if (count && count > 0) {
         return NextResponse.json(
           { error: 'Reassign or remove secondary executives before deleting this primary executive' },
           { status: 400 }
@@ -215,16 +194,27 @@ export async function DELETE(
       }
     }
 
-    // Remove secondary mapping from customers owned by this secondary.
+    // If deleting an SE, clear secondary_executive_id from customers
     if (targetRoleId === 'secondary_executive') {
-      await Customer.updateMany(
-        { secondary_executive_id: id },
-        { $unset: { secondary_executive_id: '' } }
-      );
+      await supabaseAdmin
+        .from('customers')
+        .update({ secondary_executive_id: null })
+        .eq('secondary_executive_id', id);
     }
 
-    // Find and delete the user
-    await UserModel.findByIdAndDelete(id);
+    // Delete the user
+    const { error: deleteError } = await supabaseAdmin
+      .from('users')
+      .delete()
+      .eq('id', id);
+
+    if (deleteError) {
+      console.error('Delete user error:', deleteError);
+      return NextResponse.json(
+        { error: 'Failed to delete user' },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,

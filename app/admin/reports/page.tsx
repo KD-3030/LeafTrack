@@ -317,7 +317,7 @@ export default function ReportsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F5F5DC] p-6">
+    <div className="min-h-screen bg-background p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">

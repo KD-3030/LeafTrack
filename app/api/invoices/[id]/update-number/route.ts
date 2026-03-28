@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectDB } from '@/lib/mongodb';
-import Invoice from '@/models/Invoice';
+import { supabaseAdmin } from '@/lib/supabase-server';
 import { requireAdminAuth } from '@/lib/authMiddleware';
+import { withId } from '@/lib/supabase-helpers';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,8 +11,6 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
-    
     // Require admin authentication
     const authResult = requireAdminAuth(request);
     if (authResult instanceof NextResponse) {
@@ -30,8 +28,13 @@ export async function PATCH(
     }
 
     // Check if the invoice exists
-    const invoice = await Invoice.findById(id);
-    if (!invoice) {
+    const { data: invoice, error: fetchError } = await supabaseAdmin
+      .from('invoices')
+      .select('id, invoice_number')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !invoice) {
       return NextResponse.json(
         { success: false, error: 'Invoice not found' },
         { status: 404 }
@@ -39,12 +42,14 @@ export async function PATCH(
     }
 
     // Check if the new invoice number is already used by another invoice
-    const existingInvoice = await Invoice.findOne({
-      invoice_number: new_invoice_number.trim(),
-      _id: { $ne: id } // Exclude current invoice
-    });
+    const { data: existing } = await supabaseAdmin
+      .from('invoices')
+      .select('id')
+      .eq('invoice_number', new_invoice_number.trim())
+      .neq('id', id)
+      .maybeSingle();
 
-    if (existingInvoice) {
+    if (existing) {
       return NextResponse.json(
         { success: false, error: `Invoice number ${new_invoice_number} is already in use` },
         { status: 400 }
@@ -53,15 +58,27 @@ export async function PATCH(
 
     // Update the invoice number
     const oldInvoiceNumber = invoice.invoice_number;
-    invoice.invoice_number = new_invoice_number.trim();
-    await invoice.save();
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from('invoices')
+      .update({ invoice_number: new_invoice_number.trim() })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error('Update invoice number error:', updateError);
+      return NextResponse.json(
+        { success: false, error: 'Failed to update invoice number' },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
       message: 'Invoice number updated successfully',
       old_invoice_number: oldInvoiceNumber,
-      new_invoice_number: invoice.invoice_number,
-      invoice: invoice
+      new_invoice_number: updated.invoice_number,
+      invoice: withId(updated),
     });
 
   } catch (error) {

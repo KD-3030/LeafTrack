@@ -1,304 +1,129 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { connectDB } from '@/lib/mongodb';
-import Invoice from '@/models/Invoice';
-import jwt from 'jsonwebtoken';
+﻿import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAuth } from '@/lib/authMiddleware';
+import { withId } from '@/lib/supabase-helpers';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify authentication
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json(
-        { error: 'Unauthorized - No token provided' },
-        { status: 401 }
-      );
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
-    if (!decoded) {
-      return NextResponse.json(
-        { error: 'Unauthorized - Invalid token' },
-        { status: 401 }
-      );
-    }
-
-    await connectDB();
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
     const { searchParams } = new URL(request.url);
-    const limit = parseInt(searchParams.get('limit') || '50');
     const page = parseInt(searchParams.get('page') || '1');
-    const sortBy = searchParams.get('sort') || '-due_date';
-    const overdueOnly = searchParams.get('overdue') === 'true';
+    const limit = parseInt(searchParams.get('limit') || '20');
+    const status = searchParams.get('status');
+    const customer_id = searchParams.get('customer_id');
+    const sort_by = searchParams.get('sort_by') || 'balance_due';
+    const sort_order = searchParams.get('sort_order') || 'desc';
+    const overdue_only = searchParams.get('overdue_only') === 'true';
 
-    // Get outstanding invoices with payment information
-    const outstandingInvoices = await Invoice.aggregate([
-      {
-        $lookup: {
-          from: 'payments',
-          localField: '_id',
-          foreignField: 'invoice_id',
-          as: 'payments'
-        }
-      },
-      {
-        $addFields: {
-          paid_amount: {
-            $sum: {
-              $map: {
-                input: {
-                  $filter: {
-                    input: '$payments',
-                    cond: { $eq: ['$$this.status', 'Confirmed'] }
-                  }
-                },
-                as: 'payment',
-                in: '$$payment.amount_paid'
-              }
-            }
-          }
-        }
-      },
-      {
-        $addFields: {
-          balance_due: { $subtract: ['$grand_total', '$paid_amount'] },
-          days_overdue: {
-            $max: [
-              0,
-              {
-                $divide: [
-                  { $subtract: [new Date(), '$due_date'] },
-                  1000 * 60 * 60 * 24 // Convert milliseconds to days
-                ]
-              }
-            ]
-          }
-        }
-      },
-      {
-        $match: {
-          balance_due: { $gt: 0 },
-          ...(overdueOnly ? { days_overdue: { $gt: 0 } } : {})
-        }
-      },
-      {
-        $addFields: {
-          days_overdue: { $floor: '$days_overdue' }
-        }
-      },
-      {
-        $sort: getSortObject(sortBy)
-      },
-      {
-        $skip: (page - 1) * limit
-      },
-      {
-        $limit: limit
-      },
-      {
-        $project: {
-          invoice_number: 1,
-          customer_id: 1,
-          customer_details: 1,
-          invoice_date: 1,
-          due_date: 1,
-          grand_total: 1,
-          paid_amount: 1,
-          balance_due: 1,
-          days_overdue: 1,
-          payment_terms: 1,
-          status: 1
-        }
-      }
-    ]);
+    const now = new Date();
 
-    // Get total count for pagination
-    const totalCountPipeline = await Invoice.aggregate([
-      {
-        $lookup: {
-          from: 'payments',
-          localField: '_id',
-          foreignField: 'invoice_id',
-          as: 'payments'
-        }
-      },
-      {
-        $addFields: {
-          paid_amount: {
-            $sum: {
-              $map: {
-                input: {
-                  $filter: {
-                    input: '$payments',
-                    cond: { $eq: ['$$this.status', 'Confirmed'] }
-                  }
-                },
-                as: 'payment',
-                in: '$$payment.amount_paid'
-              }
-            }
-          }
-        }
-      },
-      {
-        $addFields: {
-          balance_due: { $subtract: ['$grand_total', '$paid_amount'] },
-          days_overdue: {
-            $max: [
-              0,
-              {
-                $divide: [
-                  { $subtract: [new Date(), '$due_date'] },
-                  1000 * 60 * 60 * 24
-                ]
-              }
-            ]
-          }
-        }
-      },
-      {
-        $match: {
-          balance_due: { $gt: 0 },
-          ...(overdueOnly ? { days_overdue: { $gt: 0 } } : {})
-        }
-      },
-      {
-        $count: 'total'
-      }
-    ]);
+    // Fetch invoices with outstanding balances
+    let query = supabaseAdmin.from('invoices').select('*', { count: 'exact' });
+    query = query.gt('balance_due', 0);
+    if (status) query = query.eq('payment_status', status);
+    if (customer_id) query = query.eq('customer_id', customer_id);
+    if (overdue_only) query = query.lt('due_date', now.toISOString());
 
-    const total = totalCountPipeline[0]?.total || 0;
-    const totalPages = Math.ceil(total / limit);
+    // Sorting
+    const ascending = sort_order === 'asc';
+    if (sort_by === 'balance_due' || sort_by === 'grand_total' || sort_by === 'due_date' || sort_by === 'created_at') {
+      query = query.order(sort_by, { ascending });
+    } else {
+      query = query.order('balance_due', { ascending: false });
+    }
 
-    // Calculate summary statistics
-    const summaryStats = await Invoice.aggregate([
-      {
-        $lookup: {
-          from: 'payments',
-          localField: '_id',
-          foreignField: 'invoice_id',
-          as: 'payments'
-        }
-      },
-      {
-        $addFields: {
-          paid_amount: {
-            $sum: {
-              $map: {
-                input: {
-                  $filter: {
-                    input: '$payments',
-                    cond: { $eq: ['$$this.status', 'Confirmed'] }
-                  }
-                },
-                as: 'payment',
-                in: '$$payment.amount_paid'
-              }
-            }
-          }
-        }
-      },
-      {
-        $addFields: {
-          balance_due: { $subtract: ['$grand_total', '$paid_amount'] },
-          days_overdue: {
-            $max: [
-              0,
-              {
-                $divide: [
-                  { $subtract: [new Date(), '$due_date'] },
-                  1000 * 60 * 60 * 24
-                ]
-              }
-            ]
-          }
-        }
-      },
-      {
-        $match: {
-          balance_due: { $gt: 0 }
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          total_outstanding: { $sum: '$balance_due' },
-          total_overdue: {
-            $sum: {
-              $cond: [
-                { $gt: ['$days_overdue', 0] },
-                '$balance_due',
-                0
-              ]
-            }
-          },
-          count_outstanding: { $sum: 1 },
-          count_overdue: {
-            $sum: {
-              $cond: [
-                { $gt: ['$days_overdue', 0] },
-                1,
-                0
-              ]
-            }
-          },
-          average_overdue_days: {
-            $avg: {
-              $cond: [
-                { $gt: ['$days_overdue', 0] },
-                '$days_overdue',
-                null
-              ]
-            }
-          }
-        }
-      }
-    ]);
+    const offset = (page - 1) * limit;
+    const { data: rawInvoices, count, error } = await query.range(offset, offset + limit - 1);
+    if (error) throw error;
+    const invoices = rawInvoices || [];
+    const total = count || 0;
 
-    const summary = summaryStats[0] || {
-      total_outstanding: 0,
-      total_overdue: 0,
-      count_outstanding: 0,
-      count_overdue: 0,
-      average_overdue_days: 0
+    // Enrich with customer data
+    const customerIds = [...new Set(invoices.map(i => i.customer_id).filter(Boolean))];
+    let customerMap = new Map<string, Record<string, unknown>>();
+    if (customerIds.length) {
+      const { data: customers } = await supabaseAdmin.from('customers').select('id, name, email, phone, gstin').in('id', customerIds);
+      customerMap = new Map((customers || []).map(c => [c.id, c]));
+    }
+
+    // Calculate days overdue for each invoice
+    const enrichedInvoices = invoices.map(inv => {
+      const customer = inv.customer_id ? customerMap.get(inv.customer_id) : null;
+      const dueDate = inv.due_date ? new Date(inv.due_date) : null;
+      const daysOverdue = dueDate && dueDate < now
+        ? Math.ceil((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24))
+        : 0;
+
+      return {
+        ...withId(inv),
+        customer_id: customer ? { _id: inv.customer_id, ...customer } : inv.customer_id,
+        days_overdue: daysOverdue,
+        is_overdue: daysOverdue > 0,
+      };
+    });
+
+    // Fetch all outstanding invoices for summary stats (unfiltered by pagination)
+    const { data: allOutstanding } = await supabaseAdmin
+      .from('invoices')
+      .select('balance_due, due_date, payment_status')
+      .gt('balance_due', 0);
+
+    const allInvs = allOutstanding || [];
+    const summary = {
+      total_outstanding_amount: allInvs.reduce((sum, i) => sum + Number(i.balance_due || 0), 0),
+      total_outstanding_invoices: allInvs.length,
+      overdue_amount: allInvs
+        .filter(i => i.due_date && new Date(i.due_date) < now)
+        .reduce((sum, i) => sum + Number(i.balance_due || 0), 0),
+      overdue_count: allInvs.filter(i => i.due_date && new Date(i.due_date) < now).length,
+      current_amount: allInvs
+        .filter(i => !i.due_date || new Date(i.due_date) >= now)
+        .reduce((sum, i) => sum + Number(i.balance_due || 0), 0),
+      current_count: allInvs.filter(i => !i.due_date || new Date(i.due_date) >= now).length,
     };
+
+    // Aging breakdown
+    const aging = {
+      current: { count: 0, amount: 0 },
+      '1_30': { count: 0, amount: 0 },
+      '31_60': { count: 0, amount: 0 },
+      '61_90': { count: 0, amount: 0 },
+      '90_plus': { count: 0, amount: 0 },
+    };
+
+    for (const inv of allInvs) {
+      const dueDate = inv.due_date ? new Date(inv.due_date) : null;
+      const daysOverdue = dueDate && dueDate < now
+        ? Math.ceil((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24))
+        : 0;
+      const amount = Number(inv.balance_due || 0);
+
+      if (daysOverdue <= 0) { aging.current.count++; aging.current.amount += amount; }
+      else if (daysOverdue <= 30) { aging['1_30'].count++; aging['1_30'].amount += amount; }
+      else if (daysOverdue <= 60) { aging['31_60'].count++; aging['31_60'].amount += amount; }
+      else if (daysOverdue <= 90) { aging['61_90'].count++; aging['61_90'].amount += amount; }
+      else { aging['90_plus'].count++; aging['90_plus'].amount += amount; }
+    }
 
     return NextResponse.json({
       success: true,
-      invoices: outstandingInvoices,
+      invoices: enrichedInvoices,
+      summary,
+      aging,
       pagination: {
-        page,
-        limit,
-        total,
-        totalPages,
-        hasNext: page < totalPages,
-        hasPrev: page > 1
+        currentPage: page,
+        totalPages: Math.ceil(total / limit),
+        totalCount: total,
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPrevPage: page > 1,
       },
-      summary
     });
   } catch (error) {
-    console.error('Outstanding invoices error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('Error fetching outstanding invoices:', error);
+    return NextResponse.json({ error: 'Failed to fetch outstanding data' }, { status: 500 });
   }
-}
-
-function getSortObject(sortBy: string) {
-  const sortMap: { [key: string]: any } = {
-    '-due_date': { due_date: -1 },
-    'due_date': { due_date: 1 },
-    '-balance_due': { balance_due: -1 },
-    'balance_due': { balance_due: 1 },
-    '-days_overdue': { days_overdue: -1 },
-    'days_overdue': { days_overdue: 1 },
-    '-invoice_date': { invoice_date: -1 },
-    'invoice_date': { invoice_date: 1 },
-    'customer': { 'customer_details.name': 1 },
-    '-customer': { 'customer_details.name': -1 }
-  };
-
-  return sortMap[sortBy] || { due_date: -1 };
 }

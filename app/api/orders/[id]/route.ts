@@ -1,20 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import Order from '@/models/Order';
-import User from '@/models/User';
-import { verifyToken } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAuth } from '@/lib/authMiddleware';
 import { normalizeRoleId } from '@/lib/roles';
-import mongoose from 'mongoose';
+import { withId } from '@/lib/supabase-helpers';
 
 async function canPrimaryAccessOrder(primaryId: string, salesmanId: string): Promise<boolean> {
   if (salesmanId === primaryId) return true;
 
-  const secondary = await User.findOne({
-    _id: salesmanId,
-    managerId: primaryId,
-    role: 'SecondaryExecutive',
-    approval_status: 'approved',
-  }).select('_id').lean();
+  const { data: secondary } = await supabaseAdmin
+    .from('users')
+    .select('id')
+    .eq('id', salesmanId)
+    .eq('manager_id', primaryId)
+    .eq('role', 'secondary_executive')
+    .eq('approval_status', 'approved')
+    .maybeSingle();
 
   return Boolean(secondary);
 }
@@ -25,38 +25,43 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+    const decoded = authResult;
 
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const { data: order, error } = await supabaseAdmin
+      .from('orders')
+      .select('*')
+      .eq('id', params.id)
+      .single();
 
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
-
-    const order = await Order.findById(params.id).lean();
-
-    if (!order) {
+    if (error || !order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
     const roleId = normalizeRoleId(decoded.role);
-    if (roleId === 'secondary_executive' && order.salesman_id.toString() !== decoded.userId) {
+    if (roleId === 'secondary_executive' && order.salesman_id !== decoded.userId) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
     if (roleId === 'primary_executive') {
-      const allowed = await canPrimaryAccessOrder(decoded.userId, order.salesman_id.toString());
+      const allowed = await canPrimaryAccessOrder(decoded.userId, order.salesman_id);
       if (!allowed) {
         return NextResponse.json({ error: 'Access denied' }, { status: 403 });
       }
     }
 
+    // Fetch order items
+    const { data: orderItems } = await supabaseAdmin
+      .from('order_items')
+      .select('*')
+      .eq('order_id', params.id);
+
     return NextResponse.json({
       success: true,
-      order,
+      order: {
+        ...withId(order),
+        items: order.items || (orderItems || []).map(withId),
+      },
     });
   } catch (error) {
     console.error('Error fetching order:', error);
@@ -73,85 +78,69 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+    const decoded = authResult;
 
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const { data: order, error: fetchErr } = await supabaseAdmin
+      .from('orders')
+      .select('*')
+      .eq('id', params.id)
+      .single();
 
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
-
-    console.log('PUT /api/orders/[id] - User:', decoded.userId, 'Role:', decoded.role);
-
-    const order = await Order.findById(params.id);
-
-    if (!order) {
+    if (fetchErr || !order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
     const body = await request.json();
-    console.log('PUT /api/orders/[id] - Body:', JSON.stringify(body));
-
     const roleId = normalizeRoleId(decoded.role);
+    const updateData: Record<string, unknown> = {};
 
     // Admin actions: approve/reject/modify
     if (roleId === 'admin') {
-      // Update status if provided
       if (body.status) {
         if (!['approved', 'rejected'].includes(body.status)) {
-          return NextResponse.json(
-            { error: 'Invalid status' },
-            { status: 400 }
-          );
+          return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
         }
 
-        order.status = body.status;
-        order.reviewed_at = new Date();
-        order.reviewed_by = new mongoose.Types.ObjectId(decoded.userId);
-        order.reviewer_name = decoded.name || 'Admin';
+        updateData.status = body.status;
+        updateData.reviewed_at = new Date().toISOString();
+        updateData.reviewed_by = decoded.userId;
+        updateData.reviewer_name = decoded.name || 'Admin';
 
         if (body.status === 'rejected' && body.rejection_reason) {
-          order.rejection_reason = body.rejection_reason;
+          updateData.rejection_reason = body.rejection_reason;
         }
       }
 
-      // Admin can modify order details
       if (body.items) {
-        // Store original total if this is the first modification
         if (!order.admin_modified) {
-          order.original_total = order.total_amount;
+          updateData.original_total = order.total_amount;
         }
-        order.admin_modified = true;
-        order.items = body.items;
+        updateData.admin_modified = true;
+        updateData.items = body.items;
       }
 
-      if (body.subtotal !== undefined) order.subtotal = body.subtotal;
-      if (body.tax_percentage !== undefined) order.tax_percentage = body.tax_percentage;
-      if (body.tax_amount !== undefined) order.tax_amount = body.tax_amount;
-      if (body.discount_amount !== undefined) order.discount_amount = body.discount_amount;
-      if (body.total_amount !== undefined) order.total_amount = body.total_amount;
-      if (body.admin_notes) order.admin_notes = body.admin_notes;
-      if (body.delivery_date) order.delivery_date = body.delivery_date;
-      if (body.payment_terms) order.payment_terms = body.payment_terms;
-
-    } 
-    // Secondary executive actions: edit only own orders before primary review.
+      if (body.subtotal !== undefined) updateData.subtotal = body.subtotal;
+      if (body.tax_percentage !== undefined) updateData.tax_percentage = body.tax_percentage;
+      if (body.tax_amount !== undefined) updateData.tax_amount = body.tax_amount;
+      if (body.discount_amount !== undefined) updateData.discount_amount = body.discount_amount;
+      if (body.total_amount !== undefined) updateData.total_amount = body.total_amount;
+      if (body.admin_notes) updateData.admin_notes = body.admin_notes;
+      if (body.delivery_date) updateData.delivery_date = body.delivery_date;
+      if (body.payment_terms) updateData.payment_terms = body.payment_terms;
+    }
+    // Secondary executive actions
     else if (roleId === 'secondary_executive') {
-      if (order.salesman_id.toString() !== decoded.userId) {
+      if (order.salesman_id !== decoded.userId) {
         return NextResponse.json({ error: 'Access denied' }, { status: 403 });
       }
-
       if (order.status !== 'pending_primary') {
         return NextResponse.json(
           { error: 'Cannot edit order after it has been reviewed by primary executive' },
           { status: 400 }
         );
       }
-
       if (body.status) {
         return NextResponse.json(
           { error: 'Secondary executives cannot submit directly to admin' },
@@ -159,32 +148,28 @@ export async function PUT(
         );
       }
 
-      // Allow updating customer and item details.
-      if (body.customer_name) order.customer_name = body.customer_name;
-      if (body.customer_contact) order.customer_contact = body.customer_contact;
-      if (body.customer_address) order.customer_address = body.customer_address;
-      if (body.customer_gstin) order.customer_gstin = body.customer_gstin;
-      if (body.customer_email) order.customer_email = body.customer_email;
-      if (body.items) order.items = body.items;
-      if (body.subtotal !== undefined) order.subtotal = body.subtotal;
-      if (body.tax_percentage !== undefined) order.tax_percentage = body.tax_percentage;
-      if (body.tax_amount !== undefined) order.tax_amount = body.tax_amount;
-      if (body.discount_amount !== undefined) order.discount_amount = body.discount_amount;
-      if (body.total_amount !== undefined) order.total_amount = body.total_amount;
-      if (body.notes) order.notes = body.notes;
+      if (body.customer_name) updateData.customer_name = body.customer_name;
+      if (body.customer_contact) updateData.customer_contact = body.customer_contact;
+      if (body.customer_address) updateData.customer_address = body.customer_address;
+      if (body.customer_gstin) updateData.customer_gstin = body.customer_gstin;
+      if (body.customer_email) updateData.customer_email = body.customer_email;
+      if (body.items) updateData.items = body.items;
+      if (body.subtotal !== undefined) updateData.subtotal = body.subtotal;
+      if (body.tax_percentage !== undefined) updateData.tax_percentage = body.tax_percentage;
+      if (body.tax_amount !== undefined) updateData.tax_amount = body.tax_amount;
+      if (body.discount_amount !== undefined) updateData.discount_amount = body.discount_amount;
+      if (body.total_amount !== undefined) updateData.total_amount = body.total_amount;
+      if (body.notes) updateData.notes = body.notes;
     }
-    // Primary executive actions:
-    // 1) manage own orders before admin review
-    // 2) review secondary orders and forward to admin
+    // Primary executive actions
     else if (roleId === 'primary_executive') {
-      const isOwnOrder = order.salesman_id.toString() === decoded.userId;
-      const isTeamOrder = await canPrimaryAccessOrder(decoded.userId, order.salesman_id.toString());
+      const isOwnOrder = order.salesman_id === decoded.userId;
+      const isTeamOrder = await canPrimaryAccessOrder(decoded.userId, order.salesman_id);
 
       if (!isTeamOrder) {
         return NextResponse.json({ error: 'Access denied' }, { status: 403 });
       }
 
-      // Team-review action: primary can forward team order to admin.
       if (!isOwnOrder && body.status) {
         if (order.status !== 'pending_primary') {
           return NextResponse.json(
@@ -192,7 +177,6 @@ export async function PUT(
             { status: 400 }
           );
         }
-
         if (body.status !== 'pending') {
           return NextResponse.json(
             { error: 'Primary executive can only forward team orders to admin approval' },
@@ -200,11 +184,11 @@ export async function PUT(
           );
         }
 
-        order.status = 'pending';
-        order.reviewed_at = new Date();
-        order.reviewed_by = new mongoose.Types.ObjectId(decoded.userId);
-        order.reviewer_name = decoded.name || 'Primary Executive';
-        if (body.admin_notes) order.admin_notes = body.admin_notes;
+        updateData.status = 'pending';
+        updateData.reviewed_at = new Date().toISOString();
+        updateData.reviewed_by = decoded.userId;
+        updateData.reviewer_name = decoded.name || 'Primary Executive';
+        if (body.admin_notes) updateData.admin_notes = body.admin_notes;
       } else {
         if (order.status !== 'pending') {
           return NextResponse.json(
@@ -212,7 +196,6 @@ export async function PUT(
             { status: 400 }
           );
         }
-
         if (!isOwnOrder) {
           return NextResponse.json(
             { error: 'Only your own pending orders can be edited' },
@@ -220,40 +203,48 @@ export async function PUT(
           );
         }
 
-        // Own-order edits before admin review.
-        if (body.customer_name) order.customer_name = body.customer_name;
-        if (body.customer_contact) order.customer_contact = body.customer_contact;
-        if (body.customer_address) order.customer_address = body.customer_address;
-        if (body.customer_gstin) order.customer_gstin = body.customer_gstin;
-        if (body.customer_email) order.customer_email = body.customer_email;
-        if (body.items) order.items = body.items;
-        if (body.subtotal !== undefined) order.subtotal = body.subtotal;
-        if (body.tax_percentage !== undefined) order.tax_percentage = body.tax_percentage;
-        if (body.tax_amount !== undefined) order.tax_amount = body.tax_amount;
-        if (body.discount_amount !== undefined) order.discount_amount = body.discount_amount;
-        if (body.total_amount !== undefined) order.total_amount = body.total_amount;
-        if (body.notes) order.notes = body.notes;
+        if (body.customer_name) updateData.customer_name = body.customer_name;
+        if (body.customer_contact) updateData.customer_contact = body.customer_contact;
+        if (body.customer_address) updateData.customer_address = body.customer_address;
+        if (body.customer_gstin) updateData.customer_gstin = body.customer_gstin;
+        if (body.customer_email) updateData.customer_email = body.customer_email;
+        if (body.items) updateData.items = body.items;
+        if (body.subtotal !== undefined) updateData.subtotal = body.subtotal;
+        if (body.tax_percentage !== undefined) updateData.tax_percentage = body.tax_percentage;
+        if (body.tax_amount !== undefined) updateData.tax_amount = body.tax_amount;
+        if (body.discount_amount !== undefined) updateData.discount_amount = body.discount_amount;
+        if (body.total_amount !== undefined) updateData.total_amount = body.total_amount;
+        if (body.notes) updateData.notes = body.notes;
       }
     } else {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    await order.save();
+    updateData.updated_at = new Date().toISOString();
 
-    console.log('PUT /api/orders/[id] - Order updated successfully:', order._id, 'Status:', order.status);
+    const { data: updatedOrder, error: updateErr } = await supabaseAdmin
+      .from('orders')
+      .update(updateData)
+      .eq('id', params.id)
+      .select()
+      .single();
+
+    if (updateErr || !updatedOrder) {
+      return NextResponse.json(
+        { error: 'Failed to update order', details: updateErr?.message },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      message: roleId === 'admin' 
-        ? `Order ${body.status || 'updated'} successfully` 
+      message: roleId === 'admin'
+        ? `Order ${body.status || 'updated'} successfully`
         : 'Order updated successfully',
-      order,
+      order: withId(updatedOrder),
     });
   } catch (error) {
     console.error('Error updating order:', error);
-    if (error instanceof Error) {
-      console.error('Error details:', error.message, error.stack);
-    }
     return NextResponse.json(
       { error: 'Failed to update order', details: error instanceof Error ? error.message : String(error) },
       { status: 500 }
@@ -267,31 +258,26 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+    const decoded = authResult;
 
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const { data: order, error: fetchErr } = await supabaseAdmin
+      .from('orders')
+      .select('id, salesman_id, status')
+      .eq('id', params.id)
+      .single();
 
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
-
-    const order = await Order.findById(params.id);
-
-    if (!order) {
+    if (fetchErr || !order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
     const roleId = normalizeRoleId(decoded.role);
 
     if (roleId === 'secondary_executive') {
-      if (order.salesman_id.toString() !== decoded.userId) {
+      if (order.salesman_id !== decoded.userId) {
         return NextResponse.json({ error: 'Access denied' }, { status: 403 });
       }
-
       if (order.status !== 'pending_primary') {
         return NextResponse.json(
           { error: 'Cannot delete order after primary review has started' },
@@ -299,20 +285,18 @@ export async function DELETE(
         );
       }
     } else if (roleId === 'primary_executive') {
-      const isOwnOrder = order.salesman_id.toString() === decoded.userId;
-      const isTeamOrder = await canPrimaryAccessOrder(decoded.userId, order.salesman_id.toString());
+      const isOwnOrder = order.salesman_id === decoded.userId;
+      const isTeamOrder = await canPrimaryAccessOrder(decoded.userId, order.salesman_id);
 
       if (!isTeamOrder) {
         return NextResponse.json({ error: 'Access denied' }, { status: 403 });
       }
-
       if (isOwnOrder && order.status !== 'pending') {
         return NextResponse.json(
           { error: 'Cannot delete own order after review has started' },
           { status: 400 }
         );
       }
-
       if (!isOwnOrder && order.status !== 'pending_primary') {
         return NextResponse.json(
           { error: 'Only team orders pending your review can be deleted' },
@@ -323,7 +307,9 @@ export async function DELETE(
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    await Order.findByIdAndDelete(params.id);
+    // Delete order items first, then order
+    await supabaseAdmin.from('order_items').delete().eq('order_id', params.id);
+    await supabaseAdmin.from('orders').delete().eq('id', params.id);
 
     return NextResponse.json({
       success: true,

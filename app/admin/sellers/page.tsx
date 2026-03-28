@@ -225,7 +225,7 @@ export default function SellersPage() {
             Manage your suppliers and vendors for purchases
           </p>
         </div>
-        <Button onClick={openNewSellerDialog} className="bg-green-600 hover:bg-green-700">
+        <Button onClick={openNewSellerDialog} className="">
           <Plus className="h-4 w-4 mr-2" />
           Add Seller
         </Button>
@@ -597,7 +597,7 @@ export default function SellersPage() {
               <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" className="bg-green-600 hover:bg-green-700">
+              <Button type="submit" className="">
                 {isEditing ? 'Update Seller' : 'Add Seller'}
               </Button>
             </DialogFooter>

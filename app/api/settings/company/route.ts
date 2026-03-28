@@ -1,101 +1,70 @@
-import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import CompanySettings, { ICompanySettings } from '@/models/CompanySettings';
-import { verifyToken } from '@/lib/auth';
-import { Model } from 'mongoose';
+﻿import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAuth } from '@/lib/authMiddleware';
+import { withId } from '@/lib/supabase-helpers';
 
 export const dynamic = 'force-dynamic';
 
-// GET - Get company settings
+const DEFAULT_SETTINGS = {
+  company_name: 'Sohagtea Trading Company',
+  address: 'Tea Estate Road, Bagdogra',
+  city: 'Siliguri',
+  state: 'West Bengal',
+  pincode: '734421',
+  phone: '+91 98765 43210',
+  email: 'info@sohagtea.com',
+  gstin: '19ABCDE1234F1Z5',
+  pan: 'ABCDE1234F',
+};
+
 export async function GET(request: NextRequest) {
   try {
-    await connectDB();
-    
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
-    
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+    const { data: settings } = await supabaseAdmin.from('company_settings').select('*').limit(1).single();
 
-    const CompanySettingsModel = CompanySettings as Model<ICompanySettings>;
-    let settings = await CompanySettingsModel.findOne();
+    if (settings) {
+      return NextResponse.json({ success: true, settings: withId(settings) });
+    }
 
     // Create default settings if none exist
-    if (!settings) {
-      settings = await CompanySettingsModel.create({
-        company_name: 'Sohagtea Trading Company',
-        address: 'Tea Estate Road, Bagdogra',
-        city: 'Siliguri',
-        state: 'West Bengal',
-        pincode: '734421',
-        phone: '+91 98765 43210',
-        email: 'info@sohagtea.com',
-        gstin: '19ABCDE1234F1Z5',
-        pan: 'ABCDE1234F',
-      });
-    }
+    const { data: created, error } = await supabaseAdmin.from('company_settings').insert(DEFAULT_SETTINGS).select().single();
+    if (error) throw error;
 
-    return NextResponse.json({
-      success: true,
-      settings,
-    });
+    return NextResponse.json({ success: true, settings: withId(created) });
   } catch (error) {
     console.error('Error fetching company settings:', error);
     return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });
   }
 }
 
-// PUT - Update company settings
 export async function PUT(request: NextRequest) {
   try {
-    await connectDB();
-    
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
-    
-    if (!decoded || decoded.role?.toLowerCase() !== 'admin') {
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+    if (authResult.role?.toLowerCase() !== 'admin') {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
     const updates = await request.json();
-    const CompanySettingsModel = CompanySettings as Model<ICompanySettings>;
 
-    let settings = await CompanySettingsModel.findOne();
-    
-    if (!settings) {
-      // Create new settings if none exist
-      settings = new CompanySettingsModel(updates);
+    const { data: existing } = await supabaseAdmin.from('company_settings').select('id').limit(1).single();
+
+    let settings;
+    if (existing) {
+      const { data, error } = await supabaseAdmin.from('company_settings').update(updates).eq('id', existing.id).select().single();
+      if (error) throw error;
+      settings = data;
     } else {
-      // Update existing settings
-      Object.assign(settings, updates);
+      const { data, error } = await supabaseAdmin.from('company_settings').insert(updates).select().single();
+      if (error) throw error;
+      settings = data;
     }
 
-    await settings.save();
-
-    return NextResponse.json({
-      success: true,
-      message: 'Company settings updated successfully',
-      settings,
-    });
+    return NextResponse.json({ success: true, message: 'Company settings updated successfully', settings: withId(settings) });
   } catch (error) {
     console.error('Error updating company settings:', error);
-
-    if ((error as any).name === 'ValidationError') {
-      return NextResponse.json({
-        error: 'Validation failed',
-        details: (error as any).message
-      }, { status: 400 });
-    }    return NextResponse.json({ error: 'Failed to update settings' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to update settings' }, { status: 500 });
   }
 }

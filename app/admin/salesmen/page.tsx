@@ -473,7 +473,7 @@ export default function ExecutiveManagementPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F5F5DC] p-6">
+    <div className="min-h-screen bg-background p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
@@ -534,7 +534,7 @@ export default function ExecutiveManagementPage() {
                     </Select>
                   </div>
                   <div className="md:col-span-4">
-                    <Button type="submit" className="bg-green-600 hover:bg-green-700" disabled={inviteLoading}>
+                    <Button type="submit" className="" disabled={inviteLoading}>
                       <Link2 className="h-4 w-4 mr-2" />
                       {inviteLoading ? 'Creating...' : 'Generate Invite Link'}
                     </Button>
@@ -587,7 +587,7 @@ export default function ExecutiveManagementPage() {
                           />
                         </TableCell>
                         <TableCell className="space-x-2">
-                          <Button size="sm" onClick={() => approveUser(u._id)} className="bg-green-600 hover:bg-green-700"><CheckCircle className="h-4 w-4 mr-1" />Approve</Button>
+                          <Button size="sm" onClick={() => approveUser(u._id)} className=""><CheckCircle className="h-4 w-4 mr-1" />Approve</Button>
                           <Button size="sm" variant="destructive" onClick={() => rejectUser(u._id)}><XCircle className="h-4 w-4 mr-1" />Reject</Button>
                         </TableCell>
                       </TableRow>

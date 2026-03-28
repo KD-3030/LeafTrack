@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectDB } from '@/lib/mongodb';
-import SaleReturn from '@/models/SaleReturn';
+import { supabaseAdmin } from '@/lib/supabase-server';
 import { requireAdminAuth } from '@/lib/authMiddleware';
+import { withId } from '@/lib/supabase-helpers';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,30 +11,47 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
-
-    // Use standardized admin authentication
     const authResult = requireAdminAuth(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
-    }
+    if (authResult instanceof NextResponse) return authResult;
 
     const { id } = params;
 
-    // Find and delete the sale return
-    const deletedReturn = await SaleReturn.findByIdAndDelete(id);
+    // Fetch before delete for response
+    const { data: existing } = await supabaseAdmin
+      .from('sale_returns')
+      .select('id')
+      .eq('id', id)
+      .single();
 
-    if (!deletedReturn) {
+    if (!existing) {
       return NextResponse.json(
         { success: false, error: 'Sale return not found' },
         { status: 404 }
       );
     }
 
+    // Delete items first (cascade should handle, but be explicit)
+    await supabaseAdmin
+      .from('sale_return_items')
+      .delete()
+      .eq('sale_return_id', id);
+
+    const { error } = await supabaseAdmin
+      .from('sale_returns')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error('Delete sale return error:', error);
+      return NextResponse.json(
+        { success: false, error: 'Failed to delete sale return' },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({
       success: true,
       message: 'Sale return deleted successfully',
-      deletedReturn,
     });
 
   } catch (error) {
@@ -52,32 +69,58 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
-
-    // Use standardized authentication
     const authResult = requireAdminAuth(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
-    }
+    if (authResult instanceof NextResponse) return authResult;
 
     const { id } = params;
 
-    const saleReturn = await SaleReturn.findById(id)
-      .populate('customer_id', 'name email phone')
-      .populate('salesman_id', 'name email')
-      .populate('original_invoice_id', 'invoice_number invoice_date')
-      .populate('approved_by', 'name');
+    // Fetch sale return with items
+    const { data: saleReturn, error } = await supabaseAdmin
+      .from('sale_returns')
+      .select('*')
+      .eq('id', id)
+      .single();
 
-    if (!saleReturn) {
+    if (error || !saleReturn) {
       return NextResponse.json(
         { success: false, error: 'Sale return not found' },
         { status: 404 }
       );
     }
 
+    // Fetch related data
+    const [
+      { data: items },
+      { data: customer },
+      { data: salesman },
+      { data: invoice },
+      { data: approver },
+    ] = await Promise.all([
+      supabaseAdmin.from('sale_return_items').select('*').eq('sale_return_id', id),
+      saleReturn.customer_id
+        ? supabaseAdmin.from('customers').select('id, name, email, phone').eq('id', saleReturn.customer_id).single()
+        : Promise.resolve({ data: null }),
+      saleReturn.salesman_id
+        ? supabaseAdmin.from('users').select('id, name, email').eq('id', saleReturn.salesman_id).single()
+        : Promise.resolve({ data: null }),
+      saleReturn.original_invoice_id
+        ? supabaseAdmin.from('invoices').select('id, invoice_number, invoice_date').eq('id', saleReturn.original_invoice_id).single()
+        : Promise.resolve({ data: null }),
+      saleReturn.approved_by
+        ? supabaseAdmin.from('users').select('id, name').eq('id', saleReturn.approved_by).single()
+        : Promise.resolve({ data: null }),
+    ]);
+
     return NextResponse.json({
       success: true,
-      saleReturn,
+      saleReturn: withId({
+        ...saleReturn,
+        items: items || [],
+        customer,
+        salesman,
+        original_invoice: invoice,
+        approver,
+      }),
     });
 
   } catch (error) {
@@ -95,13 +138,8 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
-
-    // Use standardized admin authentication
     const authResult = requireAdminAuth(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
-    }
+    if (authResult instanceof NextResponse) return authResult;
 
     const { id } = params;
     const updates = await request.json();
@@ -116,13 +154,14 @@ export async function PATCH(
       }
     }
 
-    const updatedReturn = await SaleReturn.findByIdAndUpdate(
-      id,
-      updateData,
-      { new: true, runValidators: true }
-    );
+    const { data: updatedReturn, error } = await supabaseAdmin
+      .from('sale_returns')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
 
-    if (!updatedReturn) {
+    if (error || !updatedReturn) {
       return NextResponse.json(
         { success: false, error: 'Sale return not found' },
         { status: 404 }
@@ -132,7 +171,7 @@ export async function PATCH(
     return NextResponse.json({
       success: true,
       message: 'Sale return updated successfully',
-      saleReturn: updatedReturn,
+      saleReturn: withId(updatedReturn),
     });
 
   } catch (error) {

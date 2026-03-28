@@ -1,25 +1,15 @@
-import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import Order from '@/models/Order';
-import User from '@/models/User';
-import { verifyToken } from '@/lib/auth';
+﻿import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAuth } from '@/lib/authMiddleware';
+import { withId, withIds } from '@/lib/supabase-helpers';
 import { normalizeRoleId } from '@/lib/roles';
-import mongoose from 'mongoose';
 
-// GET /api/orders - Get all orders (filtered by role)
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
-    await connectDB();
-
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
@@ -28,170 +18,122 @@ export async function GET(request: NextRequest) {
     const to_date = searchParams.get('to_date');
     const search = searchParams.get('search');
 
-    // Build query based on user role
-    interface QueryType {
-      salesman_id?: string | { $in: string[] };
-      status?: string;
-      customer_name?: { $regex: string; $options: string };
-      order_date?: { $gte?: Date; $lte?: Date };
-      $or?: Array<{ [key: string]: { $regex: string; $options: string } }>;
-    }
-    const query: QueryType = {};
+    const roleId = normalizeRoleId(authResult.role);
 
-    const roleId = normalizeRoleId(decoded.role);
+    let query = supabaseAdmin.from('orders').select('*, order_items(*)');
+
+    // Role-based filtering
     if (roleId === 'secondary_executive') {
-      query.salesman_id = decoded.userId;
+      query = query.eq('salesman_id', authResult.userId);
     } else if (roleId === 'primary_executive') {
-      const teamMembers = await User.find({
-        managerId: decoded.userId,
-        role: 'SecondaryExecutive',
-        approval_status: 'approved',
-      }).select('_id');
-        query.salesman_id = {
-          $in: [decoded.userId, ...teamMembers.map((member) => (member._id as mongoose.Types.ObjectId).toString())],
-      };
+      const { data: team } = await supabaseAdmin.from('users')
+        .select('id').eq('manager_id', authResult.userId)
+        .eq('role', 'SecondaryExecutive').eq('approval_status', 'approved');
+      const teamIds = [authResult.userId, ...(team || []).map(t => t.id)];
+      query = query.in('salesman_id', teamIds);
     }
 
-    // Apply filters
-    if (status && status !== 'all') {
-      query.status = status;
-    }
+    if (status && status !== 'all') query = query.eq('status', status);
+    if (customer_name) query = query.ilike('customer_name', `%${customer_name}%`);
+    if (from_date) query = query.gte('order_date', from_date);
+    if (to_date) query = query.lte('order_date', to_date);
+    if (search) query = query.or(`order_number.ilike.%${search}%,customer_name.ilike.%${search}%,salesman_name.ilike.%${search}%,customer_contact.ilike.%${search}%`);
 
-    if (customer_name) {
-      query.customer_name = { $regex: customer_name, $options: 'i' };
-    }
+    const { data: orders, error } = await query.order('order_date', { ascending: false });
+    if (error) throw error;
 
-    if (from_date || to_date) {
-      query.order_date = {};
-      if (from_date) {
-        query.order_date.$gte = new Date(from_date);
-      }
-      if (to_date) {
-        query.order_date.$lte = new Date(to_date);
-      }
-    }
+    const mapped = (orders || []).map(o => ({
+      ...withId(o),
+      items: o.order_items || [],
+      createdAt: o.created_at,
+      updatedAt: o.updated_at,
+    }));
 
-    // Global search
-    if (search) {
-      query.$or = [
-        { order_number: { $regex: search, $options: 'i' } },
-        { customer_name: { $regex: search, $options: 'i' } },
-        { salesman_name: { $regex: search, $options: 'i' } },
-        { customer_contact: { $regex: search, $options: 'i' } },
-      ];
-    }
-
-    const orders = await Order.find(query)
-      .sort({ order_date: -1, submitted_at: -1 })
-      .lean();
-
-    // Calculate summary statistics
-    const pendingForAdmin = orders.filter((o) => o.status === 'pending');
-    const pendingForPrimary = orders.filter((o) => o.status === 'pending_primary');
+    const pendingForAdmin = mapped.filter(o => o.status === 'pending');
+    const pendingForPrimary = mapped.filter(o => o.status === 'pending_primary');
 
     const summary = {
-      total_orders: orders.length,
+      total_orders: mapped.length,
       pending_count: pendingForAdmin.length,
       primary_review_count: pendingForPrimary.length,
-      approved_count: orders.filter(o => o.status === 'approved').length,
-      rejected_count: orders.filter(o => o.status === 'rejected').length,
-      total_value: orders.reduce((sum, o) => sum + o.total_amount, 0),
+      approved_count: mapped.filter(o => o.status === 'approved').length,
+      rejected_count: mapped.filter(o => o.status === 'rejected').length,
+      total_value: mapped.reduce((s, o) => s + (o.total_amount || 0), 0),
       pending_value: (roleId === 'admin' ? pendingForAdmin : [...pendingForAdmin, ...pendingForPrimary])
-        .reduce((sum, o) => sum + o.total_amount, 0),
-      approved_value: orders.filter(o => o.status === 'approved').reduce((sum, o) => sum + o.total_amount, 0),
+        .reduce((s, o) => s + (o.total_amount || 0), 0),
+      approved_value: mapped.filter(o => o.status === 'approved').reduce((s, o) => s + (o.total_amount || 0), 0),
     };
 
-    return NextResponse.json({
-      success: true,
-      orders,
-      summary,
-    });
+    return NextResponse.json({ success: true, orders: mapped, summary });
   } catch (error) {
     console.error('Error fetching orders:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch orders' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to fetch orders' }, { status: 500 });
   }
 }
 
-// POST /api/orders - Create a new order
 export async function POST(request: NextRequest) {
   try {
-    await connectDB();
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
-
-    const roleId = normalizeRoleId(decoded.role);
+    const roleId = normalizeRoleId(authResult.role);
     if (roleId !== 'secondary_executive' && roleId !== 'primary_executive') {
-      return NextResponse.json(
-        { error: 'Only executives can create orders' },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: 'Only executives can create orders' }, { status: 403 });
     }
 
     const body = await request.json();
-
-    // Validate required fields
-    const requiredFields = [
-      'customer_name',
-      'customer_contact',
-      'items',
-      'subtotal',
-      'total_amount',
-    ];
-
-    for (const field of requiredFields) {
-      if (!body[field]) {
-        return NextResponse.json(
-          { error: `Missing required field: ${field}` },
-          { status: 400 }
-        );
-      }
+    const required = ['customer_name', 'customer_contact', 'items', 'subtotal', 'total_amount'];
+    for (const f of required) {
+      if (!body[f]) return NextResponse.json({ error: `Missing required field: ${f}` }, { status: 400 });
     }
-
-    // Validate items
     if (!Array.isArray(body.items) || body.items.length === 0) {
-      return NextResponse.json(
-        { error: 'Order must have at least one item' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Order must have at least one item' }, { status: 400 });
     }
 
-    const isSecondaryExecutive = roleId === 'secondary_executive';
+    const isSecondary = roleId === 'secondary_executive';
 
-    // Create order
-    const order = new Order({
-      ...body,
-      salesman_id: decoded.userId,
-      salesman_name: decoded.name || 'Unknown',
-      // Secondary orders are reviewed by primary executives first.
-      status: isSecondaryExecutive ? 'pending_primary' : 'pending',
-      submitted_at: new Date(),
-    });
+    const { data: order, error } = await supabaseAdmin.from('orders').insert({
+      order_date: body.order_date || new Date().toISOString(),
+      salesman_id: authResult.userId,
+      salesman_name: authResult.name || 'Unknown',
+      customer_id: body.customer_id || null,
+      customer_name: body.customer_name,
+      customer_contact: body.customer_contact,
+      customer_address: body.customer_address || null,
+      customer_gstin: body.customer_gstin || null,
+      customer_email: body.customer_email || null,
+      subtotal: body.subtotal,
+      tax_percentage: body.tax_percentage || 0,
+      tax_amount: body.tax_amount || 0,
+      discount_amount: body.discount_amount || 0,
+      total_amount: body.total_amount,
+      status: isSecondary ? 'pending_primary' : 'pending',
+      submitted_at: new Date().toISOString(),
+      notes: body.notes || null,
+    }).select().single();
+    if (error) throw error;
 
-    await order.save();
+    // Insert order items
+    const itemRows = body.items.map((item: Record<string, unknown>) => ({
+      order_id: order.id,
+      product_id: item.product_id || null,
+      product_name: item.product_name,
+      quantity: item.quantity,
+      unit: item.unit || 'kg',
+      price_per_unit: item.price_per_unit,
+      total_price: item.total_price,
+    }));
+    if (itemRows.length > 0) await supabaseAdmin.from('order_items').insert(itemRows);
 
     return NextResponse.json({
       success: true,
-      message: isSecondaryExecutive
+      message: isSecondary
         ? 'Order submitted successfully and is pending primary executive review'
         : 'Order submitted successfully and is pending admin approval',
-      order,
+      order: { ...withId(order), items: body.items, createdAt: order.created_at, updatedAt: order.updated_at },
     });
   } catch (error) {
     console.error('Error creating order:', error);
-    return NextResponse.json(
-      { error: 'Failed to create order' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
   }
 }

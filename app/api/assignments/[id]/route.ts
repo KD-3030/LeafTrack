@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectDB } from '@/lib/mongodb';
-import Assignment, { IAssignment } from '@/models/Assignment';
-import Product from '@/models/Product';
-import User from '@/models/User';
-import { requireAdminAuth, requireUserAuth, DecodedToken } from '@/lib/authMiddleware';
-import mongoose from 'mongoose';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAdminAuth, requireAuth, DecodedToken } from '@/lib/authMiddleware';
 import { normalizeRoleId } from '@/lib/roles';
+import { withId } from '@/lib/supabase-helpers';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,105 +18,82 @@ export async function DELETE(
   { params }: RouteParams
 ) {
   try {
-    await connectDB();
-
-    // Use standardized admin authentication
     const authResult = requireAdminAuth(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
-    }
+    if (authResult instanceof NextResponse) return authResult;
 
     const { id } = params;
 
-    // Validate assignment ID
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    // Find the assignment to get the product_id and quantity
+    const { data: assignment, error: fetchErr } = await supabaseAdmin
+      .from('assignments')
+      .select('id, product_id, quantity')
+      .eq('id', id)
+      .single();
+
+    if (fetchErr || !assignment) {
       return NextResponse.json(
-        { success: false, error: 'Invalid assignment ID' },
+        { success: false, error: 'Assignment not found' },
+        { status: 404 }
+      );
+    }
+
+    // Find the product to verify it exists and get current stock
+    const { data: product, error: prodErr } = await supabaseAdmin
+      .from('products')
+      .select('id, name, total_stock')
+      .eq('id', assignment.product_id)
+      .single();
+
+    if (prodErr || !product) {
+      return NextResponse.json(
+        { success: false, error: 'Associated product not found' },
         { status: 400 }
       );
     }
 
-    // Start a transaction to ensure data consistency
-    const session = await mongoose.startSession();
-    
-    try {
-      await session.withTransaction(async () => {
-        // First, find the assignment to get the productId and quantity
-        const assignment = await Assignment.findById(id)
-          .populate('productId')
-          .session(session);
+    // Return stock to product
+    const { error: stockErr } = await supabaseAdmin
+      .from('products')
+      .update({
+        total_stock: product.total_stock + assignment.quantity,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', assignment.product_id);
 
-        if (!assignment) {
-          throw new Error('Assignment not found');
-        }
-
-        const assignmentData = assignment as IAssignment;
-        const productId = assignmentData.productId;
-        const quantityToReturn = assignmentData.quantity;
-
-        // Find the product and return the stock
-        const product = await Product.findById(productId).session(session);
-        
-        if (!product) {
-          throw new Error('Associated product not found');
-        }
-
-        // Return the assigned quantity back to product stock
-        const updatedProduct = await Product.findByIdAndUpdate(
-          productId,
-          { 
-            $inc: { totalStock: quantityToReturn },
-            updatedAt: new Date()
-          },
-          { 
-            new: true,
-            session: session
-          }
-        );
-
-        if (!updatedProduct) {
-          throw new Error('Failed to update product stock');
-        }
-
-        // Delete the assignment
-        const deletedAssignment = await Assignment.findByIdAndDelete(id, { session });
-        
-        if (!deletedAssignment) {
-          throw new Error('Failed to delete assignment');
-        }
-
-        console.log(`✅ Assignment deleted: ${id}`);
-        console.log(`📦 Stock returned: ${quantityToReturn} units to product ${product.name}`);
-        console.log(`📊 Updated product stock: ${updatedProduct.totalStock}`);
-      });
-
-      await session.endSession();
-
-      return NextResponse.json({
-        success: true,
-        message: 'Assignment deleted successfully and stock returned to inventory'
-      });
-
-    } catch (transactionError) {
-      await session.endSession();
-      console.error('Transaction failed:', transactionError);
-      
+    if (stockErr) {
       return NextResponse.json(
-        { 
-          success: false, 
-          error: transactionError instanceof Error ? transactionError.message : 'Failed to delete assignment'
-        },
-        { status: 400 }
+        { success: false, error: 'Failed to update product stock' },
+        { status: 500 }
       );
     }
 
+    // Delete the assignment
+    const { error: delErr } = await supabaseAdmin
+      .from('assignments')
+      .delete()
+      .eq('id', id);
+
+    if (delErr) {
+      // Try to revert stock if delete fails
+      await supabaseAdmin
+        .from('products')
+        .update({ total_stock: product.total_stock })
+        .eq('id', assignment.product_id);
+
+      return NextResponse.json(
+        { success: false, error: 'Failed to delete assignment' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Assignment deleted successfully and stock returned to inventory',
+    });
   } catch (error) {
     console.error('Error in DELETE /api/assignments/[id]:', error);
     return NextResponse.json(
-      { 
-        success: false, 
-        error: 'Internal server error' 
-      },
+      { success: false, error: 'Internal server error' },
       { status: 500 }
     );
   }
@@ -131,70 +105,79 @@ export async function GET(
   { params }: RouteParams
 ) {
   try {
-    await connectDB();
-
-    // Use standardized authentication
-    const authResult = requireUserAuth(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
-    }
-
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
     const decoded = authResult as DecodedToken;
-    const currentUser = await User.findById(decoded.userId).select('role managerId');
+
+    const { id } = params;
+
+    // Fetch current user role
+    const { data: currentUser } = await supabaseAdmin
+      .from('users')
+      .select('role, manager_id')
+      .eq('id', decoded.userId)
+      .single();
+
     if (!currentUser) {
       return NextResponse.json(
         { success: false, error: 'User not found' },
         { status: 404 }
       );
     }
-    const { id } = params;
 
-    // Validate assignment ID
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid assignment ID' },
-        { status: 400 }
-      );
-    }
-
-    const query: Record<string, string> = { _id: id };
     const roleId = normalizeRoleId(currentUser.role);
 
+    // Build query filter based on role
+    let query = supabaseAdmin
+      .from('assignments')
+      .select('*')
+      .eq('id', id);
+
     if (roleId === 'secondary_executive') {
-      if (!currentUser.managerId) {
+      if (!currentUser.manager_id) {
         return NextResponse.json(
           { success: false, error: 'Secondary executive is not assigned to a primary executive' },
           { status: 400 }
         );
       }
-      Object.assign(query, { salesman_id: currentUser.managerId.toString() });
+      query = query.eq('salesman_id', currentUser.manager_id);
     } else if (roleId === 'primary_executive') {
-      Object.assign(query, { salesman_id: decoded.userId });
+      query = query.eq('salesman_id', decoded.userId);
     }
 
-    const assignment = await Assignment.findOne(query)
-      .populate('salesman_id', 'name email')
-      .populate('productId', 'name manufacturingCost totalStock hsn_code gst_rate');
+    const { data: assignment, error } = await query.single();
 
-    if (!assignment) {
+    if (error || !assignment) {
       return NextResponse.json(
         { success: false, error: 'Assignment not found' },
         { status: 404 }
       );
     }
 
+    // Fetch related salesman and product data
+    const [salesmanRes, productRes] = await Promise.all([
+      assignment.salesman_id
+        ? supabaseAdmin.from('users').select('id, name, email').eq('id', assignment.salesman_id).single()
+        : Promise.resolve({ data: null }),
+      assignment.product_id
+        ? supabaseAdmin.from('products').select('id, name, manufacturing_cost, total_stock, hsn_code, gst_rate').eq('id', assignment.product_id).single()
+        : Promise.resolve({ data: null }),
+    ]);
+
+    const enriched = {
+      ...withId(assignment),
+      salesman_id: salesmanRes.data ? withId(salesmanRes.data) : assignment.salesman_id,
+      productId: productRes.data ? withId(productRes.data) : assignment.product_id,
+    };
+
     return NextResponse.json({
       success: true,
-      assignment
+      assignment: enriched,
     });
-
   } catch (error) {
     console.error('Error in GET /api/assignments/[id]:', error);
     return NextResponse.json(
-      { 
-        success: false, 
-        error: 'Internal server error' 
-      },
+      { success: false, error: 'Internal server error' },
       { status: 500 }
     );
   }

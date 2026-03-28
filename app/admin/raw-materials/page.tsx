@@ -230,7 +230,7 @@ export default function RawMaterialsPage() {
         
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
-            <Button className="bg-green-600 hover:bg-green-700">
+            <Button className="">
               <Plus className="h-4 w-4 mr-2" />
               Add Material
             </Button>
@@ -344,7 +344,7 @@ export default function RawMaterialsPage() {
                 >
                   Cancel
                 </Button>
-                <Button type="submit" className="bg-green-600 hover:bg-green-700">
+                <Button type="submit" className="">
                   Create Material
                 </Button>
               </div>
@@ -603,7 +603,7 @@ export default function RawMaterialsPage() {
                 >
                   Cancel
                 </Button>
-                <Button type="submit" className="bg-green-600 hover:bg-green-700">
+                <Button type="submit" className="">
                   Update Material
                 </Button>
               </div>

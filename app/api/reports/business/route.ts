@@ -1,347 +1,300 @@
-import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import Invoice, { IInvoice } from '@/models/Invoice';
-import Product from '@/models/Product'; // Import for populate
-import Customer from '@/models/Customer'; // Import for populate
-import User from '@/models/User'; // Import for populate
-import { verifyToken } from '@/lib/auth';
-import { Model } from 'mongoose';
+﻿import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAuth } from '@/lib/authMiddleware';
 
 export const dynamic = 'force-dynamic';
 
-// GET - Generate business reports and analytics
 export async function GET(request: NextRequest) {
   try {
-    await connectDB();
-    
-    // Ensure models are registered for populate
-    if (!Product || !Customer || !User) {
-      throw new Error('Required models not loaded');
-    }
-    
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
-    
-    if (!decoded || decoded.role?.toLowerCase() !== 'admin') {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
-
-    // Get query parameters
     const { searchParams } = new URL(request.url);
-    const reportType = searchParams.get('type') || 'overview';
-    const fromDate = searchParams.get('from_date');
-    const toDate = searchParams.get('to_date');
-    // const period = searchParams.get('period') || 'month'; // day, week, month, year
+    const report_type = searchParams.get('type') || 'overview';
+    const from_date = searchParams.get('from_date');
+    const to_date = searchParams.get('to_date');
+    const customer_id = searchParams.get('customer_id');
 
-    // Default date range (last 30 days if not specified)
-    const endDate = toDate ? new Date(toDate) : new Date();
-    const startDate = fromDate ? new Date(fromDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
-    const dateFilter = {
-      createdAt: {
-        $gte: startDate,
-        $lte: endDate,
-      }
-    };
-
-    const InvoiceModel = Invoice as Model<IInvoice>;
-
-    if (reportType === 'overview') {
-      // Dashboard overview
-      const totalSales = await InvoiceModel.aggregate([
-        { 
-          $match: { 
-            ...dateFilter,
-            status: { $ne: 'Cancelled' }
-          }
-        },
-        {
-          $group: {
-            _id: null,
-            total_revenue: { $sum: '$grand_total' },
-            total_invoices: { $sum: 1 },
-            paid_amount: { 
-              $sum: { 
-                $cond: [
-                  { $eq: ['$payment_status', 'Paid'] },
-                  '$grand_total',
-                  '$paid_amount'
-                ]
-              }
-            },
-            pending_amount: {
-              $sum: {
-                $cond: [
-                  { $ne: ['$payment_status', 'Paid'] },
-                  '$balance_due',
-                  0
-                ]
-              }
-            }
-          }
-        }
-      ]);
-
-      const salesStats = totalSales[0] || {
-        total_revenue: 0,
-        total_invoices: 0,
-        paid_amount: 0,
-        pending_amount: 0,
-      };
-
-      // Top selling products
-      const topProducts = await InvoiceModel.aggregate([
-        { 
-          $match: { 
-            ...dateFilter,
-            status: { $ne: 'Cancelled' }
-          }
-        },
-        { $unwind: '$items' },
-        {
-          $group: {
-            _id: '$items.product_name',
-            quantity_sold: { $sum: '$items.quantity' },
-            revenue: { $sum: '$items.total_amount' },
-            orders: { $sum: 1 }
-          }
-        },
-        { $sort: { revenue: -1 } },
-        { $limit: 5 }
-      ]);
-
-      // Top performing salesmen
-      const topSalesmen = await InvoiceModel.aggregate([
-        { 
-          $match: { 
-            ...dateFilter,
-            status: { $ne: 'Cancelled' }
-          }
-        },
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'salesman_id',
-            foreignField: '_id',
-            as: 'salesman'
-          }
-        },
-        { $unwind: '$salesman' },
-        {
-          $group: {
-            _id: '$salesman_id',
-            salesman_name: { $first: '$salesman.name' },
-            total_sales: { $sum: '$grand_total' },
-            total_invoices: { $sum: 1 }
-          }
-        },
-        { $sort: { total_sales: -1 } },
-        { $limit: 5 }
-      ]);
-
-      // Monthly trend (last 12 months)
-      const monthlyTrend = await InvoiceModel.aggregate([
-        {
-          $match: {
-            invoice_date: {
-              $gte: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000)
-            },
-            status: { $ne: 'Cancelled' }
-          }
-        },
-        {
-          $group: {
-            _id: {
-              year: { $year: '$invoice_date' },
-              month: { $month: '$invoice_date' }
-            },
-            revenue: { $sum: '$grand_total' },
-            invoices: { $sum: 1 }
-          }
-        },
-        { $sort: { '_id.year': 1, '_id.month': 1 } },
-        { $limit: 12 }
-      ]);
-
-      return NextResponse.json({
-        success: true,
-        report_type: 'Overview',
-        period: { from: startDate, to: endDate },
-        stats: salesStats,
-        top_products: topProducts,
-        top_salesmen: topSalesmen,
-        monthly_trend: monthlyTrend,
-      });
+    switch (report_type) {
+      case 'overview':
+        return await getOverviewReport(from_date, to_date);
+      case 'profit_loss':
+        return await getProfitLossReport(from_date, to_date);
+      case 'sales_performance':
+        return await getSalesPerformanceReport(from_date, to_date);
+      case 'customer_ledger':
+        return await getCustomerLedgerReport(customer_id, from_date, to_date);
+      default:
+        return NextResponse.json({ error: 'Invalid report type' }, { status: 400 });
     }
-
-    if (reportType === 'profit_loss') {
-      // Profit & Loss Report
-      const salesData = await InvoiceModel.aggregate([
-        { 
-          $match: { 
-            ...dateFilter,
-            status: { $ne: 'Cancelled' }
-          }
-        },
-        { $unwind: '$items' },
-        {
-          $lookup: {
-            from: 'products',
-            localField: 'items.product_id',
-            foreignField: '_id',
-            as: 'product'
-          }
-        },
-        { $unwind: '$product' },
-        {
-          $group: {
-            _id: null,
-            total_revenue: { $sum: '$items.total_amount' },
-            total_cost: { 
-              $sum: { 
-                $multiply: ['$items.quantity', '$product.manufacturingCost'] 
-              }
-            },
-            total_tax: { 
-              $sum: { 
-                $add: [
-                  '$items.cgst_amount',
-                  '$items.sgst_amount',
-                  '$items.igst_amount'
-                ]
-              }
-            }
-          }
-        }
-      ]);
-
-      const profitLoss = salesData[0] || {
-        total_revenue: 0,
-        total_cost: 0,
-        total_tax: 0,
-      };
-
-      profitLoss.gross_profit = profitLoss.total_revenue - profitLoss.total_cost;
-      profitLoss.net_profit = profitLoss.gross_profit - profitLoss.total_tax;
-      profitLoss.profit_margin = profitLoss.total_revenue ? 
-        ((profitLoss.gross_profit / profitLoss.total_revenue) * 100) : 0;
-
-      return NextResponse.json({
-        success: true,
-        report_type: 'Profit & Loss',
-        period: { from: startDate, to: endDate },
-        profit_loss: profitLoss,
-      });
-    }
-
-    if (reportType === 'sales_performance') {
-      // Sales Performance Analytics
-      const salesPerformance = await InvoiceModel.aggregate([
-        { 
-          $match: { 
-            ...dateFilter,
-            status: { $ne: 'Cancelled' }
-          }
-        },
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'salesman_id',
-            foreignField: '_id',
-            as: 'salesman'
-          }
-        },
-        { $unwind: '$salesman' },
-        {
-          $group: {
-            _id: '$salesman_id',
-            salesman_name: { $first: '$salesman.name' },
-            salesman_email: { $first: '$salesman.email' },
-            total_sales: { $sum: '$grand_total' },
-            total_invoices: { $sum: 1 },
-            avg_invoice_value: { $avg: '$grand_total' },
-            total_customers: { $addToSet: '$customer_id' }
-          }
-        },
-        {
-          $addFields: {
-            total_customers: { $size: '$total_customers' }
-          }
-        },
-        { $sort: { total_sales: -1 } }
-      ]);
-
-      // Product wise sales
-      const productWiseSales = await InvoiceModel.aggregate([
-        { 
-          $match: { 
-            ...dateFilter,
-            status: { $ne: 'Cancelled' }
-          }
-        },
-        { $unwind: '$items' },
-        {
-          $group: {
-            _id: '$items.product_name',
-            quantity_sold: { $sum: '$items.quantity' },
-            revenue: { $sum: '$items.total_amount' },
-            avg_price: { $avg: '$items.unit_price' },
-            orders: { $sum: 1 }
-          }
-        },
-        { $sort: { revenue: -1 } }
-      ]);
-
-      return NextResponse.json({
-        success: true,
-        report_type: 'Sales Performance',
-        period: { from: startDate, to: endDate },
-        salesman_performance: salesPerformance,
-        product_performance: productWiseSales,
-      });
-    }
-
-    if (reportType === 'customer_ledger') {
-      // Customer ledger
-      const customerId = searchParams.get('customer_id');
-      
-      if (!customerId) {
-        return NextResponse.json({ 
-          error: 'Customer ID is required for ledger report' 
-        }, { status: 400 });
-      }
-
-      const customerInvoices = await InvoiceModel.find({
-        customer_id: customerId,
-        status: { $ne: 'Cancelled' }
-      })
-      .sort({ invoice_date: 1 })
-      .populate('customer_id', 'name email phone');
-
-      const ledgerSummary = {
-        total_invoices: customerInvoices.length,
-        total_amount: customerInvoices.reduce((sum, inv) => sum + inv.grand_total, 0),
-        total_paid: customerInvoices.reduce((sum, inv) => sum + inv.paid_amount, 0),
-        total_outstanding: customerInvoices.reduce((sum, inv) => sum + inv.balance_due, 0),
-      };
-
-      return NextResponse.json({
-        success: true,
-        report_type: 'Customer Ledger',
-        customer: customerInvoices[0]?.customer_id || null,
-        summary: ledgerSummary,
-        transactions: customerInvoices,
-      });
-    }
-
-    return NextResponse.json({ error: 'Invalid report type' }, { status: 400 });
   } catch (error) {
-    console.error('Error generating business report:', error);
+    console.error('Error generating report:', error);
     return NextResponse.json({ error: 'Failed to generate report' }, { status: 500 });
   }
+}
+
+async function getOverviewReport(from_date: string | null, to_date: string | null) {
+  let invoiceQuery = supabaseAdmin.from('invoices').select('id, grand_total, balance_due, payment_status, salesman_id, customer_id, created_at');
+  let purchaseQuery = supabaseAdmin.from('purchases').select('id, final_amount, payment_status, created_at');
+
+  if (from_date) {
+    invoiceQuery = invoiceQuery.gte('created_at', new Date(from_date).toISOString());
+    purchaseQuery = purchaseQuery.gte('created_at', new Date(from_date).toISOString());
+  }
+  if (to_date) {
+    invoiceQuery = invoiceQuery.lte('created_at', new Date(to_date).toISOString());
+    purchaseQuery = purchaseQuery.lte('created_at', new Date(to_date).toISOString());
+  }
+
+  const [invoicesRes, purchasesRes, customersRes, productsRes] = await Promise.all([
+    invoiceQuery,
+    purchaseQuery,
+    supabaseAdmin.from('customers').select('id, name'),
+    supabaseAdmin.from('products').select('id, name'),
+  ]);
+
+  const invoices = invoicesRes.data || [];
+  const purchases = purchasesRes.data || [];
+
+  // Fetch invoice items for top products
+  const invoiceIds = invoices.map(i => i.id);
+  let invoiceItems: Record<string, unknown>[] = [];
+  if (invoiceIds.length > 0) {
+    const { data } = await supabaseAdmin.from('invoice_items').select('invoice_id, product_name, quantity, total').in('invoice_id', invoiceIds);
+    invoiceItems = data || [];
+  }
+
+  const totalRevenue = invoices.reduce((sum, i) => sum + Number(i.grand_total || 0), 0);
+  const totalPurchases = purchases.reduce((sum, p) => sum + Number(p.final_amount || 0), 0);
+  const totalOutstanding = invoices.reduce((sum, i) => sum + Number(i.balance_due || 0), 0);
+  const grossProfit = totalRevenue - totalPurchases;
+
+  // Top products by revenue
+  const productRevenue = new Map<string, { name: string; quantity: number; revenue: number }>();
+  for (const item of invoiceItems) {
+    const name = String(item.product_name || 'Unknown');
+    const existing = productRevenue.get(name) || { name, quantity: 0, revenue: 0 };
+    existing.quantity += Number(item.quantity || 0);
+    existing.revenue += Number(item.total || 0);
+    productRevenue.set(name, existing);
+  }
+  const topProducts = Array.from(productRevenue.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 10);
+
+  // Top salesmen by revenue
+  const salesmenRevenue = new Map<string, { id: string; revenue: number; invoiceCount: number }>();
+  for (const inv of invoices) {
+    if (!inv.salesman_id) continue;
+    const existing = salesmenRevenue.get(inv.salesman_id) || { id: inv.salesman_id, revenue: 0, invoiceCount: 0 };
+    existing.revenue += Number(inv.grand_total || 0);
+    existing.invoiceCount++;
+    salesmenRevenue.set(inv.salesman_id, existing);
+  }
+  const topSalesmenIds = Array.from(salesmenRevenue.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 10);
+  const salesmenIds = topSalesmenIds.map(s => s.id);
+  let salesmenMap = new Map<string, string>();
+  if (salesmenIds.length) {
+    const { data: salesmen } = await supabaseAdmin.from('users').select('id, name').in('id', salesmenIds);
+    salesmenMap = new Map((salesmen || []).map(s => [s.id, s.name]));
+  }
+  const topSalesmen = topSalesmenIds.map(s => ({
+    name: salesmenMap.get(s.id) || 'Unknown',
+    revenue: s.revenue,
+    invoiceCount: s.invoiceCount,
+  }));
+
+  return NextResponse.json({
+    success: true,
+    report: {
+      type: 'overview',
+      totalRevenue,
+      totalPurchases,
+      grossProfit,
+      totalOutstanding,
+      totalInvoices: invoices.length,
+      totalPurchaseOrders: purchases.length,
+      totalCustomers: (customersRes.data || []).length,
+      totalProducts: (productsRes.data || []).length,
+      topProducts,
+      topSalesmen,
+    },
+  });
+}
+
+async function getProfitLossReport(from_date: string | null, to_date: string | null) {
+  let invoiceQuery = supabaseAdmin.from('invoices').select('id, grand_total, tax_amount, created_at');
+  let purchaseQuery = supabaseAdmin.from('purchases').select('id, final_amount, tax_amount, created_at');
+
+  if (from_date) {
+    invoiceQuery = invoiceQuery.gte('created_at', new Date(from_date).toISOString());
+    purchaseQuery = purchaseQuery.gte('created_at', new Date(from_date).toISOString());
+  }
+  if (to_date) {
+    invoiceQuery = invoiceQuery.lte('created_at', new Date(to_date).toISOString());
+    purchaseQuery = purchaseQuery.lte('created_at', new Date(to_date).toISOString());
+  }
+
+  const [invoicesRes, purchasesRes] = await Promise.all([invoiceQuery, purchaseQuery]);
+  const invoices = invoicesRes.data || [];
+  const purchases = purchasesRes.data || [];
+
+  const totalRevenue = invoices.reduce((sum, i) => sum + Number(i.grand_total || 0), 0);
+  const totalCost = purchases.reduce((sum, p) => sum + Number(p.final_amount || 0), 0);
+  const salesTax = invoices.reduce((sum, i) => sum + Number(i.tax_amount || 0), 0);
+  const purchaseTax = purchases.reduce((sum, p) => sum + Number(p.tax_amount || 0), 0);
+  const grossProfit = totalRevenue - totalCost;
+  const netTax = salesTax - purchaseTax;
+  const netProfit = grossProfit - netTax;
+
+  // Monthly breakdown
+  const monthlyData = new Map<string, { revenue: number; cost: number; profit: number }>();
+
+  for (const inv of invoices) {
+    const month = inv.created_at ? new Date(inv.created_at).toISOString().substring(0, 7) : 'unknown';
+    const existing = monthlyData.get(month) || { revenue: 0, cost: 0, profit: 0 };
+    existing.revenue += Number(inv.grand_total || 0);
+    monthlyData.set(month, existing);
+  }
+  for (const pur of purchases) {
+    const month = pur.created_at ? new Date(pur.created_at).toISOString().substring(0, 7) : 'unknown';
+    const existing = monthlyData.get(month) || { revenue: 0, cost: 0, profit: 0 };
+    existing.cost += Number(pur.final_amount || 0);
+    monthlyData.set(month, existing);
+  }
+  for (const [, data] of monthlyData) {
+    data.profit = data.revenue - data.cost;
+  }
+
+  const monthly = Array.from(monthlyData.entries())
+    .map(([month, data]) => ({ month, ...data }))
+    .sort((a, b) => a.month.localeCompare(b.month));
+
+  return NextResponse.json({
+    success: true,
+    report: {
+      type: 'profit_loss',
+      totalRevenue,
+      totalCost,
+      grossProfit,
+      salesTax,
+      purchaseTax,
+      netTax,
+      netProfit,
+      profitMargin: totalRevenue > 0 ? Math.round((grossProfit / totalRevenue) * 100) : 0,
+      monthly,
+    },
+  });
+}
+
+async function getSalesPerformanceReport(from_date: string | null, to_date: string | null) {
+  let invoiceQuery = supabaseAdmin.from('invoices').select('id, grand_total, balance_due, payment_status, salesman_id, customer_id, created_at');
+  if (from_date) invoiceQuery = invoiceQuery.gte('created_at', new Date(from_date).toISOString());
+  if (to_date) invoiceQuery = invoiceQuery.lte('created_at', new Date(to_date).toISOString());
+
+  const { data: invoices } = await invoiceQuery;
+  const invs = invoices || [];
+
+  // Group by salesman
+  const salesmanStats = new Map<string, { revenue: number; collected: number; outstanding: number; invoiceCount: number; customers: Set<string> }>();
+  for (const inv of invs) {
+    const sid = inv.salesman_id || 'unassigned';
+    const existing = salesmanStats.get(sid) || { revenue: 0, collected: 0, outstanding: 0, invoiceCount: 0, customers: new Set() };
+    existing.revenue += Number(inv.grand_total || 0);
+    existing.outstanding += Number(inv.balance_due || 0);
+    existing.collected += Number(inv.grand_total || 0) - Number(inv.balance_due || 0);
+    existing.invoiceCount++;
+    if (inv.customer_id) existing.customers.add(inv.customer_id);
+    salesmanStats.set(sid, existing);
+  }
+
+  const salesmanIds = Array.from(salesmanStats.keys()).filter(id => id !== 'unassigned');
+  let salesmenMap = new Map<string, string>();
+  if (salesmanIds.length) {
+    const { data: salesmen } = await supabaseAdmin.from('users').select('id, name').in('id', salesmanIds);
+    salesmenMap = new Map((salesmen || []).map(s => [s.id, s.name]));
+  }
+
+  const performance = Array.from(salesmanStats.entries()).map(([id, stats]) => ({
+    salesman_id: id,
+    salesman_name: id === 'unassigned' ? 'Unassigned' : (salesmenMap.get(id) || 'Unknown'),
+    revenue: stats.revenue,
+    collected: stats.collected,
+    outstanding: stats.outstanding,
+    invoiceCount: stats.invoiceCount,
+    customerCount: stats.customers.size,
+    collectionRate: stats.revenue > 0 ? Math.round((stats.collected / stats.revenue) * 100) : 0,
+  })).sort((a, b) => b.revenue - a.revenue);
+
+  return NextResponse.json({ success: true, report: { type: 'sales_performance', performance } });
+}
+
+async function getCustomerLedgerReport(customer_id: string | null, from_date: string | null, to_date: string | null) {
+  if (!customer_id) {
+    return NextResponse.json({ error: 'customer_id is required for ledger report' }, { status: 400 });
+  }
+
+  const { data: customer } = await supabaseAdmin.from('customers').select('*').eq('id', customer_id).single();
+  if (!customer) return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+
+  let invoiceQuery = supabaseAdmin.from('invoices').select('id, invoice_number, grand_total, balance_due, payment_status, created_at, due_date').eq('customer_id', customer_id);
+  if (from_date) invoiceQuery = invoiceQuery.gte('created_at', new Date(from_date).toISOString());
+  if (to_date) invoiceQuery = invoiceQuery.lte('created_at', new Date(to_date).toISOString());
+
+  const { data: invoices } = await invoiceQuery.order('created_at', { ascending: true });
+  const invs = invoices || [];
+
+  const invoiceIds = invs.map(i => i.id);
+  let payments: Record<string, unknown>[] = [];
+  if (invoiceIds.length) {
+    const { data } = await supabaseAdmin.from('payments').select('id, invoice_id, amount, payment_date, payment_method, status').in('invoice_id', invoiceIds).eq('status', 'confirmed');
+    payments = data || [];
+  }
+
+  // Build ledger entries
+  const ledgerEntries: Record<string, unknown>[] = [];
+  let runningBalance = 0;
+
+  for (const inv of invs) {
+    runningBalance += Number(inv.grand_total || 0);
+    ledgerEntries.push({
+      date: inv.created_at,
+      type: 'invoice',
+      description: `Invoice ${inv.invoice_number}`,
+      debit: Number(inv.grand_total || 0),
+      credit: 0,
+      balance: runningBalance,
+      reference_id: inv.id,
+    });
+
+    // Add payments for this invoice
+    const invPayments = payments.filter(p => (p as Record<string, unknown>).invoice_id === inv.id);
+    for (const payment of invPayments) {
+      const p = payment as Record<string, unknown>;
+      const amount = Number(p.amount || 0);
+      runningBalance -= amount;
+      ledgerEntries.push({
+        date: p.payment_date || p.created_at,
+        type: 'payment',
+        description: `Payment (${p.payment_method})`,
+        debit: 0,
+        credit: amount,
+        balance: runningBalance,
+        reference_id: p.id,
+      });
+    }
+  }
+
+  const totalInvoiced = invs.reduce((sum, i) => sum + Number(i.grand_total || 0), 0);
+  const totalPaid = payments.reduce((sum, p) => sum + Number((p as Record<string, unknown>).amount || 0), 0);
+
+  return NextResponse.json({
+    success: true,
+    report: {
+      type: 'customer_ledger',
+      customer: { _id: customer.id, ...customer },
+      totalInvoiced,
+      totalPaid,
+      outstandingBalance: totalInvoiced - totalPaid,
+      ledgerEntries,
+    },
+  });
 }

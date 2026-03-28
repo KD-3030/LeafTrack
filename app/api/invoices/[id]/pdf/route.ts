@@ -1,23 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { connectDB } from '@/lib/mongodb';
-import Invoice from '@/models/Invoice';
-import Customer from '@/models/Customer';
-import CompanySettings from '@/models/CompanySettings';
-import User from '@/models/User';
-import { verifyToken } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAuth } from '@/lib/authMiddleware';
 import { normalizeRoleId } from '@/lib/roles';
 import QRCode from 'qrcode';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
-
-interface JwtPayload {
-  userId: string;
-  role: string;
-}
 
 function escapeHtml(value: unknown): string {
   return String(value ?? '')
@@ -162,45 +153,46 @@ async function resolveLaunchConfig(): Promise<LaunchConfig> {
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    await connectDB();
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+    const decoded = authResult;
 
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const { data: invoice, error: invErr } = await supabaseAdmin
+      .from('invoices')
+      .select('*')
+      .eq('id', params.id)
+      .single();
 
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token) as JwtPayload | null;
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
-
-    const invoice = await Invoice.findById(params.id).lean();
-    if (!invoice) {
+    if (invErr || !invoice) {
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
 
     const roleId = normalizeRoleId(decoded.role);
     if (roleId === 'secondary_executive') {
-      if (invoice.salesman_id?.toString() !== decoded.userId) {
+      if (invoice.salesman_id !== decoded.userId) {
         return NextResponse.json({ error: 'Access denied' }, { status: 403 });
       }
     } else if (roleId === 'primary_executive') {
-      const secondaries = await User.find({
-        managerId: decoded.userId,
-        role: 'SecondaryExecutive',
-        approval_status: 'approved',
-      }).select('_id').lean();
+      const { data: secondaries } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('manager_id', decoded.userId)
+        .eq('role', 'secondary_executive')
+        .eq('approval_status', 'approved');
 
-      const teamIds = new Set([decoded.userId, ...secondaries.map((s) => s._id.toString())]);
-      if (!teamIds.has(invoice.salesman_id?.toString())) {
+      const teamIds = new Set([decoded.userId, ...(secondaries || []).map(s => s.id)]);
+      if (!teamIds.has(invoice.salesman_id)) {
         return NextResponse.json({ error: 'Access denied' }, { status: 403 });
       }
     }
 
-    const customer = await Customer.findById(invoice.customer_id).select('outstanding_balance').lean();
-    const rawSettings = await CompanySettings.findOne().lean();
-    const settings = (rawSettings || null) as Record<string, unknown> | null;
+    const [customerRes, settingsRes] = await Promise.all([
+      supabaseAdmin.from('customers').select('outstanding_balance').eq('id', invoice.customer_id).single(),
+      supabaseAdmin.from('company_settings').select('*').limit(1).single(),
+    ]);
+
+    const customer = customerRes.data;
+    const settings = settingsRes.data as Record<string, unknown> | null;
 
     const origin = request.nextUrl.origin;
     const companyName = (settings?.company_name as string | undefined) || invoice.company_details?.name || 'Company Name';

@@ -34,7 +34,7 @@ const nextConfig = {
   productionBrowserSourceMaps: false,
 
   experimental: {
-    serverComponentsExternalPackages: ['mongoose', 'bcryptjs'],
+    serverComponentsExternalPackages: ['bcryptjs'],
   },
 
   eslint: {

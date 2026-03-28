@@ -1,136 +1,99 @@
 import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import Seller from '@/models/Seller';
-import { verifyToken } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAuth, requireAdminAuth } from '@/lib/authMiddleware';
+import { withIds, withId } from '@/lib/supabase-helpers';
 
 // GET /api/sellers - Get all sellers
 export async function GET(request: NextRequest) {
   try {
-    await connectDB();
-
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
     const { searchParams } = new URL(request.url);
     const search = searchParams.get('search');
     const is_active = searchParams.get('is_active');
 
-    // Build query
-    interface QueryType {
-      is_active?: boolean;
-      $or?: Array<{ [key: string]: { $regex: string; $options: string } }>;
-    }
-    const query: QueryType = {};
+    let query = supabaseAdmin.from('sellers').select('*');
 
     if (is_active !== null && is_active !== undefined && is_active !== '') {
-      query.is_active = is_active === 'true';
+      query = query.eq('is_active', is_active === 'true');
     }
 
     if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { gstin: { $regex: search, $options: 'i' } },
-        { contact_person: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
-        { city: { $regex: search, $options: 'i' } },
-      ];
+      query = query.or(`name.ilike.%${search}%,gstin.ilike.%${search}%,contact_person.ilike.%${search}%,phone.ilike.%${search}%,city.ilike.%${search}%`);
     }
 
-    const sellers = await Seller.find(query)
-      .sort({ name: 1 })
-      .lean();
+    const { data, error } = await query.order('name', { ascending: true });
+
+    if (error) throw error;
 
     return NextResponse.json({
       success: true,
-      sellers,
-      count: sellers.length,
+      sellers: withIds(data || []),
+      count: (data || []).length,
     });
   } catch (error) {
     console.error('Error fetching sellers:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch sellers' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to fetch sellers' }, { status: 500 });
   }
 }
 
 // POST /api/sellers - Create a new seller
 export async function POST(request: NextRequest) {
   try {
-    await connectDB();
-
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
-
-    // Check if admin
-    if (decoded.role !== 'Admin') {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
+    const authResult = requireAdminAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
     const body = await request.json();
 
-    // Validate required field
     if (!body.name || body.name.trim() === '') {
-      return NextResponse.json(
-        { error: 'Seller name is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Seller name is required' }, { status: 400 });
     }
 
     // Check for duplicate GSTIN if provided
     if (body.gstin) {
-      const existingGstin = await Seller.findOne({ gstin: body.gstin.toUpperCase() });
-      if (existingGstin) {
-        return NextResponse.json(
-          { error: 'A seller with this GSTIN already exists' },
-          { status: 400 }
-        );
+      const { data: existing } = await supabaseAdmin
+        .from('sellers')
+        .select('id')
+        .eq('gstin', body.gstin.toUpperCase())
+        .maybeSingle();
+
+      if (existing) {
+        return NextResponse.json({ error: 'A seller with this GSTIN already exists' }, { status: 400 });
       }
     }
 
-    const seller = new Seller({
-      name: body.name.trim(),
-      gstin: body.gstin?.trim().toUpperCase(),
-      contact_person: body.contact_person?.trim(),
-      phone: body.phone?.trim(),
-      email: body.email?.trim().toLowerCase(),
-      address: body.address?.trim(),
-      city: body.city?.trim(),
-      state: body.state?.trim(),
-      pincode: body.pincode?.trim(),
-      bank_name: body.bank_name?.trim(),
-      account_number: body.account_number?.trim(),
-      ifsc_code: body.ifsc_code?.trim().toUpperCase(),
-      notes: body.notes?.trim(),
-      is_active: body.is_active !== false,
-    });
+    const { data, error } = await supabaseAdmin
+      .from('sellers')
+      .insert({
+        name: body.name.trim(),
+        gstin: body.gstin?.trim().toUpperCase() || null,
+        contact_person: body.contact_person?.trim() || null,
+        phone: body.phone?.trim() || null,
+        email: body.email?.trim().toLowerCase() || null,
+        address: body.address?.trim() || null,
+        city: body.city?.trim() || null,
+        state: body.state?.trim() || null,
+        pincode: body.pincode?.trim() || null,
+        bank_name: body.bank_name?.trim() || null,
+        account_number: body.account_number?.trim() || null,
+        ifsc_code: body.ifsc_code?.trim().toUpperCase() || null,
+        upi_id: body.upi_id?.trim() || null,
+        notes: body.notes?.trim() || null,
+        is_active: body.is_active !== false,
+      })
+      .select()
+      .single();
 
-    await seller.save();
+    if (error) throw error;
 
     return NextResponse.json({
       success: true,
       message: 'Seller created successfully',
-      seller,
+      seller: withId(data),
     }, { status: 201 });
   } catch (error) {
     console.error('Error creating seller:', error);
-    return NextResponse.json(
-      { error: 'Failed to create seller' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to create seller' }, { status: 500 });
   }
 }

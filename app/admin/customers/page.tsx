@@ -591,7 +591,7 @@ export default function CustomersPage() {
   const uniqueStates = [...new Set(customers.map(c => c.state).filter(Boolean))];
 
   return (
-    <div className="min-h-screen bg-[#F5F5DC] p-6">
+    <div className="min-h-screen bg-background p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -604,7 +604,7 @@ export default function CustomersPage() {
               resetForm();
               setIsCreateDialogOpen(true);
             }}
-            className="bg-green-600 hover:bg-green-700"
+            className=""
           >
             <Plus className="h-4 w-4 mr-2" />
             Add Customer
@@ -1076,7 +1076,7 @@ export default function CustomersPage() {
                 >
                   Cancel
                 </Button>
-                <Button type="submit" className="bg-green-600 hover:bg-green-700">
+                <Button type="submit" className="">
                   {editingCustomer ? 'Update Customer' : 'Create Customer'}
                 </Button>
               </div>

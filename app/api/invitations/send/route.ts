@@ -1,105 +1,83 @@
-import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import Invitation from '@/models/Invitation';
-import User from '@/models/User';
+﻿import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase-server';
 import { requireAdminAuth } from '@/lib/authMiddleware';
-import { generateSecureToken } from '@/lib/security';
-import { normalizeRoleId, roleIdToDbRole } from '@/lib/roles';
+import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    await connectDB();
-
     const authResult = requireAdminAuth(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
-    }
+    if (authResult instanceof NextResponse) return authResult;
+    const decoded = authResult;
 
-    const { email, role, managerId } = await request.json();
+    const body = await request.json();
+    const { email, role, manager_id } = body;
 
     if (!email || !role) {
-      return NextResponse.json(
-        { success: false, error: 'email and role are required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Email and role are required' }, { status: 400 });
     }
 
-    const roleId = normalizeRoleId(role);
-    if (!roleId || (roleId !== 'primary_executive' && roleId !== 'secondary_executive')) {
-      return NextResponse.json(
-        { success: false, error: 'Role must be primary_executive or secondary_executive' },
-        { status: 400 }
-      );
+    // Check if user already exists
+    const { data: existingUser } = await supabaseAdmin.from('users').select('id').eq('email', email.toLowerCase()).single();
+    if (existingUser) {
+      return NextResponse.json({ error: 'User with this email already exists' }, { status: 400 });
     }
 
-    if (roleId === 'secondary_executive' && !managerId) {
-      return NextResponse.json(
-        { success: false, error: 'managerId is required for secondary_executive invites' },
-        { status: 400 }
-      );
+    // Check for existing unused invitation
+    const { data: existingInvitation } = await supabaseAdmin
+      .from('invitations')
+      .select('id')
+      .eq('email', email.toLowerCase())
+      .eq('used', false)
+      .gt('expires_at', new Date().toISOString())
+      .single();
+    if (existingInvitation) {
+      return NextResponse.json({ error: 'An active invitation already exists for this email' }, { status: 400 });
     }
 
-    if (managerId) {
-      const manager = await User.findById(managerId);
-      if (!manager || manager.role !== 'PrimaryExecutive') {
-        return NextResponse.json(
-          { success: false, error: 'managerId must belong to a primary executive' },
-          { status: 400 }
-        );
+    // Validate manager if role requires it
+    if (role === 'SecondaryExecutive' && !manager_id) {
+      return NextResponse.json({ error: 'Manager is required for Secondary Executive role' }, { status: 400 });
+    }
+    if (manager_id) {
+      const { data: manager } = await supabaseAdmin.from('users').select('id, role').eq('id', manager_id).single();
+      if (!manager) {
+        return NextResponse.json({ error: 'Manager not found' }, { status: 404 });
       }
     }
 
-    const existingUser = await User.findOne({ email: String(email).toLowerCase() });
-    if (existingUser) {
-      return NextResponse.json(
-        { success: false, error: 'User already exists with this email' },
-        { status: 400 }
-      );
-    }
+    // Generate invitation token
+    const invitationToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7); // 7 days expiry
 
-    const activeInvite = await Invitation.findOne({
-      email: String(email).toLowerCase(),
-      used: false,
-      expires_at: { $gt: new Date() },
-    });
-
-    if (activeInvite) {
-      return NextResponse.json(
-        { success: false, error: 'An active invitation already exists for this email' },
-        { status: 400 }
-      );
-    }
-
-    const token = generateSecureToken(24);
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-
-    const invitation = await Invitation.create({
-      token,
-      email: String(email).toLowerCase(),
-      role: roleIdToDbRole(roleId),
-      managerId: managerId || undefined,
-      invited_by: authResult.userId,
-      expires_at: expiresAt,
-    });
+    const { data: invitation, error } = await supabaseAdmin
+      .from('invitations')
+      .insert({
+        email: email.toLowerCase(),
+        role,
+        manager_id: manager_id || null,
+        token: invitationToken,
+        expires_at: expiresAt.toISOString(),
+        used: false,
+        created_by: decoded.userId,
+      })
+      .select()
+      .single();
+    if (error) throw error;
 
     return NextResponse.json({
       success: true,
+      message: 'Invitation created successfully',
       invitation: {
-        id: invitation._id,
-        email: invitation.email,
-        role: invitation.role,
-        managerId: invitation.managerId,
-        expires_at: invitation.expires_at,
+        ...invitation,
+        _id: invitation.id,
+        signupUrl: `/signup?token=${invitationToken}`,
       },
-      inviteLink: `/signup?token=${token}`,
     });
   } catch (error) {
-    console.error('Invitation send error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('Error sending invitation:', error);
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to send invitation' }, { status: 500 });
   }
 }

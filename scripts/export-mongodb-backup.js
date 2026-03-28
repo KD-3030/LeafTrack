@@ -20,7 +20,8 @@ if (!MONGODB_URI) {
   process.exit(1);
 }
 
-const BACKUP_DIR = path.resolve(__dirname, '..', 'backups', `mongodb-backup-${new Date().toISOString().slice(0, 10)}`);
+const BACKUP_BASE = process.env.BACKUP_PATH || path.resolve(__dirname, '..', 'backups');
+const BACKUP_DIR = path.join(BACKUP_BASE, `mongodb-backup-${new Date().toISOString().slice(0, 10)}`);
 
 async function exportAll() {
   const client = new MongoClient(MONGODB_URI);

@@ -4,7 +4,6 @@ import { Montserrat, Playfair_Display, Inter } from 'next/font/google';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { Toaster } from '@/components/ui/sonner';
 import { PageErrorBoundary } from '@/components/ErrorBoundary';
-import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const montserrat = Montserrat({ 
   subsets: ['latin'],
@@ -36,14 +35,13 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={`${montserrat.variable} ${playfair.variable} ${inter.variable} font-sans bg-[#F5F5DC] antialiased`} suppressHydrationWarning={true}>
+        <body className={`${montserrat.variable} ${playfair.variable} ${inter.variable} font-sans antialiased`} suppressHydrationWarning={true}>
         <PageErrorBoundary>
           <AuthProvider>
             {children}
             <Toaster />
           </AuthProvider>
         </PageErrorBoundary>
-        <SpeedInsights />
       </body>
     </html>
   );

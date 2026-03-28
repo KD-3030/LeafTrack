@@ -29,14 +29,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, []);
 
-  const login = async (email: string, password: string, role: string): Promise<{ success: boolean; error?: string }> => {
+  const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ email, password, role }),
+        body: JSON.stringify({ email, password }),
       });
 
       const data = await response.json();
@@ -53,10 +53,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       setUser(data.user);
       
-      // Redirect based on role aliases.
+      // Redirect based on role
       const roleId = normalizeRoleId(data.user.role);
       if (roleId === 'admin') {
         router.replace('/admin/dashboard');
+      } else if (roleId === 'primary_executive') {
+        router.replace('/executive/dashboard');
       } else {
         router.replace('/salesman/dashboard');
       }

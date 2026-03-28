@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import BOM from '@/models/BOM';
-import Product from '@/models/Product';
-import { verifyToken } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAdminAuth } from '@/lib/authMiddleware';
+import { withId } from '@/lib/supabase-helpers';
+
+export const dynamic = 'force-dynamic';
 
 // GET /api/boms/[id] - Get single BOM
 export async function GET(
@@ -10,27 +11,28 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
+    const authResult = requireAdminAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const { data: bom, error } = await supabaseAdmin
+      .from('boms')
+      .select('*')
+      .eq('id', params.id)
+      .single();
 
-    const decoded = verifyToken(token);
-    if (!decoded || decoded.role?.toLowerCase() !== 'admin') {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
-
-    const bom = await BOM.findById(params.id).lean();
-
-    if (!bom) {
+    if (error || !bom) {
       return NextResponse.json({ error: 'BOM not found' }, { status: 404 });
     }
 
+    // Fetch materials
+    const { data: materials } = await supabaseAdmin
+      .from('bom_materials')
+      .select('*')
+      .eq('bom_id', params.id);
+
     return NextResponse.json({
       success: true,
-      bom,
+      bom: withId({ ...bom, materials: materials || [] }),
     });
   } catch (error) {
     console.error('Error fetching BOM:', error);
@@ -47,65 +49,108 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
+    const authResult = requireAdminAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    // Fetch existing BOM
+    const { data: bom, error: fetchError } = await supabaseAdmin
+      .from('boms')
+      .select('*')
+      .eq('id', params.id)
+      .single();
 
-    const decoded = verifyToken(token);
-    if (!decoded || decoded.role?.toLowerCase() !== 'admin') {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
-
-    const bom = await BOM.findById(params.id);
-
-    if (!bom) {
+    if (fetchError || !bom) {
       return NextResponse.json({ error: 'BOM not found' }, { status: 404 });
     }
 
     const body = await request.json();
 
-    // Update fields
-    if (body.materials !== undefined) bom.materials = body.materials;
-    if (body.overhead_percentage !== undefined) bom.overhead_percentage = body.overhead_percentage;
-    if (body.notes !== undefined) bom.notes = body.notes;
-    if (body.status !== undefined) bom.status = body.status;
+    // Prepare update fields for BOM
+    const bomUpdate: Record<string, unknown> = {};
+    if (body.overhead_percentage !== undefined) bomUpdate.overhead_percentage = body.overhead_percentage;
+    if (body.notes !== undefined) bomUpdate.notes = body.notes;
+    if (body.status !== undefined) bomUpdate.status = body.status;
+    if (body.total_manufacturing_cost !== undefined) bomUpdate.total_manufacturing_cost = body.total_manufacturing_cost;
+    if (body.final_cost !== undefined) bomUpdate.final_cost = body.final_cost;
 
     // Handle is_current flag
-    if (body.is_current !== undefined || body.status === 'active') {
-      const shouldBeCurrent = body.is_current || body.status === 'active';
-      
-      if (shouldBeCurrent && !bom.is_current) {
-        // Unset other current BOMs for this product
-        await BOM.updateMany(
-          { product_id: bom.product_id, _id: { $ne: bom._id }, is_current: true },
-          { is_current: false }
-        );
-        bom.is_current = true;
-      } else if (!shouldBeCurrent) {
-        bom.is_current = false;
-      }
+    const shouldBeCurrent = body.is_current || body.status === 'active';
+    if (shouldBeCurrent && !bom.is_current) {
+      // Unset other current BOMs for this product
+      await supabaseAdmin
+        .from('boms')
+        .update({ is_current: false })
+        .eq('product_id', bom.product_id)
+        .eq('is_current', true)
+        .neq('id', params.id);
+
+      bomUpdate.is_current = true;
+    } else if (body.is_current === false) {
+      bomUpdate.is_current = false;
     }
 
-    await bom.save();
+    // Update BOM
+    const { data: updatedBom, error: updateError } = await supabaseAdmin
+      .from('boms')
+      .update(bomUpdate)
+      .eq('id', params.id)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error('BOM update error:', updateError);
+      return NextResponse.json(
+        { error: 'Failed to update BOM' },
+        { status: 500 }
+      );
+    }
+
+    // Handle materials update if provided
+    if (body.materials !== undefined && Array.isArray(body.materials)) {
+      // Delete existing materials
+      await supabaseAdmin
+        .from('bom_materials')
+        .delete()
+        .eq('bom_id', params.id);
+
+      // Insert new materials
+      if (body.materials.length > 0) {
+        const materialsToInsert = body.materials.map((m: Record<string, unknown>) => ({
+          bom_id: params.id,
+          material_id: m.material_id,
+          material_name: m.material_name,
+          quantity: m.quantity,
+          unit: m.unit,
+          cost_per_unit: m.cost_per_unit,
+          total_cost: m.total_cost,
+        }));
+
+        await supabaseAdmin
+          .from('bom_materials')
+          .insert(materialsToInsert);
+      }
+    }
 
     // Update product manufacturing cost if this is the current BOM
-    if (bom.is_current) {
-      const product = await Product.findById(bom.product_id);
-      if (product) {
-        product.manufacturingCost = bom.final_cost;
-        await product.save();
-        
-        console.log(`✅ Updated product ${product.name} manufacturing cost to ₹${bom.final_cost}`);
-      }
+    if (updatedBom.is_current && updatedBom.final_cost) {
+      await supabaseAdmin
+        .from('products')
+        .update({ manufacturing_cost: updatedBom.final_cost })
+        .eq('id', updatedBom.product_id);
+
+      console.log(`Updated product manufacturing cost to ₹${updatedBom.final_cost}`);
     }
+
+    // Fetch updated materials for response
+    const { data: materials } = await supabaseAdmin
+      .from('bom_materials')
+      .select('*')
+      .eq('bom_id', params.id);
 
     return NextResponse.json({
       success: true,
-      message: 'BOM updated successfully' + (bom.is_current ? ' and product cost updated' : ''),
-      bom,
+      message: 'BOM updated successfully' + (updatedBom.is_current ? ' and product cost updated' : ''),
+      bom: withId({ ...updatedBom, materials: materials || [] }),
     });
   } catch (error) {
     console.error('Error updating BOM:', error);
@@ -122,21 +167,16 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    await connectDB();
+    const authResult = requireAdminAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
-    const token = request.headers.get('authorization')?.split(' ')[1];
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const { data: bom, error: fetchError } = await supabaseAdmin
+      .from('boms')
+      .select('id, is_current, status')
+      .eq('id', params.id)
+      .single();
 
-    const decoded = verifyToken(token);
-    if (!decoded || decoded.role?.toLowerCase() !== 'admin') {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
-
-    const bom = await BOM.findById(params.id);
-
-    if (!bom) {
+    if (fetchError || !bom) {
       return NextResponse.json({ error: 'BOM not found' }, { status: 404 });
     }
 
@@ -148,7 +188,19 @@ export async function DELETE(
       );
     }
 
-    await BOM.findByIdAndDelete(params.id);
+    // Delete BOM (bom_materials cascade via ON DELETE CASCADE)
+    const { error } = await supabaseAdmin
+      .from('boms')
+      .delete()
+      .eq('id', params.id);
+
+    if (error) {
+      console.error('BOM delete error:', error);
+      return NextResponse.json(
+        { error: 'Failed to delete BOM' },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,

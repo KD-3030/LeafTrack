@@ -679,7 +679,7 @@ export default function FinancialDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F5F5DC] p-6">
+    <div className="min-h-screen bg-background p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -1106,7 +1106,7 @@ export default function FinancialDashboard() {
                           <Button
                             size="sm"
                             onClick={() => openPaymentDialog(invoice)}
-                            className="bg-green-600 hover:bg-green-700"
+                            className=""
                           >
                             <Plus className="h-4 w-4 mr-1" />
                             Record Payment
@@ -1580,7 +1580,7 @@ export default function FinancialDashboard() {
                   </Button>
                   <Button
                     onClick={recordPayment}
-                    className="bg-green-600 hover:bg-green-700"
+                    className=""
                     disabled={paymentForm.amount_paid <= 0}
                   >
                     Record Payment

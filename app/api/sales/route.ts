@@ -1,33 +1,21 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { connectDB } from '@/lib/mongodb';
-import Sale from '@/models/Sale';
-import Assignment from '@/models/Assignment';
-// import Product from '@/models/Product';
-import Customer from '@/models/Customer';
-import User from '@/models/User';
-// import User from '@/models/User';
+﻿import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase-server';
 import { requireAuth } from '@/lib/authMiddleware';
 import { normalizeRoleId } from '@/lib/roles';
+import { withId } from '@/lib/supabase-helpers';
 
 export const dynamic = 'force-dynamic';
 
-// GET - List all sales with enhanced filtering
 export async function GET(request: NextRequest) {
   try {
-    await connectDB();
-    
     const authResult = requireAuth(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
-    }
+    if (authResult instanceof NextResponse) return authResult;
     const decoded = authResult;
-    const currentUser = await User.findById(decoded.userId).select('role managerId');
-    if (!currentUser) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
+
+    const { data: currentUser } = await supabaseAdmin.from('users').select('id, role, manager_id').eq('id', decoded.userId).single();
+    if (!currentUser) return NextResponse.json({ error: 'User not found' }, { status: 404 });
     const roleId = normalizeRoleId(currentUser.role);
 
-    // Get query parameters for filtering
     const { searchParams } = new URL(request.url);
     const salesmanId = searchParams.get('salesman_id');
     const customerId = searchParams.get('customer_id');
@@ -37,56 +25,61 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '10');
     const invoiceGenerated = searchParams.get('invoice_generated');
 
-    // Build filter object
-    interface SaleFilter {
-      salesman_id?: string | { $in: string[] };
-      customer_id?: string;
-      invoice_generated?: boolean;
-      sale_date?: {
-        $gte?: Date;
-        $lte?: Date;
-      };
+    let query = supabaseAdmin.from('sales').select('*', { count: 'exact' });
+
+    if (salesmanId) query = query.eq('salesman_id', salesmanId);
+    if (customerId) query = query.eq('customer_id', customerId);
+    if (invoiceGenerated !== null && invoiceGenerated !== undefined && invoiceGenerated !== '') {
+      query = query.eq('invoice_generated', invoiceGenerated === 'true');
     }
-    
-    const filter: SaleFilter = {};
-    
-    if (salesmanId) filter.salesman_id = salesmanId;
-    if (customerId) filter.customer_id = customerId;
-    if (invoiceGenerated !== null) {
-      filter.invoice_generated = invoiceGenerated === 'true';
-    }
-    
-    if (fromDate || toDate) {
-      filter.sale_date = {};
-      if (fromDate) filter.sale_date.$gte = new Date(fromDate);
-      if (toDate) filter.sale_date.$lte = new Date(toDate);
-    }
+    if (fromDate) query = query.gte('sale_date', new Date(fromDate).toISOString());
+    if (toDate) query = query.lte('sale_date', new Date(toDate).toISOString());
 
     if (roleId === 'secondary_executive') {
-      filter.salesman_id = decoded.userId;
+      query = query.eq('salesman_id', decoded.userId);
     } else if (roleId === 'primary_executive') {
-      const teamMembers = await User.find({ managerId: decoded.userId }).select('_id');
-      filter.salesman_id = {
-        $in: [decoded.userId, ...teamMembers.map((member) => member._id.toString())],
-      };
+      const { data: team } = await supabaseAdmin.from('users').select('id').eq('manager_id', decoded.userId);
+      const teamIds = [decoded.userId, ...(team || []).map(m => m.id)];
+      query = query.in('salesman_id', teamIds);
     }
-    
-    // Get total count for pagination
-    const total = await Sale.countDocuments(filter);
-    
-    // Get sales with pagination and population
-    const sales = await Sale.find(filter)
-      .populate('assignment_id')
-      .populate('salesman_id', 'name email')
-      .populate('product_id', 'name manufacturingCost hsn_code gst_rate')
-      .populate('customer_id', 'name email phone')
-      .sort({ sale_date: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit);
+
+    const offset = (page - 1) * limit;
+    const { data: rawSales, count, error } = await query
+      .order('sale_date', { ascending: false })
+      .range(offset, offset + limit - 1);
+    if (error) throw error;
+    const sales = rawSales || [];
+    const total = count || 0;
+
+    // Enrich with related data
+    const uIds = [...new Set(sales.map(s => s.salesman_id).filter(Boolean))];
+    const pIds = [...new Set(sales.map(s => s.product_id).filter(Boolean))];
+    const cIds = [...new Set(sales.map(s => s.customer_id).filter(Boolean))];
+    const aIds = [...new Set(sales.map(s => s.assignment_id).filter(Boolean))];
+
+    const [uRes, pRes, cRes, aRes] = await Promise.all([
+      uIds.length ? supabaseAdmin.from('users').select('id, name, email').in('id', uIds) : { data: [] },
+      pIds.length ? supabaseAdmin.from('products').select('id, name, manufacturing_cost, hsn_code, gst_rate').in('id', pIds) : { data: [] },
+      cIds.length ? supabaseAdmin.from('customers').select('id, name, email, phone').in('id', cIds) : { data: [] },
+      aIds.length ? supabaseAdmin.from('assignments').select('*').in('id', aIds) : { data: [] },
+    ]);
+
+    const uMap = new Map((uRes.data || []).map(u => [u.id, u]));
+    const pMap = new Map((pRes.data || []).map(p => [p.id, p]));
+    const cMap = new Map((cRes.data || []).map(c => [c.id, c]));
+    const aMap = new Map((aRes.data || []).map(a => [a.id, a]));
+
+    const enriched = sales.map(s => ({
+      ...withId(s),
+      salesman_id: s.salesman_id && uMap.has(s.salesman_id) ? { _id: s.salesman_id, ...uMap.get(s.salesman_id) } : s.salesman_id,
+      product_id: s.product_id && pMap.has(s.product_id) ? { _id: s.product_id, ...pMap.get(s.product_id) } : s.product_id,
+      customer_id: s.customer_id && cMap.has(s.customer_id) ? { _id: s.customer_id, ...cMap.get(s.customer_id) } : s.customer_id,
+      assignment_id: s.assignment_id && aMap.has(s.assignment_id) ? { _id: s.assignment_id, ...aMap.get(s.assignment_id) } : s.assignment_id,
+    }));
 
     return NextResponse.json({
       success: true,
-      sales,
+      sales: enriched,
       pagination: {
         currentPage: page,
         totalPages: Math.ceil(total / limit),
@@ -101,73 +94,49 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST - Create new sale with customer integration
 export async function POST(request: NextRequest) {
   try {
-    await connectDB();
-    
     const authResult = requireAuth(request);
-    if (authResult instanceof NextResponse) {
-      return authResult;
-    }
+    if (authResult instanceof NextResponse) return authResult;
     const decoded = authResult;
-    const currentUser = await User.findById(decoded.userId).select('role managerId');
-    if (!currentUser) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
+
+    const { data: currentUser } = await supabaseAdmin.from('users').select('id, role, manager_id').eq('id', decoded.userId).single();
+    if (!currentUser) return NextResponse.json({ error: 'User not found' }, { status: 404 });
     const roleId = normalizeRoleId(currentUser.role);
-    
+
     const saleData = await request.json();
 
-    // Validate required fields
     if (!saleData.assignment_id || !saleData.quantity_sold || !saleData.unit_price) {
-      return NextResponse.json({ 
-        error: 'Assignment ID, quantity sold, and unit price are required' 
-      }, { status: 400 });
+      return NextResponse.json({ error: 'Assignment ID, quantity sold, and unit price are required' }, { status: 400 });
     }
 
-    // Verify assignment exists and get details
-    const assignment = await Assignment.findById(saleData.assignment_id)
-      .populate('productId', 'name manufacturingCost hsn_code gst_rate')
-      .populate('salesman_id');
+    // Verify assignment
+    const { data: assignment } = await supabaseAdmin.from('assignments').select('*').eq('id', saleData.assignment_id).single();
+    if (!assignment) return NextResponse.json({ error: 'Assignment not found' }, { status: 404 });
 
-    if (!assignment) {
-      return NextResponse.json({ error: 'Assignment not found' }, { status: 404 });
-    }
+    const { data: product } = await supabaseAdmin.from('products').select('id, name, manufacturing_cost, hsn_code, gst_rate').eq('id', assignment.product_id).single();
 
-    const assignmentOwnerId = assignment.salesman_id._id.toString();
-
+    // Check role-based authorization
     if (roleId === 'secondary_executive') {
-      if (!currentUser.managerId || assignmentOwnerId !== currentUser.managerId.toString()) {
+      if (!currentUser.manager_id || assignment.salesman_id !== currentUser.manager_id) {
         return NextResponse.json({ error: 'Unauthorized to consume stock outside your primary executive pool' }, { status: 403 });
       }
     } else if (roleId === 'primary_executive') {
-      if (assignmentOwnerId !== decoded.userId) {
+      if (assignment.salesman_id !== decoded.userId) {
         return NextResponse.json({ error: 'Unauthorized to consume stock outside your pool' }, { status: 403 });
       }
     }
 
-    // Check if assignment has sufficient quantity
     if (saleData.quantity_sold > assignment.quantity) {
-      return NextResponse.json({ 
-        error: `Insufficient stock. Available: ${assignment.quantity} units` 
-      }, { status: 400 });
+      return NextResponse.json({ error: `Insufficient stock. Available: ${assignment.quantity} units` }, { status: 400 });
     }
 
     // Handle customer creation/selection
     let customerId = saleData.customer_id;
-    
     if (!customerId && saleData.customer_details) {
-      const primaryExecutiveId = roleId === 'primary_executive'
-        ? decoded.userId
-        : (roleId === 'secondary_executive' ? currentUser.managerId?.toString() : undefined);
-
-      const secondaryExecutiveId = roleId === 'secondary_executive'
-        ? decoded.userId
-        : undefined;
-
-      // Create new customer if customer details are provided
-      const customer = await Customer.create({
+      const peId = roleId === 'primary_executive' ? decoded.userId : (roleId === 'secondary_executive' ? currentUser.manager_id : undefined);
+      const seId = roleId === 'secondary_executive' ? decoded.userId : undefined;
+      const { data: newCust, error: custErr } = await supabaseAdmin.from('customers').insert({
         name: saleData.customer_details.name,
         email: saleData.customer_details.email || `customer_${Date.now()}@leaftrack.com`,
         phone: saleData.customer_details.phone,
@@ -176,64 +145,49 @@ export async function POST(request: NextRequest) {
         gstin: saleData.customer_details.gstin,
         business_type: 'Individual',
         status: 'Active',
-        primary_executive_id: primaryExecutiveId,
-        secondary_executive_id: secondaryExecutiveId,
+        primary_executive_id: peId,
+        secondary_executive_id: seId,
         created_by: decoded.userId,
-      });
-      customerId = customer._id;
+      }).select('id').single();
+      if (custErr) throw custErr;
+      customerId = newCust.id;
     }
 
-    // Calculate total amount
-    const unitPrice = saleData.unit_price;
     const quantity = saleData.quantity_sold;
+    const unitPrice = saleData.unit_price;
     const discountPercentage = saleData.discount_percentage || 0;
     const totalAmount = unitPrice * quantity * (1 - discountPercentage / 100);
 
     // Create sale
-    const productData = assignment.productId as unknown as { _id: string };
-    const sale = new Sale({
+    const { data: sale, error: saleErr } = await supabaseAdmin.from('sales').insert({
       assignment_id: saleData.assignment_id,
-      salesman_id: currentUser._id,
-      product_id: productData._id,
+      salesman_id: currentUser.id,
+      product_id: assignment.product_id,
       customer_id: customerId,
       quantity_sold: quantity,
       unit_price: unitPrice,
-      priceAtSale: assignment.sellingPricePerUnit, // Store the selling price from assignment
+      price_at_sale: assignment.selling_price_per_unit,
       discount_percentage: discountPercentage,
       total_amount: totalAmount,
       payment_method: saleData.payment_method || 'Cash',
       notes: saleData.notes,
-    });
+    }).select().single();
+    if (saleErr) throw saleErr;
 
-    await sale.save();
+    // Update assignment quantity
+    await supabaseAdmin.from('assignments').update({ quantity: assignment.quantity - quantity }).eq('id', saleData.assignment_id);
 
-    // Update assignment quantity (reduce by sold quantity)
-    assignment.quantity -= quantity;
-    await assignment.save();
+    const enrichedSale = {
+      ...withId(sale),
+      assignment_id: { _id: assignment.id, ...assignment },
+      salesman_id: { _id: currentUser.id, name: currentUser.name, email: (currentUser as Record<string, unknown>).email },
+      product_id: product ? { _id: product.id, ...product } : sale.product_id,
+      customer_id: customerId,
+    };
 
-    // Populate the created sale for response
-    await sale.populate([
-      { path: 'assignment_id' },
-      { path: 'salesman_id', select: 'name email' },
-      { path: 'product_id', select: 'name manufacturingCost hsn_code gst_rate' },
-      { path: 'customer_id', select: 'name email phone' }
-    ]);
-
-    return NextResponse.json({
-      success: true,
-      message: 'Sale created successfully',
-      sale,
-    });
+    return NextResponse.json({ success: true, message: 'Sale created successfully', sale: enrichedSale });
   } catch (error) {
     console.error('Error creating sale:', error);
-    
-    if (error instanceof Error && error.name === 'ValidationError') {
-      return NextResponse.json({ 
-        error: 'Validation failed', 
-        details: error.message 
-      }, { status: 400 });
-    }
-    
     return NextResponse.json({ error: 'Failed to create sale' }, { status: 500 });
   }
 }

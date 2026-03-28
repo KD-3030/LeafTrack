@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import User, { IUser } from '@/models/User';
+import { supabaseAdmin } from '@/lib/supabase-server';
 import { comparePassword, generateToken } from '@/lib/auth';
-import { Model } from 'mongoose';
 import { strictRateLimit } from '@/lib/rateLimit';
-import { normalizeRoleId, roleIdToDbRole } from '@/lib/roles';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,64 +13,37 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    await connectDB();
-    
-    const { email, password, role } = await request.json();
+    const { email, password } = await request.json();
 
     // Validate input
-    if (!email || !password || !role) {
-      console.log('❌ Missing required fields');
+    if (!email || !password) {
       return NextResponse.json(
-        { error: 'All fields are required' },
+        { error: 'Email and password are required' },
         { status: 400 }
       );
     }
-
-    // Normalize role and map it to canonical DB enum value.
-    const normalizedRoleId = normalizeRoleId(role);
-    if (!normalizedRoleId) {
-      return NextResponse.json(
-        { error: 'Invalid role' },
-        { status: 400 }
-      );
-    }
-
-    const normalizedRole = roleIdToDbRole(normalizedRoleId);
     
-    console.log('🔐 Login attempt:', { email, role: normalizedRole, hasPassword: !!password });
+    const { data: user, error } = await supabaseAdmin
+      .from('users')
+      .select('*')
+      .eq('email', String(email).toLowerCase())
+      .single();
     
-    const UserModel = User as Model<IUser>;
-    const user = await UserModel.findOne({ 
-      email, 
-      role: normalizedRole 
-    });
-    
-    if (!user) {
-      console.log('❌ User not found or role mismatch:', { email, role: normalizedRole });
-      // Check if user exists with different role
-      const userWithEmail = await UserModel.findOne({ email });
-      if (userWithEmail) {
-        console.log('⚠️ User exists but with role:', userWithEmail.role);
-      }
-      return NextResponse.json(
-        { error: 'Invalid credentials or role mismatch' },
-        { status: 401 }
-      );
-    }
-
-    console.log('✅ User found:', { email, role: user.role });
-
-    // Verify password
-    const isValidPassword = await comparePassword(password, user.password);
-    if (!isValidPassword) {
-      console.log('❌ Invalid password for user:', email);
+    if (error || !user) {
       return NextResponse.json(
         { error: 'Invalid credentials' },
         { status: 401 }
       );
     }
 
-    console.log('✅ Password verified for user:', email);
+    // Verify password
+    const isValidPassword = await comparePassword(password, user.password);
+    if (!isValidPassword) {
+      return NextResponse.json(
+        { error: 'Invalid credentials' },
+        { status: 401 }
+      );
+    }
 
     if (user.approval_status === 'pending') {
       return NextResponse.json(
@@ -96,18 +66,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Generate token with user name
-    const token = generateToken((user._id as string).toString(), user.role, user.name);
+    // Generate token with Supabase UUID
+    const token = generateToken(user.id, user.role, user.name);
 
     // Return user data (without password)
     const userData = {
-      id: (user._id as string).toString(),
+      id: user.id,
       name: user.name,
       email: user.email,
       role: user.role,
-      managerId: user.managerId,
+      managerId: user.manager_id,
       approval_status: user.approval_status,
-      created_at: user.createdAt,
+      created_at: user.created_at,
     };
 
     return NextResponse.json({

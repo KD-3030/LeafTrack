@@ -1,204 +1,158 @@
-import { NextRequest, NextResponse } from 'next/server';
-import connectDB from '@/lib/mongodb';
-import Invoice, { IInvoice } from '@/models/Invoice';
-import Customer from '@/models/Customer'; // Import for populate
-import User from '@/models/User'; // Import for populate  
-import { verifyToken } from '@/lib/auth';
-import { Model } from 'mongoose';
+﻿import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase-server';
+import { requireAuth } from '@/lib/authMiddleware';
 
 export const dynamic = 'force-dynamic';
 
-// GET - Generate GST reports (GSTR-1 data)
 export async function GET(request: NextRequest) {
   try {
-    await connectDB();
-    
-    // Ensure models are registered for populate
-    if (!Customer || !User) {
-      throw new Error('Required models not loaded');
-    }
-    
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const authResult = requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
-    const token = authHeader.substring(7);
-    const decoded = verifyToken(token);
-    
-    if (!decoded || decoded.role?.toLowerCase() !== 'admin') {
-      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
-    }
-
-    // Get query parameters
     const { searchParams } = new URL(request.url);
-    const fromDate = searchParams.get('from_date');
-    const toDate = searchParams.get('to_date');
-    const reportType = searchParams.get('type') || 'gstr1'; // gstr1, summary, detailed
+    const report_type = searchParams.get('type') || 'gstr1';
+    const from_date = searchParams.get('from_date');
+    const to_date = searchParams.get('to_date');
 
-    if (!fromDate || !toDate) {
-      return NextResponse.json({ 
-        error: 'From date and to date are required' 
-      }, { status: 400 });
+    // Fetch invoices with items
+    let invoiceQuery = supabaseAdmin.from('invoices').select('id, invoice_number, invoice_date, customer_id, grand_total, taxable_amount, total_tax, total_cgst, total_sgst, total_igst, created_at');
+    if (from_date) invoiceQuery = invoiceQuery.gte('invoice_date', new Date(from_date).toISOString());
+    if (to_date) invoiceQuery = invoiceQuery.lte('invoice_date', new Date(to_date).toISOString());
+
+    const { data: invoices, error } = await invoiceQuery.order('invoice_date', { ascending: true });
+    if (error) throw error;
+    const invs = invoices || [];
+
+    // Fetch invoice items and customer data
+    const invoiceIds = invs.map(i => i.id);
+    const customerIds = [...new Set(invs.map(i => i.customer_id).filter(Boolean))];
+
+    const [itemsRes, customersRes, settingsRes] = await Promise.all([
+      invoiceIds.length ? supabaseAdmin.from('invoice_items').select('*').in('invoice_id', invoiceIds) : { data: [] },
+      customerIds.length ? supabaseAdmin.from('customers').select('id, name, gstin, state').in('id', customerIds) : { data: [] },
+      supabaseAdmin.from('company_settings').select('*').limit(1).single(),
+    ]);
+
+    const items = itemsRes.data || [];
+    const customerMap = new Map((customersRes.data || []).map(c => [c.id, c]));
+    const companyState = settingsRes.data?.state || '';
+
+    // Group items by invoice
+    const itemsByInvoice = new Map<string, Record<string, unknown>[]>();
+    for (const item of items) {
+      const list = itemsByInvoice.get(item.invoice_id) || [];
+      list.push(item);
+      itemsByInvoice.set(item.invoice_id, list);
     }
 
-    // Build date filter
-    const dateFilter = {
-      invoice_date: {
-        $gte: new Date(fromDate),
-        $lte: new Date(toDate),
-      },
-      status: { $ne: 'Cancelled' }, // Exclude cancelled invoices
-    };
+    switch (report_type) {
+      case 'gstr1': {
+        // GSTR-1: Invoice-level detail
+        const gstr1Data = invs.map(inv => {
+          const customer = inv.customer_id ? customerMap.get(inv.customer_id) : null;
+          const isInterState = customer?.state && customer.state !== companyState;
+          return {
+            invoice_number: inv.invoice_number,
+            invoice_date: inv.invoice_date,
+            customer_name: customer?.name || 'Unknown',
+            customer_gstin: customer?.gstin || 'Unregistered',
+            place_of_supply: customer?.state || '',
+            taxable_amount: Number(inv.taxable_amount || 0),
+            cgst: Number(inv.total_cgst || 0),
+            sgst: Number(inv.total_sgst || 0),
+            igst: Number(inv.total_igst || 0),
+            total_tax: Number(inv.total_tax || 0),
+            invoice_value: Number(inv.grand_total || 0),
+            supply_type: isInterState ? 'Inter-State' : 'Intra-State',
+          };
+        });
 
-    const InvoiceModel = Invoice as Model<IInvoice>;
+        const totalTaxable = gstr1Data.reduce((sum, d) => sum + d.taxable_amount, 0);
+        const totalCgst = gstr1Data.reduce((sum, d) => sum + d.cgst, 0);
+        const totalSgst = gstr1Data.reduce((sum, d) => sum + d.sgst, 0);
+        const totalIgst = gstr1Data.reduce((sum, d) => sum + d.igst, 0);
+        const totalTax = gstr1Data.reduce((sum, d) => sum + d.total_tax, 0);
+        const totalValue = gstr1Data.reduce((sum, d) => sum + d.invoice_value, 0);
 
-    if (reportType === 'gstr1') {
-      // GSTR-1 format data
-      const invoices = await InvoiceModel.find(dateFilter)
-        .populate('customer_id', 'name gstin state')
-        .sort({ invoice_date: 1 })
-        .lean();
+        return NextResponse.json({
+          success: true,
+          report: {
+            type: 'gstr1',
+            data: gstr1Data,
+            summary: { totalTaxable, totalCgst, totalSgst, totalIgst, totalTax, totalValue, invoiceCount: gstr1Data.length },
+          },
+        });
+      }
 
-      const gstr1Data = invoices.map(invoice => ({
-        invoice_number: invoice.invoice_number || '',
-        invoice_date: invoice.invoice_date,
-        customer_name: invoice.customer_details?.name || '',
-        customer_gstin: invoice.customer_details?.gstin || 'Unregistered',
-        customer_state: invoice.customer_details?.state || '',
-        place_of_supply: invoice.customer_details?.state || '',
-        reverse_charge: 'N',
-        invoice_type: invoice.customer_details?.gstin ? 'B2B' : 'B2C',
-        ecommerce_gstin: '',
-        items: (invoice.items || []).map(item => ({
-          item_description: item.product_name || '',
-          hsn_code: item.hsn_code || '',
-          quantity: item.quantity || 0,
-          unit_price: item.unit_price || 0,
-          discount: item.discount_percentage || 0,
-          taxable_amount: item.taxable_amount || 0,
-          gst_rate: item.gst_rate || 0,
-          cgst_amount: item.cgst_amount || 0,
-          sgst_amount: item.sgst_amount || 0,
-          igst_amount: item.igst_amount || 0,
-          cess_amount: 0,
-          total_amount: item.total_amount || 0,
-        })),
-        total_taxable_amount: invoice.taxable_amount || 0,
-        total_cgst: invoice.total_cgst || 0,
-        total_sgst: invoice.total_sgst || 0,
-        total_igst: invoice.total_igst || 0,
-        total_cess: 0,
-        invoice_value: invoice.grand_total || 0,
-      }));
+      case 'summary': {
+        // Tax rate-wise summary
+        const rateGroups = new Map<number, { taxable: number; cgst: number; sgst: number; igst: number; total: number; count: number }>();
 
-      console.log(`GST GSTR-1 Report: Found ${gstr1Data.length} invoices for period ${fromDate} to ${toDate}`);
-      
-      return NextResponse.json({
-        success: true,
-        report_type: 'GSTR-1',
-        period: { from: fromDate, to: toDate },
-        data: gstr1Data,
-        summary: {
-          total_invoices: gstr1Data.length,
-          total_taxable_amount: gstr1Data.reduce((sum, inv) => sum + (inv.total_taxable_amount || 0), 0),
-          total_tax_amount: gstr1Data.reduce((sum, inv) => sum + (inv.total_cgst || 0) + (inv.total_sgst || 0) + (inv.total_igst || 0), 0),
-          total_invoice_value: gstr1Data.reduce((sum, inv) => sum + (inv.invoice_value || 0), 0),
-        },
-      });
-    }
-
-    if (reportType === 'summary') {
-      // Summary report
-      const pipeline: any[] = [
-        { $match: dateFilter },
-        {
-          $group: {
-            _id: null,
-            total_invoices: { $sum: 1 },
-            total_taxable_amount: { $sum: '$taxable_amount' },
-            total_cgst: { $sum: '$total_cgst' },
-            total_sgst: { $sum: '$total_sgst' },
-            total_igst: { $sum: '$total_igst' },
-            total_tax: { $sum: '$total_tax' },
-            total_invoice_value: { $sum: '$grand_total' },
-          }
+        for (const item of items) {
+          const rate = Number(item.gst_rate || 0);
+          const existing = rateGroups.get(rate) || { taxable: 0, cgst: 0, sgst: 0, igst: 0, total: 0, count: 0 };
+          existing.taxable += Number(item.taxable_amount || 0);
+          existing.cgst += Number(item.cgst_amount || 0);
+          existing.sgst += Number(item.sgst_amount || 0);
+          existing.igst += Number(item.igst_amount || 0);
+          existing.total += Number(item.total || 0);
+          existing.count++;
+          rateGroups.set(rate, existing);
         }
-      ];
 
-      const summaryResult = await InvoiceModel.aggregate(pipeline);
-      const summary = summaryResult[0] || {
-        total_invoices: 0,
-        total_taxable_amount: 0,
-        total_cgst: 0,
-        total_sgst: 0,
-        total_igst: 0,
-        total_tax: 0,
-        total_invoice_value: 0,
-      };
+        const rateSummary = Array.from(rateGroups.entries())
+          .map(([rate, data]) => ({ gst_rate: rate, ...data }))
+          .sort((a, b) => a.gst_rate - b.gst_rate);
 
-      // GST rate wise summary
-      const gstRateWisePipeline: any[] = [
-        { $match: dateFilter },
-        { $unwind: '$items' },
-        {
-          $group: {
-            _id: '$items.gst_rate',
-            count: { $sum: 1 },
-            taxable_amount: { $sum: '$items.taxable_amount' },
-            cgst_amount: { $sum: '$items.cgst_amount' },
-            sgst_amount: { $sum: '$items.sgst_amount' },
-            igst_amount: { $sum: '$items.igst_amount' },
-            total_amount: { $sum: '$items.total_amount' },
-          }
-        },
-        { $sort: { _id: 1 } }
-      ];
+        return NextResponse.json({
+          success: true,
+          report: {
+            type: 'summary',
+            data: rateSummary,
+            totalInvoices: invs.length,
+            totalItems: items.length,
+          },
+        });
+      }
 
-      const gstRateWise = await InvoiceModel.aggregate(gstRateWisePipeline);
+      case 'detailed': {
+        // Item-level detailed report
+        const detailedData = invs.map(inv => {
+          const customer = inv.customer_id ? customerMap.get(inv.customer_id) : null;
+          const invItems = itemsByInvoice.get(inv.id) || [];
+          return {
+            invoice_number: inv.invoice_number,
+            invoice_date: inv.invoice_date,
+            customer_name: customer?.name || 'Unknown',
+            customer_gstin: customer?.gstin || '',
+            items: invItems.map(item => ({
+              product_name: item.product_name,
+              hsn_code: item.hsn_code,
+              quantity: item.quantity,
+              unit: item.unit,
+              rate: item.rate,
+              taxable_amount: Number(item.taxable_amount || 0),
+              gst_rate: item.gst_rate,
+              cgst: Number(item.cgst_amount || 0),
+              sgst: Number(item.sgst_amount || 0),
+              igst: Number(item.igst_amount || 0),
+              total: Number(item.total || 0),
+            })),
+            invoice_total: Number(inv.grand_total || 0),
+          };
+        });
 
-      console.log(`GST Summary Report: ${summary.total_invoices} invoices, ${gstRateWise.length} GST rates for period ${fromDate} to ${toDate}`);
+        return NextResponse.json({
+          success: true,
+          report: { type: 'detailed', data: detailedData },
+        });
+      }
 
-      return NextResponse.json({
-        success: true,
-        report_type: 'Summary',
-        period: { from: fromDate, to: toDate },
-        summary,
-        gst_rate_wise: gstRateWise,
-      });
+      default:
+        return NextResponse.json({ error: 'Invalid GST report type' }, { status: 400 });
     }
-
-    if (reportType === 'detailed') {
-      // Detailed report
-      const invoices = await InvoiceModel.find(dateFilter)
-        .populate('customer_id', 'name email gstin state')
-        .populate('salesman_id', 'name email')
-        .sort({ invoice_date: 1 })
-        .lean();
-
-      return NextResponse.json({
-        success: true,
-        report_type: 'Detailed',
-        period: { from: fromDate, to: toDate },
-        invoices,
-        summary: {
-          total_invoices: invoices.length,
-          total_amount: invoices.reduce((sum, inv) => sum + (inv.grand_total || 0), 0),
-          total_tax: invoices.reduce((sum, inv) => sum + (inv.total_tax || 0), 0),
-          paid_invoices: invoices.filter(inv => inv.payment_status === 'Paid').length,
-          pending_invoices: invoices.filter(inv => inv.payment_status === 'Pending').length,
-        },
-      });
-    }
-
-    return NextResponse.json({ error: 'Invalid report type' }, { status: 400 });
   } catch (error) {
     console.error('Error generating GST report:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to generate report';
-    return NextResponse.json({ 
-      error: 'Failed to generate GST report',
-      details: errorMessage,
-      success: false
-    }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to generate GST report' }, { status: 500 });
   }
 }

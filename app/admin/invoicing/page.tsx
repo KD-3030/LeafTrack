@@ -847,7 +847,7 @@ export default function InvoicingPage() {
   const selectedCustomerOutstanding = Math.max(0, selectedManualCustomer?.outstanding_balance || 0);
 
   return (
-    <div className="min-h-screen bg-[#F5F5DC] p-6">
+    <div className="min-h-screen bg-background p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -865,7 +865,7 @@ export default function InvoicingPage() {
             </Button>
             <Button
               onClick={() => setIsCreateDialogOpen(true)}
-              className="bg-green-600 hover:bg-green-700"
+              className=""
             >
               <Plus className="h-4 w-4 mr-2" />
               From Sale
@@ -1227,7 +1227,7 @@ export default function InvoicingPage() {
                         <Button
                           size="sm"
                           onClick={() => createInvoiceFromSale(sale._id)}
-                          className="bg-green-600 hover:bg-green-700"
+                          className=""
                         >
                           Generate Invoice
                         </Button>
@@ -1728,7 +1728,7 @@ export default function InvoicingPage() {
                 <Button 
                   onClick={createManualInvoice}
                   disabled={!manualInvoiceForm.customer_id || manualInvoiceForm.items.length === 0}
-                  className="bg-green-600 hover:bg-green-700"
+                  className=""
                 >
                   Create Invoice
                 </Button>
