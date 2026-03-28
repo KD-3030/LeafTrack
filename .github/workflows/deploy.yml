@@ -49,11 +49,15 @@ jobs:
             # Build
             npm run build
 
+            # Standalone mode: copy static assets into the standalone output
+            cp -r .next/static .next/standalone/.next/static
+            cp -r public .next/standalone/public
+
             # Reload PM2 (zero-downtime), start if not running yet
             if pm2 describe leaftrack > /dev/null 2>&1; then
               pm2 reload leaftrack --update-env
             else
-              pm2 start npm --name leaftrack -- run start
+              pm2 start .next/standalone/server.js --name leaftrack
               pm2 save
             fi
 
