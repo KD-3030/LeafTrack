@@ -43,8 +43,8 @@ jobs:
             export NVM_DIR="$HOME/.nvm"
             [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
-            # Install dependencies (production only)
-            npm ci --omit=dev
+            # Install all dependencies (devDeps needed for next build)
+            npm ci
 
             # Build
             npm run build
