@@ -162,47 +162,42 @@ export async function DELETE(
       );
     }
 
-    // Fetch target user
-    const { data: targetUser, error: fetchError } = await supabaseAdmin
+    // Fetch target user for cascade logic (don't block if not found)
+    const { data: targetUser } = await supabaseAdmin
       .from('users')
       .select('id, role')
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
-    if (fetchError || !targetUser) {
-      return NextResponse.json(
-        { error: 'User not found' },
-        { status: 404 }
-      );
-    }
+    if (targetUser) {
+      const targetRoleId = normalizeRoleId(targetUser.role);
 
-    const targetRoleId = normalizeRoleId(targetUser.role);
+      // If deleting a PE, check they have no assigned SEs
+      if (targetRoleId === 'primary_executive') {
+        const { count } = await supabaseAdmin
+          .from('users')
+          .select('id', { count: 'exact', head: true })
+          .eq('role', 'SecondaryExecutive')
+          .eq('manager_id', id);
 
-    // If deleting a PE, check they have no assigned SEs
-    if (targetRoleId === 'primary_executive') {
-      const { count } = await supabaseAdmin
-        .from('users')
-        .select('id', { count: 'exact', head: true })
-        .eq('role', 'SecondaryExecutive')
-        .eq('manager_id', id);
+        if (count && count > 0) {
+          return NextResponse.json(
+            { error: 'Reassign or remove secondary executives before deleting this primary executive' },
+            { status: 400 }
+          );
+        }
+      }
 
-      if (count && count > 0) {
-        return NextResponse.json(
-          { error: 'Reassign or remove secondary executives before deleting this primary executive' },
-          { status: 400 }
-        );
+      // If deleting an SE, clear secondary_executive_id from customers
+      if (targetRoleId === 'secondary_executive') {
+        await supabaseAdmin
+          .from('customers')
+          .update({ secondary_executive_id: null })
+          .eq('secondary_executive_id', id);
       }
     }
 
-    // If deleting an SE, clear secondary_executive_id from customers
-    if (targetRoleId === 'secondary_executive') {
-      await supabaseAdmin
-        .from('customers')
-        .update({ secondary_executive_id: null })
-        .eq('secondary_executive_id', id);
-    }
-
-    // Delete the user
+    // Always attempt delete — Supabase DELETE is safe on non-existent rows
     const { error: deleteError } = await supabaseAdmin
       .from('users')
       .delete()

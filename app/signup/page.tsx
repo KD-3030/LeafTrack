@@ -15,6 +15,7 @@ function SignupPageContent() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [invitationToken, setInvitationToken] = useState('');
   const [inviteStatus, setInviteStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid'>('idle');
   const [invitedRole, setInvitedRole] = useState<string>('');
@@ -57,8 +58,18 @@ function SignupPageContent() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!name || !email || !password || !invitationToken) {
+    if (!name || !email || !password || !confirmPassword || !invitationToken) {
       toast.error('Please fill in all fields');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
+
+    if (password.length < 6) {
+      toast.error('Password must be at least 6 characters');
       return;
     }
 
@@ -72,7 +83,7 @@ function SignupPageContent() {
     try {
       const result = await signup(name, email, password, invitationToken);
       if (result.success) {
-        toast.success('Account created. Please wait for admin approval.');
+        toast.success('Account created! You can now log in.');
         setTimeout(() => {
           router.push('/login');
         }, 1500);
@@ -95,15 +106,44 @@ function SignupPageContent() {
           <CardHeader className="text-center">
             <CardTitle className="text-2xl font-bold text-gray-900 flex items-center justify-center space-x-2">
               <UserPlus className="h-6 w-6 text-green-600" />
-              <span>Complete Invitation</span>
+              <span>Set Up Your Account</span>
             </CardTitle>
             <CardDescription className="text-gray-600">
-              Invite-only onboarding for executives
+              Complete your account setup to get started
             </CardDescription>
           </CardHeader>
           
           <CardContent>
+            {inviteStatus === 'validating' && (
+              <div className="text-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto mb-3"></div>
+                <p className="text-sm text-gray-500">Validating your invitation...</p>
+              </div>
+            )}
+            {inviteStatus === 'invalid' && (
+              <div className="text-center py-8">
+                <p className="text-red-600 font-medium">This invitation link is invalid or has expired.</p>
+                <p className="text-sm text-gray-500 mt-2">Please contact your admin for a new invitation.</p>
+              </div>
+            )}
+            {inviteStatus === 'valid' && (
             <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="p-3 bg-green-50 border border-green-200 rounded-md">
+                <p className="text-sm text-green-700">Invitation valid for role: <strong>{invitedRole}</strong></p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="email">Email Address</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  placeholder="Your email"
+                  disabled
+                  className="bg-gray-50"
+                />
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="name">Full Name</Label>
                 <Input
@@ -117,56 +157,35 @@ function SignupPageContent() {
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="email">Email Address</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Enter your email"
-                  required
-                  disabled={inviteStatus === 'valid'}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="invitation">Invitation Token</Label>
-                <Input
-                  id="invitation"
-                  type="text"
-                  value={invitationToken}
-                  onChange={(e) => setInvitationToken(e.target.value)}
-                  placeholder="Invitation token"
-                  required
-                  disabled
-                />
-                {inviteStatus === 'validating' && (
-                  <p className="text-xs text-gray-500">Validating invitation...</p>
-                )}
-                {inviteStatus === 'valid' && (
-                  <p className="text-xs text-green-600">Invitation valid for role: {invitedRole}</p>
-                )}
-                {inviteStatus === 'invalid' && (
-                  <p className="text-xs text-red-600">This invitation is invalid or expired.</p>
-                )}
-              </div>
-              
-              <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
                 <Input
                   id="password"
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Create a password"
+                  placeholder="Create a password (min 6 characters)"
                   required
+                  minLength={6}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="confirmPassword">Confirm Password</Label>
+                <Input
+                  id="confirmPassword"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Confirm your password"
+                  required
+                  minLength={6}
                 />
               </div>
               
               <Button
                 type="submit"
                 className="w-full"
-                disabled={isLoading || inviteStatus !== 'valid'}
+                disabled={isLoading}
               >
                 {isLoading ? (
                   <div className="flex items-center space-x-2">
@@ -178,6 +197,7 @@ function SignupPageContent() {
                 )}
               </Button>
             </form>
+            )}
             
             <div className="mt-6 text-center">
               <p className="text-sm text-gray-600">

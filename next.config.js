@@ -51,6 +51,18 @@ const nextConfig = {
   },
 
   async headers() {
+    // Skip security headers in development — CSP blocks Next.js HMR/static assets in non-Chrome browsers
+    if (process.env.NODE_ENV === 'development') {
+      return [
+        {
+          source: '/api/:path*',
+          headers: [
+            { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate' },
+          ],
+        },
+      ];
+    }
+
     return [
       {
         source: '/:path*',

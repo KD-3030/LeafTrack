@@ -12,7 +12,8 @@ export async function POST(request: NextRequest) {
     const decoded = authResult;
 
     const body = await request.json();
-    const { email, role, manager_id } = body;
+    const { email, role, manager_id, managerId } = body;
+    const resolvedManagerId = manager_id || managerId || null;
 
     if (!email || !role) {
       return NextResponse.json({ error: 'Email and role are required' }, { status: 400 });
@@ -36,12 +37,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'An active invitation already exists for this email' }, { status: 400 });
     }
 
-    // Validate manager if role requires it
-    if (role === 'SecondaryExecutive' && !manager_id) {
-      return NextResponse.json({ error: 'Manager is required for Secondary Executive role' }, { status: 400 });
-    }
-    if (manager_id) {
-      const { data: manager } = await supabaseAdmin.from('users').select('id, role').eq('id', manager_id).single();
+    // Validate manager if provided (manager assignment is optional at invite time)
+    if (resolvedManagerId) {
+      const { data: manager } = await supabaseAdmin.from('users').select('id, role').eq('id', resolvedManagerId).single();
       if (!manager) {
         return NextResponse.json({ error: 'Manager not found' }, { status: 404 });
       }
@@ -50,14 +48,14 @@ export async function POST(request: NextRequest) {
     // Generate invitation token
     const invitationToken = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7); // 7 days expiry
+    expiresAt.setHours(expiresAt.getHours() + 24); // 24 hours expiry
 
     const { data: invitation, error } = await supabaseAdmin
       .from('invitations')
       .insert({
         email: email.toLowerCase(),
         role,
-        manager_id: manager_id || null,
+        manager_id: resolvedManagerId,
         token: invitationToken,
         expires_at: expiresAt.toISOString(),
         used: false,
@@ -67,13 +65,15 @@ export async function POST(request: NextRequest) {
       .single();
     if (error) throw error;
 
+    const signupUrl = `/signup?token=${invitationToken}`;
     return NextResponse.json({
       success: true,
       message: 'Invitation created successfully',
+      inviteLink: signupUrl,
       invitation: {
         ...invitation,
         _id: invitation.id,
-        signupUrl: `/signup?token=${invitationToken}`,
+        signupUrl,
       },
     });
   } catch (error) {

@@ -28,9 +28,6 @@ export async function POST(request: NextRequest) {
     if (!invitedRole || invitedRole === 'admin' || invitedRole === 'customer') {
       return NextResponse.json({ error: 'Invitation role is invalid' }, { status: 400 });
     }
-    if (invitedRole === 'secondary_executive' && !invitation.manager_id) {
-      return NextResponse.json({ error: 'Secondary executive invitations require a primary manager assignment' }, { status: 400 });
-    }
 
     // Check existing user
     const { data: existingUser } = await supabaseAdmin.from('users').select('id').eq('email', email).single();
@@ -41,11 +38,11 @@ export async function POST(request: NextRequest) {
     const hashedPassword = await hashPassword(password);
 
     const { data: user, error: createErr } = await supabaseAdmin.from('users').insert({
-      name, email, password: hashedPassword,
+      name, email: email.toLowerCase(), password: hashedPassword,
       role: roleIdToDbRole(invitedRole),
       manager_id: invitation.manager_id || null,
-      invited_by: invitation.invited_by || null,
-      approval_status: 'pending',
+      invited_by: invitation.created_by || null,
+      approval_status: 'approved',
     }).select().single();
     if (createErr) throw createErr;
 
@@ -57,7 +54,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       user: { id: user.id, _id: user.id, name: user.name, email: user.email, role: user.role, managerId: user.manager_id, approval_status: user.approval_status, created_at: user.created_at },
-      message: 'Account created. Awaiting admin approval.',
+      message: 'Account created successfully. You can now log in.',
     });
   } catch (error) {
     console.error('Signup error:', error);
