@@ -21,7 +21,8 @@ jobs:
           host: ${{ secrets.SERVER_TAILSCALE_IP }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          timeout: 10m
+          timeout: 30s
+          command_timeout: 20m
           script: |
             set -e
 
