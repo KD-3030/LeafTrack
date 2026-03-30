@@ -21,34 +21,91 @@ import {
   RotateCcw,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Store,
   ClipboardCheck,
   Leaf
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
-const navigation = [
-  { name: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard },
-  { name: 'Orders', href: '/admin/orders', icon: ClipboardCheck },
-  { name: 'Products', href: '/admin/products', icon: Package },
-  { name: 'Sellers', href: '/admin/sellers', icon: Store },
-  { name: 'Purchases', href: '/admin/purchases', icon: ShoppingCart },
-  { name: 'Purchase Returns', href: '/admin/purchase-returns', icon: PackageX },
-  { name: 'Users', href: '/admin/salesmen', icon: Users },
-];
+interface NavItemType {
+  name: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
 
-const bomNavigation = [
-  { name: 'BOM Management', href: '/admin/boms', icon: Layers },
-  { name: 'Raw Materials', href: '/admin/raw-materials', icon: Boxes },
-];
+interface NavGroup {
+  key: string;
+  title: string;
+  colorClass: string;
+  items: NavItemType[];
+}
 
-const financialNavigation = [
-  { name: 'Financial', href: '/admin/financial', icon: DollarSign },
-  { name: 'Invoicing', href: '/admin/invoicing', icon: FileText },
-  { name: 'Sales Returns', href: '/admin/sales-returns', icon: RotateCcw },
-  { name: 'Customers', href: '/admin/customers', icon: UserCheck },
-  { name: 'Reports', href: '/admin/reports', icon: BarChart3 },
-  { name: 'Settings', href: '/admin/settings', icon: Settings },
+const navGroups: NavGroup[] = [
+  {
+    key: 'dashboard',
+    title: '',
+    colorClass: 'green',
+    items: [
+      { name: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard },
+    ],
+  },
+  {
+    key: 'sales',
+    title: 'Sales & Billing',
+    colorClass: 'green',
+    items: [
+      { name: 'Orders', href: '/admin/orders', icon: ClipboardCheck },
+      { name: 'Invoicing', href: '/admin/invoicing', icon: FileText },
+      { name: 'Sales Returns', href: '/admin/sales-returns', icon: RotateCcw },
+      { name: 'Customers', href: '/admin/customers', icon: UserCheck },
+    ],
+  },
+  {
+    key: 'procurement',
+    title: 'Procurement',
+    colorClass: 'purple',
+    items: [
+      { name: 'Sellers', href: '/admin/sellers', icon: Store },
+      { name: 'Purchases', href: '/admin/purchases', icon: ShoppingCart },
+      { name: 'Purchase Returns', href: '/admin/purchase-returns', icon: PackageX },
+    ],
+  },
+  {
+    key: 'inventory',
+    title: 'Inventory',
+    colorClass: 'green',
+    items: [
+      { name: 'Products', href: '/admin/products', icon: Package },
+    ],
+  },
+  {
+    key: 'manufacturing',
+    title: 'Manufacturing',
+    colorClass: 'purple',
+    items: [
+      { name: 'BOM Management', href: '/admin/boms', icon: Layers },
+      { name: 'Raw Materials', href: '/admin/raw-materials', icon: Boxes },
+    ],
+  },
+  {
+    key: 'finance',
+    title: 'Finance & Reports',
+    colorClass: 'blue',
+    items: [
+      { name: 'Financial', href: '/admin/financial', icon: DollarSign },
+      { name: 'Reports', href: '/admin/reports', icon: BarChart3 },
+    ],
+  },
+  {
+    key: 'admin',
+    title: 'Administration',
+    colorClass: 'blue',
+    items: [
+      { name: 'Users', href: '/admin/salesmen', icon: Users },
+      { name: 'Settings', href: '/admin/settings', icon: Settings },
+    ],
+  },
 ];
 
 
@@ -56,6 +113,7 @@ export function AdminSidebar() {
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -71,7 +129,15 @@ export function AdminSidebar() {
     return () => document.removeEventListener('keydown', handleEscape);
   }, []);
 
-  const NavItem = ({ item, colorClass }: { item: typeof navigation[0], colorClass: string }) => {
+  const toggleGroup = (key: string) => {
+    setCollapsedGroups(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const isGroupActive = (group: NavGroup) => {
+    return group.items.some(item => pathname === item.href);
+  };
+
+  const NavItem = ({ item, colorClass }: { item: NavItemType, colorClass: string }) => {
     const isActive = pathname === item.href;
     const activeColors: Record<string, string> = {
       green: 'bg-brand-50 text-brand-700 border-brand-500',
@@ -96,17 +162,33 @@ export function AdminSidebar() {
     );
   };
 
-  const SectionHeader = ({ title }: { title: string }) => (
-    !isCollapsed ? (
-      <div className="px-3 pt-4 pb-1">
-        <h3 className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
-          {title}
+  const SectionHeader = ({ group }: { group: NavGroup }) => {
+    if (!group.title) return null;
+    const isGroupCollapsed = collapsedGroups[group.key];
+    const active = isGroupActive(group);
+    
+    if (isCollapsed) {
+      return <div className="my-2 mx-3 border-t border-gray-200" />;
+    }
+    
+    return (
+      <button
+        onClick={() => toggleGroup(group.key)}
+        className={cn(
+          "w-full flex items-center justify-between px-3 pt-4 pb-1 group cursor-pointer",
+          active && "text-gray-600"
+        )}
+      >
+        <h3 className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider group-hover:text-gray-600 transition-colors">
+          {group.title}
         </h3>
-      </div>
-    ) : (
-      <div className="my-2 mx-3 border-t border-gray-200" />
-    )
-  );
+        <ChevronDown className={cn(
+          "h-3 w-3 text-gray-400 transition-transform duration-200 group-hover:text-gray-600",
+          isGroupCollapsed && "-rotate-90"
+        )} />
+      </button>
+    );
+  };
 
   return (
     <>
@@ -172,22 +254,18 @@ export function AdminSidebar() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-2 py-3 space-y-0.5">
-          {/* Main Navigation */}
-          {navigation.map((item) => (
-            <NavItem key={item.href} item={item} colorClass="green" />
-          ))}
-
-          {/* BOM Section */}
-          <SectionHeader title="Manufacturing" />
-          {bomNavigation.map((item) => (
-            <NavItem key={item.href} item={item} colorClass="purple" />
-          ))}
-
-          {/* Financial Section */}
-          <SectionHeader title="Finance" />
-          {financialNavigation.map((item) => (
-            <NavItem key={item.href} item={item} colorClass="blue" />
+        <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto scrollbar-hide">
+          {navGroups.map((group) => (
+            <div key={group.key}>
+              <SectionHeader group={group} />
+              {(!collapsedGroups[group.key] || isCollapsed) && (
+                <div className="space-y-0.5">
+                  {group.items.map((item) => (
+                    <NavItem key={item.href} item={item} colorClass={group.colorClass} />
+                  ))}
+                </div>
+              )}
+            </div>
           ))}
         </nav>
 

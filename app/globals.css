@@ -58,7 +58,6 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
-
   .text-responsive-sm {
     @apply text-xs sm:text-sm;
   }
@@ -81,3 +80,65 @@
   }
 }
 
+/* Mobile-first touch targets and spacing */
+@layer base {
+  /* PWA standalone mode */
+  @media (display-mode: standalone) {
+    body {
+      -webkit-user-select: none;
+      user-select: none;
+      overscroll-behavior: none;
+    }
+    /* Allow text selection in inputs and textareas */
+    input, textarea, [contenteditable] {
+      -webkit-user-select: text;
+      user-select: text;
+    }
+  }
+
+  /* Prevent pull-to-refresh on mobile */
+  html {
+    overscroll-behavior-y: contain;
+  }
+
+  /* Smooth scrolling */
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Prevent text size adjustment on orientation change */
+  body {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  @media (max-width: 640px) {
+    /* Ensure touch-friendly tap targets */
+    button, a, [role="button"] {
+      min-height: 36px;
+    }
+
+    /* Reduce card padding on mobile */
+    .card-compact > div {
+      padding-left: 0.75rem;
+      padding-right: 0.75rem;
+    }
+
+    /* Dialog max-width on mobile */
+    [role="dialog"] > div {
+      max-width: calc(100vw - 1rem) !important;
+      margin: 0.5rem;
+    }
+
+    /* Better table display on mobile */
+    table {
+      font-size: 0.8125rem;
+    }
+
+    /* Prevent horizontal overflow */
+    main {
+      overflow-x: hidden;
+    }
+  }
+}

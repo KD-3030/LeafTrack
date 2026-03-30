@@ -8,32 +8,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
-import { normalizeRoleId } from '@/lib/roles';
-import {
-  ArrowLeft,
-  Plus,
-  Trash2,
-  User,
-  Package,
-  IndianRupee,
-  Save,
-} from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, User, Package, IndianRupee, Save } from 'lucide-react';
 
 interface OrderItem {
   product_id?: string;
@@ -62,14 +44,13 @@ interface Product {
   gst_rate: number;
 }
 
-export default function NewOrderPage() {
+export default function ExecutiveNewOrderPage() {
   const router = useRouter();
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  
-  // Customer details
+
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerContact, setCustomerContact] = useState('');
@@ -77,18 +58,13 @@ export default function NewOrderPage() {
   const [customerGstin, setCustomerGstin] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
 
-  // Order items
   const [items, setItems] = useState<OrderItem[]>([
     { product_name: '', quantity: '', unit: 'kg', price_per_unit: '', total_price: 0 },
   ]);
 
-  // Pricing
   const [taxPercentage, setTaxPercentage] = useState('18');
   const [discountAmount, setDiscountAmount] = useState('0');
   const [notes, setNotes] = useState('');
-
-  const roleId = normalizeRoleId(user?.role || '');
-  const isPrimaryExecutive = roleId === 'primary_executive';
 
   useEffect(() => {
     fetchCustomers();
@@ -99,15 +75,10 @@ export default function NewOrderPage() {
     try {
       const token = localStorage.getItem('leaftrack_token');
       const response = await fetch('/api/customers', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
-
       const data = await response.json();
-      if (data.success) {
-        setCustomers(data.customers);
-      }
+      if (data.success) setCustomers(data.customers);
     } catch (error) {
       console.error('Error fetching customers:', error);
     }
@@ -116,32 +87,25 @@ export default function NewOrderPage() {
   const fetchProducts = async () => {
     try {
       const token = localStorage.getItem('leaftrack_token');
-      // Fetch products from assignments (PE's stock pool) rather than all products
+      // PE fetches their assignments to see available stock
       const response = await fetch('/api/assignments', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
-
       const data = await response.json();
       if (data.success && data.assignments) {
-        // Extract unique products from assignments, aggregating quantities
+        // Extract unique products from assignments
         const productMap = new Map<string, Product>();
         for (const assignment of data.assignments) {
-          const prod = assignment.productId;
-          if (!prod || typeof prod === 'string') continue;
-          const pid = prod._id;
-          if (productMap.has(pid)) {
-            const existing = productMap.get(pid)!;
-            existing.totalStock += assignment.quantity || 0;
-          } else {
-            productMap.set(pid, {
-              _id: pid,
-              name: prod.name,
-              manufacturingCost: prod.manufacturing_cost || 0,
-              totalStock: assignment.quantity || 0,
-              hsn_code: prod.hsn_code || '',
-              gst_rate: prod.gst_rate || 18,
+          const p = assignment.productId;
+          if (p && p._id) {
+            const existing = productMap.get(p._id);
+            productMap.set(p._id, {
+              _id: p._id,
+              name: p.name,
+              manufacturingCost: p.manufacturing_cost || 0,
+              totalStock: (existing?.totalStock || 0) + (assignment.quantity || 0),
+              hsn_code: p.hsn_code || '',
+              gst_rate: p.gst_rate || 0,
             });
           }
         }
@@ -167,14 +131,13 @@ export default function NewOrderPage() {
   const handleProductSelect = (index: number, productId: string) => {
     const product = products.find(p => p._id === productId);
     if (product) {
+      const basePrice = product.manufacturingCost * 1.3;
       const newItems = [...items];
-      // Use product manufacturing cost as base price (admin can adjust later)
-      const basePrice = product.manufacturingCost * 1.3; // 30% markup as default
       newItems[index] = {
         ...newItems[index],
         product_id: productId,
         product_name: product.name,
-        unit: 'kg', // Default unit
+        unit: 'kg',
         price_per_unit: basePrice.toFixed(2),
       };
       setItems(newItems);
@@ -186,7 +149,6 @@ export default function NewOrderPage() {
     const newItems = [...items];
     newItems[index] = { ...newItems[index], [field]: value };
     setItems(newItems);
-    
     if (field === 'quantity' || field === 'price_per_unit') {
       calculateItemTotal(index, newItems);
     }
@@ -196,10 +158,8 @@ export default function NewOrderPage() {
     const item = itemsList[index];
     const quantity = parseFloat(item.quantity) || 0;
     const price = parseFloat(item.price_per_unit) || 0;
-    const total = quantity * price;
-    
     const newItems = [...itemsList];
-    newItems[index].total_price = total;
+    newItems[index].total_price = quantity * price;
     setItems(newItems);
   };
 
@@ -208,27 +168,20 @@ export default function NewOrderPage() {
   };
 
   const removeItem = (index: number) => {
-    if (items.length === 1) {
-      toast.error('Order must have at least one item');
-      return;
-    }
-    const newItems = items.filter((_, i) => i !== index);
-    setItems(newItems);
+    if (items.length === 1) { toast.error('Order must have at least one item'); return; }
+    setItems(items.filter((_, i) => i !== index));
   };
 
   const calculateTotals = () => {
     const subtotal = items.reduce((sum, item) => sum + item.total_price, 0);
     const tax = (subtotal * parseFloat(taxPercentage)) / 100;
     const discount = parseFloat(discountAmount) || 0;
-    const total = subtotal + tax - discount;
-
-    return { subtotal, tax, discount, total };
+    return { subtotal, tax, discount, total: subtotal + tax - discount };
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Validation
+
     if (!customerName || !customerContact) {
       toast.error('Please provide customer name and contact');
       return;
@@ -266,23 +219,18 @@ export default function NewOrderPage() {
     };
 
     setLoading(true);
-
     try {
       const token = localStorage.getItem('leaftrack_token');
       const response = await fetch('/api/orders', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),
       });
-
       const data = await response.json();
 
       if (data.success) {
         toast.success(data.message);
-        router.push('/salesman/orders');
+        router.push('/executive/orders');
       } else {
         toast.error(data.error || 'Failed to create order');
       }
@@ -297,23 +245,19 @@ export default function NewOrderPage() {
   const { subtotal, tax, discount, total } = calculateTotals();
 
   return (
-    <div className="container mx-auto p-6 max-w-6xl">
-      <div className="mb-6">
+    <div className="max-w-5xl mx-auto space-y-6">
+      <div>
         <Button variant="ghost" onClick={() => router.back()}>
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back
+          <ArrowLeft className="mr-2 h-4 w-4" />Back
         </Button>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Header */}
         <Card>
           <CardHeader>
             <CardTitle>Create New Order</CardTitle>
             <CardDescription>
-              {isPrimaryExecutive
-                ? 'Fill in customer details and add products to send this order directly to admin approval'
-                : 'Fill in customer details and add products. This order will be sent to your primary executive for review first'}
+              This order will be sent directly to admin for approval
             </CardDescription>
           </CardHeader>
         </Card>
@@ -321,81 +265,44 @@ export default function NewOrderPage() {
         {/* Customer Information */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center">
-              <User className="mr-2 h-5 w-5" />
-              Customer Information
+            <CardTitle className="flex items-center text-base">
+              <User className="mr-2 h-5 w-5" />Customer Information
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <Label htmlFor="customer_select">Select Existing Customer (Optional)</Label>
+              <Label>Select Existing Customer (Optional)</Label>
               <Select value={selectedCustomerId} onValueChange={handleCustomerSelect}>
-                <SelectTrigger id="customer_select">
-                  <SelectValue placeholder="Choose a customer or enter manually below..." />
-                </SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Choose a customer or enter manually..." /></SelectTrigger>
                 <SelectContent>
-                  {customers.map((customer) => (
-                    <SelectItem key={customer._id} value={customer._id}>
-                      {customer.name} - {customer.phone}
-                    </SelectItem>
+                  {customers.map((c) => (
+                    <SelectItem key={c._id} value={c._id}>{c.name} - {c.phone}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="customer_name">Customer Name *</Label>
-                <Input
-                  id="customer_name"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  required
-                  placeholder="John Doe"
-                />
+                <Label>Customer Name *</Label>
+                <Input value={customerName} onChange={(e) => setCustomerName(e.target.value)} required placeholder="Customer name" />
               </div>
               <div>
-                <Label htmlFor="customer_contact">Contact Number *</Label>
-                <Input
-                  id="customer_contact"
-                  value={customerContact}
-                  onChange={(e) => setCustomerContact(e.target.value)}
-                  required
-                  placeholder="+91 98765 43210"
-                />
+                <Label>Contact Number *</Label>
+                <Input value={customerContact} onChange={(e) => setCustomerContact(e.target.value)} required placeholder="+91 98765 43210" />
               </div>
             </div>
-
             <div>
-              <Label htmlFor="customer_address">Address</Label>
-              <Textarea
-                id="customer_address"
-                value={customerAddress}
-                onChange={(e) => setCustomerAddress(e.target.value)}
-                placeholder="Full address..."
-                rows={2}
-              />
+              <Label>Address</Label>
+              <Textarea value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} placeholder="Full address..." rows={2} />
             </div>
-
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="customer_gstin">GSTIN</Label>
-                <Input
-                  id="customer_gstin"
-                  value={customerGstin}
-                  onChange={(e) => setCustomerGstin(e.target.value)}
-                  placeholder="22AAAAA0000A1Z5"
-                />
+                <Label>GSTIN</Label>
+                <Input value={customerGstin} onChange={(e) => setCustomerGstin(e.target.value)} placeholder="22AAAAA0000A1Z5" />
               </div>
               <div>
-                <Label htmlFor="customer_email">Email</Label>
-                <Input
-                  id="customer_email"
-                  type="email"
-                  value={customerEmail}
-                  onChange={(e) => setCustomerEmail(e.target.value)}
-                  placeholder="customer@example.com"
-                />
+                <Label>Email</Label>
+                <Input type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} placeholder="customer@example.com" />
               </div>
             </div>
           </CardContent>
@@ -405,13 +312,11 @@ export default function NewOrderPage() {
         <Card>
           <CardHeader>
             <div className="flex justify-between items-center">
-              <CardTitle className="flex items-center">
-                <Package className="mr-2 h-5 w-5" />
-                Order Items
+              <CardTitle className="flex items-center text-base">
+                <Package className="mr-2 h-5 w-5" />Order Items
               </CardTitle>
               <Button type="button" variant="outline" size="sm" onClick={addItem}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add Item
+                <Plus className="mr-2 h-4 w-4" />Add Item
               </Button>
             </div>
           </CardHeader>
@@ -419,59 +324,38 @@ export default function NewOrderPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[300px]">Product</TableHead>
-                  <TableHead className="w-[120px]">Quantity</TableHead>
-                  <TableHead className="w-[100px]">Unit</TableHead>
-                  <TableHead className="w-[150px]">Price/Unit (₹)</TableHead>
-                  <TableHead className="w-[150px]">Total (₹)</TableHead>
-                  <TableHead className="w-[80px]">Action</TableHead>
+                  <TableHead className="w-[280px]">Product</TableHead>
+                  <TableHead className="w-[100px]">Qty</TableHead>
+                  <TableHead className="w-[90px]">Unit</TableHead>
+                  <TableHead className="w-[130px]">Price/Unit (₹)</TableHead>
+                  <TableHead className="w-[130px]">Total (₹)</TableHead>
+                  <TableHead className="w-[60px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {items.map((item, index) => (
                   <TableRow key={index}>
                     <TableCell>
-                      <Select
-                        value={item.product_id}
-                        onValueChange={(value) => handleProductSelect(index, value)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select product or enter manually..." />
-                        </SelectTrigger>
+                      <Select value={item.product_id} onValueChange={(v) => handleProductSelect(index, v)}>
+                        <SelectTrigger><SelectValue placeholder="Select product..." /></SelectTrigger>
                         <SelectContent>
-                          {products.map((product) => (
-                            <SelectItem key={product._id} value={product._id}>
-                              {product.name} - ₹{(product.manufacturingCost * 1.3).toFixed(2)} (Stock: {product.totalStock})
+                          {products.map((p) => (
+                            <SelectItem key={p._id} value={p._id}>
+                              {p.name} (Stock: {p.totalStock})
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                       {!item.product_id && (
-                        <Input
-                          className="mt-2"
-                          value={item.product_name}
-                          onChange={(e) => handleItemChange(index, 'product_name', e.target.value)}
-                          placeholder="Or enter product name manually"
-                        />
+                        <Input className="mt-2" value={item.product_name} onChange={(e) => handleItemChange(index, 'product_name', e.target.value)} placeholder="Or enter product name" />
                       )}
                     </TableCell>
                     <TableCell>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={item.quantity}
-                        onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
-                        placeholder="0"
-                      />
+                      <Input type="number" step="0.01" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} placeholder="0" />
                     </TableCell>
                     <TableCell>
-                      <Select
-                        value={item.unit}
-                        onValueChange={(value) => handleItemChange(index, 'unit', value)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
+                      <Select value={item.unit} onValueChange={(v) => handleItemChange(index, 'unit', v)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="kg">KG</SelectItem>
                           <SelectItem value="box">Box</SelectItem>
@@ -480,25 +364,13 @@ export default function NewOrderPage() {
                       </Select>
                     </TableCell>
                     <TableCell>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={item.price_per_unit}
-                        onChange={(e) => handleItemChange(index, 'price_per_unit', e.target.value)}
-                        placeholder="0.00"
-                      />
+                      <Input type="number" step="0.01" value={item.price_per_unit} onChange={(e) => handleItemChange(index, 'price_per_unit', e.target.value)} placeholder="0.00" />
                     </TableCell>
                     <TableCell className="font-medium">
                       ₹{item.total_price.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     </TableCell>
                     <TableCell>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeItem(index)}
-                        disabled={items.length === 1}
-                      >
+                      <Button type="button" variant="ghost" size="icon" onClick={() => removeItem(index)} disabled={items.length === 1}>
                         <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>
                     </TableCell>
@@ -509,41 +381,26 @@ export default function NewOrderPage() {
           </CardContent>
         </Card>
 
-        {/* Pricing & Summary */}
+        {/* Pricing Summary */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center">
-              <IndianRupee className="mr-2 h-5 w-5" />
-              Pricing Summary
+            <CardTitle className="flex items-center text-base">
+              <IndianRupee className="mr-2 h-5 w-5" />Pricing Summary
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="tax_percentage">Tax Percentage (%)</Label>
-                <Input
-                  id="tax_percentage"
-                  type="number"
-                  step="0.01"
-                  value={taxPercentage}
-                  onChange={(e) => setTaxPercentage(e.target.value)}
-                  placeholder="18"
-                />
+                <Label>Tax Percentage (%)</Label>
+                <Input type="number" step="0.01" value={taxPercentage} onChange={(e) => setTaxPercentage(e.target.value)} />
               </div>
               <div>
-                <Label htmlFor="discount_amount">Discount Amount (₹)</Label>
-                <Input
-                  id="discount_amount"
-                  type="number"
-                  step="0.01"
-                  value={discountAmount}
-                  onChange={(e) => setDiscountAmount(e.target.value)}
-                  placeholder="0.00"
-                />
+                <Label>Discount Amount (₹)</Label>
+                <Input type="number" step="0.01" value={discountAmount} onChange={(e) => setDiscountAmount(e.target.value)} />
               </div>
             </div>
 
-            <div className="bg-orange-50 p-4 rounded-lg space-y-2">
+            <div className="bg-brand-50 p-4 rounded-lg space-y-2">
               <div className="flex justify-between text-sm">
                 <span>Subtotal:</span>
                 <span className="font-medium">₹{subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
@@ -558,31 +415,22 @@ export default function NewOrderPage() {
               </div>
               <div className="flex justify-between text-lg font-bold pt-2 border-t">
                 <span>Total Amount:</span>
-                <span className="text-orange-600">₹{total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                <span className="text-brand-700">₹{total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
               </div>
             </div>
 
             <div>
-              <Label htmlFor="notes">Notes (Optional)</Label>
-              <Textarea
-                id="notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Any additional notes or special instructions..."
-                rows={3}
-              />
+              <Label>Notes (Optional)</Label>
+              <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Any additional notes or special instructions..." rows={3} />
             </div>
           </CardContent>
         </Card>
 
-        {/* Submit Button */}
         <div className="flex justify-end gap-4">
-          <Button type="button" variant="outline" onClick={() => router.back()}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={loading} size="lg">
+          <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
+          <Button type="submit" disabled={loading} size="lg" className="bg-brand-600 hover:bg-brand-700">
             <Save className="mr-2 h-5 w-5" />
-            {loading ? 'Submitting...' : 'Submit for Approval'}
+            {loading ? 'Submitting...' : 'Submit for Admin Approval'}
           </Button>
         </div>
       </form>

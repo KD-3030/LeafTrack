@@ -537,12 +537,12 @@ export default function ExecutiveManagementPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Executive Management</h1>
-          <p className="text-muted-foreground">Manage your team, assign stock &amp; customers</p>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Executive Management</h1>
+          <p className="text-sm sm:text-base text-muted-foreground">Manage your team, assign stock &amp; customers</p>
         </div>
         <Button variant="outline" size="sm" onClick={loadAll}>
           <RefreshCw className="h-4 w-4 mr-2" />

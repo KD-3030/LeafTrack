@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { FileText, Plus, Search, Edit, Download, RefreshCw, DollarSign, TrendingUp, AlertCircle, Calendar, Filter, Eye, Trash2, Edit2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { generateInvoicePDF } from '@/lib/pdfGenerator';
+// pdfGenerator is dynamically imported on-demand for bundle optimization
 
 interface Invoice {
   _id: string;
@@ -847,35 +847,39 @@ export default function InvoicingPage() {
   const selectedCustomerOutstanding = Math.max(0, selectedManualCustomer?.outstanding_balance || 0);
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="min-h-screen bg-background p-3 sm:p-6">
+      <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Invoice Management</h1>
-            <p className="text-gray-600 mt-1">Manage GST-compliant invoices and billing</p>
+            <h1 className="text-xl sm:text-3xl font-bold text-gray-900">Invoice Management</h1>
+            <p className="text-gray-600 text-sm mt-1">Manage GST-compliant invoices and billing</p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-2 sm:gap-3">
             <Button
               onClick={() => setIsManualInvoiceDialogOpen(true)}
-              className="bg-blue-600 hover:bg-blue-700"
+              className="bg-blue-600 hover:bg-blue-700 text-xs sm:text-sm"
+              size="sm"
             >
-              <Plus className="h-4 w-4 mr-2" />
-              Manual Invoice
+              <Plus className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Manual Invoice</span>
+              <span className="sm:hidden">Manual</span>
             </Button>
             <Button
               onClick={() => setIsCreateDialogOpen(true)}
-              className=""
+              size="sm"
+              className="text-xs sm:text-sm"
             >
-              <Plus className="h-4 w-4 mr-2" />
-              From Sale
+              <Plus className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">From Sale</span>
+              <span className="sm:hidden">Sale</span>
             </Button>
           </div>
         </div>
 
         {/* Statistics Cards */}
-        <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="space-y-4 sm:space-y-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
@@ -977,35 +981,36 @@ export default function InvoicingPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            <div className="overflow-x-auto -mx-6 px-6">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Invoice #</TableHead>
                   <TableHead>Customer</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Due Date</TableHead>
+                  <TableHead className="hidden md:table-cell">Date</TableHead>
+                  <TableHead className="hidden lg:table-cell">Due Date</TableHead>
                   <TableHead>Amount</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Payment</TableHead>
+                  <TableHead className="hidden sm:table-cell">Status</TableHead>
+                  <TableHead className="hidden sm:table-cell">Payment</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredInvoices.map((invoice) => (
                   <TableRow key={invoice._id}>
-                    <TableCell className="font-medium">
+                    <TableCell className="font-medium text-xs sm:text-sm">
                       {invoice.invoice_number}
                     </TableCell>
                     <TableCell>
                       <div>
-                        <div className="font-medium">{invoice.customer_details.name}</div>
-                        <div className="text-sm text-gray-600">{invoice.customer_details.email}</div>
+                        <div className="font-medium text-xs sm:text-sm">{invoice.customer_details.name}</div>
+                        <div className="text-xs text-gray-600 hidden sm:block">{invoice.customer_details.email}</div>
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden md:table-cell">
                       {new Date(invoice.invoice_date).toLocaleDateString()}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden lg:table-cell">
                       {new Date(invoice.due_date).toLocaleDateString()}
                     </TableCell>
                     <TableCell>
@@ -1018,10 +1023,10 @@ export default function InvoicingPage() {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden sm:table-cell">
                       {getStatusBadge(invoice.status)}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden sm:table-cell">
                       {getPaymentStatusBadge(invoice.payment_status)}
                     </TableCell>
                     <TableCell className="text-right">
@@ -1066,6 +1071,7 @@ export default function InvoicingPage() {
                                   : data.invoice.customer_id?._id;
                                 const matchingCustomer = customers.find((customer) => customer._id === customerId);
 
+                                const { generateInvoicePDF } = await import('@/lib/pdfGenerator');
                                 const success = await generateInvoicePDF({
                                   ...data.invoice,
                                   customer_total_due: matchingCustomer?.outstanding_balance ?? data.invoice.customer_total_due,
@@ -1121,12 +1127,11 @@ export default function InvoicingPage() {
                 ))}
               </TableBody>
             </Table>
-            
-            {/* Pagination Controls */}
-            <div className="flex items-center justify-between mt-4 pt-4 border-t">
+            </div>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mt-4 pt-4 border-t">
               <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-600">
-                  Showing {invoices.length > 0 ? ((currentPage - 1) * itemsPerPage) + 1 : 0} to {Math.min(currentPage * itemsPerPage, totalCount)} of {totalCount} invoices
+                <span className="text-xs sm:text-sm text-gray-600">
+                  {invoices.length > 0 ? ((currentPage - 1) * itemsPerPage) + 1 : 0}–{Math.min(currentPage * itemsPerPage, totalCount)} of {totalCount}
                 </span>
                 <Select
                   value={itemsPerPage.toString()}
@@ -1248,13 +1253,12 @@ export default function InvoicingPage() {
             setEditedInvoiceNumber('');
           }
         }}>
-          <DialogContent className="max-w-4xl">
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
                 Invoice Details - {selectedInvoice?.invoice_number}
               </DialogTitle>
             </DialogHeader>
-            
             {selectedInvoice && (
               <div className="space-y-6">
                 {/* Invoice Header */}
@@ -1310,10 +1314,10 @@ export default function InvoicingPage() {
                           <TableCell>{item.product_name}</TableCell>
                           <TableCell>{item.hsn_code}</TableCell>
                           <TableCell>{item.quantity}</TableCell>
-                          <TableCell>₹{item.unit_price}</TableCell>
-                          <TableCell>₹{item.taxable_amount}</TableCell>
+                          <TableCell>₹{Number(item.unit_price).toFixed(2)}</TableCell>
+                          <TableCell>₹{Number(item.taxable_amount).toFixed(2)}</TableCell>
                           <TableCell>{item.gst_rate}%</TableCell>
-                          <TableCell>₹{item.total_amount}</TableCell>
+                          <TableCell>₹{Number(item.total_amount).toFixed(2)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1323,18 +1327,42 @@ export default function InvoicingPage() {
                 {/* Totals */}
                 <div className="border-t pt-4">
                   <div className="flex justify-end">
-                    <div className="w-64 space-y-2">
-                      <div className="flex justify-between">
+                    <div className="w-72 space-y-2 text-sm">
+                      {selectedInvoice.subtotal != null && (
+                        <div className="flex justify-between">
+                          <span>Subtotal:</span>
+                          <span>₹{Number(selectedInvoice.subtotal).toFixed(2)}</span>
+                        </div>
+                      )}
+                      {(selectedInvoice.total_discount ?? 0) > 0 && (
+                        <div className="flex justify-between text-orange-600">
+                          <span>
+                            Discount
+                            {selectedInvoice.discount_mode === 'percentage' && selectedInvoice.discount_value
+                              ? ` (${selectedInvoice.discount_value}%)`
+                              : ''}
+                            :
+                          </span>
+                          <span>- ₹{Number(selectedInvoice.total_discount).toFixed(2)}</span>
+                        </div>
+                      )}
+                      {(selectedInvoice.total_tax ?? 0) > 0 && (
+                        <div className="flex justify-between">
+                          <span>Tax (GST):</span>
+                          <span>₹{Number(selectedInvoice.total_tax).toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between border-t pt-2 font-semibold">
                         <span>Grand Total:</span>
-                        <span className="font-semibold">₹{selectedInvoice.grand_total.toLocaleString()}</span>
+                        <span>₹{Number(selectedInvoice.grand_total).toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span>Paid Amount:</span>
-                        <span className="text-green-600">₹{selectedInvoice.paid_amount.toLocaleString()}</span>
+                        <span className="text-green-600">₹{Number(selectedInvoice.paid_amount).toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between border-t pt-2">
                         <span className="font-semibold">Balance Due:</span>
-                        <span className="font-semibold text-red-600">₹{selectedInvoice.balance_due.toLocaleString()}</span>
+                        <span className="font-semibold text-red-600">₹{Number(selectedInvoice.balance_due).toFixed(2)}</span>
                       </div>
                     </div>
                   </div>
@@ -1551,7 +1579,7 @@ export default function InvoicingPage() {
                         value={itemQuantity}
                         onChange={(e) => {
                           const val = e.target.value;
-                          setItemQuantity(val === '' ? 0 : parseInt(val) || 0);
+                          setItemQuantity(val === '' ? 0 : parseInt(val, 10));
                         }}
                         placeholder="Enter quantity"
                       />
@@ -1571,7 +1599,7 @@ export default function InvoicingPage() {
                         value={itemUnitPrice}
                         onChange={(e) => {
                           const val = e.target.value;
-                          setItemUnitPrice(val === '' ? 0 : parseFloat(val) || 0);
+                          setItemUnitPrice(val === '' ? 0 : parseFloat(val));
                         }}
                         placeholder="Enter unit price"
                       />

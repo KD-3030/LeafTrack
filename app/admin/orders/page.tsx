@@ -38,7 +38,7 @@ import {
   Trash2,
   Download,
 } from 'lucide-react';
-import { generateOrderBillPDF } from '@/lib/pdfGenerator';
+// pdfGenerator is dynamically imported on-demand for bundle optimization
 
 interface OrderItem {
   product_id?: string;
@@ -167,6 +167,7 @@ export default function AdminOrdersPage() {
 
   const handleDownloadPDF = async (order: Order) => {
     try {
+      const { generateOrderBillPDF } = await import('@/lib/pdfGenerator');
       await generateOrderBillPDF(order);
       toast.success('Order bill downloaded successfully!');
     } catch (error) {
@@ -372,16 +373,16 @@ export default function AdminOrdersPage() {
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <div className="container mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Order Approvals</h1>
-        <p className="text-gray-500 mt-1">Review and approve salesman orders</p>
+        <h1 className="text-xl sm:text-3xl font-bold text-gray-900">Order Approvals</h1>
+        <p className="text-sm sm:text-base text-gray-500 mt-1">Review and approve salesman orders</p>
       </div>
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
           <Card>
             <CardHeader className="pb-2">
               <CardDescription>Total Orders</CardDescription>
@@ -491,16 +492,17 @@ export default function AdminOrdersPage() {
               </p>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Order Number</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Salesman</TableHead>
+                  <TableHead>Order #</TableHead>
+                  <TableHead className="hidden lg:table-cell">Date</TableHead>
+                  <TableHead className="hidden md:table-cell">Salesman</TableHead>
                   <TableHead>Customer</TableHead>
-                  <TableHead>Items</TableHead>
-                  <TableHead>Total Amount</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead className="hidden sm:table-cell">Items</TableHead>
+                  <TableHead>Total</TableHead>
+                  <TableHead className="hidden sm:table-cell">Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -508,13 +510,13 @@ export default function AdminOrdersPage() {
                 {filteredOrders.map((order) => (
                   <TableRow key={order._id}>
                     <TableCell className="font-medium">{order.order_number}</TableCell>
-                    <TableCell>
+                    <TableCell className="hidden lg:table-cell">
                       <div className="flex items-center text-sm">
                         <Calendar className="mr-1 h-4 w-4 text-gray-400" />
                         {new Date(order.order_date).toLocaleDateString('en-IN')}
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden md:table-cell">
                       <div className="flex items-center text-sm">
                         <User className="mr-1 h-4 w-4 text-gray-400" />
                         {order.salesman_name}
@@ -526,7 +528,7 @@ export default function AdminOrdersPage() {
                         <div className="text-sm text-gray-500">{order.customer_contact}</div>
                       </div>
                     </TableCell>
-                    <TableCell>{order.items.length} item(s)</TableCell>
+                    <TableCell className="hidden sm:table-cell">{order.items.length} item(s)</TableCell>
                     <TableCell>
                       <div className="font-medium">
                         ₹{order.total_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
@@ -535,7 +537,7 @@ export default function AdminOrdersPage() {
                         <div className="text-xs text-blue-600">Modified</div>
                       )}
                     </TableCell>
-                    <TableCell>{getStatusBadge(order.status)}</TableCell>
+                    <TableCell className="hidden sm:table-cell">{getStatusBadge(order.status)}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <Button
@@ -578,6 +580,7 @@ export default function AdminOrdersPage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>

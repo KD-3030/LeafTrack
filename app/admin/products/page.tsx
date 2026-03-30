@@ -198,15 +198,15 @@ export default function ProductsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background p-6">
+    <div className="min-h-screen bg-background p-3 sm:p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 sm:mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-              <Package className="h-8 w-8 text-green-600" />
+            <h1 className="text-xl sm:text-3xl font-bold text-gray-900 flex items-center gap-2 sm:gap-3">
+              <Package className="h-6 w-6 sm:h-8 sm:w-8 text-green-600" />
               Products Management
             </h1>
-            <p className="text-gray-600 mt-2">
+            <p className="text-gray-600 text-sm mt-1 sm:mt-2">
               Manage your product inventory with manufacturing costs and stock levels
             </p>
           </div>
@@ -333,10 +333,10 @@ export default function ProductsPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Product Name</TableHead>
-                      <TableHead>Manufacturing Cost</TableHead>
-                      <TableHead>Current Stock</TableHead>
-                      <TableHead>HSN Code</TableHead>
-                      <TableHead>GST Rate</TableHead>
+                      <TableHead>Mfg Cost</TableHead>
+                      <TableHead>Stock</TableHead>
+                      <TableHead className="hidden md:table-cell">HSN Code</TableHead>
+                      <TableHead className="hidden sm:table-cell">GST Rate</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -353,8 +353,8 @@ export default function ProductsPage() {
                             {product.totalStock || 0} units
                           </span>
                         </TableCell>
-                        <TableCell>{product.hsn_code}</TableCell>
-                        <TableCell>{product.gst_rate}%</TableCell>
+                        <TableCell className="hidden md:table-cell">{product.hsn_code}</TableCell>
+                        <TableCell className="hidden sm:table-cell">{product.gst_rate}%</TableCell>
                         <TableCell>
                           <div className="flex items-center space-x-2">
                             <Button

@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 // import { useAuth } from '@/contexts/AuthContext'; // Removed unused import
 import { toast } from 'sonner';
-import * as XLSX from 'xlsx';
+// XLSX is dynamically imported in downloadTransactionExcel() for bundle optimization
 
 interface Customer {
   _id: string;
@@ -271,7 +271,7 @@ export default function CustomersPage() {
   };
 
   // Download individual customer report with all transactions as Excel
-  const downloadCustomerReport = () => {
+  const downloadCustomerReport = async () => {
     if (!selectedCustomer || !customerTransactions) {
       toast.error('No customer data available to download');
       return;
@@ -280,6 +280,9 @@ export default function CustomersPage() {
     const customer = selectedCustomer;
     const summary = customerTransactions.summary;
     const transactions = customerTransactions.transactions;
+
+    // Dynamically import xlsx for bundle optimization
+    const XLSX = await import('xlsx');
 
     // Create a new workbook
     const workbook = XLSX.utils.book_new();
@@ -591,20 +594,21 @@ export default function CustomersPage() {
   const uniqueStates = [...new Set(customers.map(c => c.state).filter(Boolean))];
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="min-h-screen bg-background p-3 sm:p-6">
+      <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Customer Management</h1>
-            <p className="text-gray-600 mt-1">Manage your customer database and relationships</p>
+            <h1 className="text-xl sm:text-3xl font-bold text-gray-900">Customer Management</h1>
+            <p className="text-gray-600 text-sm mt-1">Manage your customer database and relationships</p>
           </div>
           <Button
             onClick={() => {
               resetForm();
               setIsCreateDialogOpen(true);
             }}
-            className=""
+            size="sm"
+            className="w-fit"
           >
             <Plus className="h-4 w-4 mr-2" />
             Add Customer
@@ -612,7 +616,7 @@ export default function CustomersPage() {
         </div>
 
         {/* Statistics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Customers</CardTitle>
@@ -728,17 +732,18 @@ export default function CustomersPage() {
                 <p className="text-gray-600">Loading customers...</p>
               </div>
             ) : (
+              <div className="overflow-x-auto -mx-6 px-6">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Customer</TableHead>
-                    <TableHead>Contact</TableHead>
-                    <TableHead>Business</TableHead>
-                    <TableHead>Location</TableHead>
-                    <TableHead>GST Info</TableHead>
-                    <TableHead>Credit</TableHead>
+                    <TableHead className="hidden md:table-cell">Contact</TableHead>
+                    <TableHead className="hidden lg:table-cell">Business</TableHead>
+                    <TableHead className="hidden lg:table-cell">Location</TableHead>
+                    <TableHead className="hidden xl:table-cell">GST Info</TableHead>
+                    <TableHead className="hidden md:table-cell">Credit</TableHead>
                     <TableHead className="text-right">Outstanding</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead className="hidden sm:table-cell">Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -751,7 +756,7 @@ export default function CustomersPage() {
                           <div className="text-sm text-gray-600">{customer.phone}</div>
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden md:table-cell">
                         <div className="space-y-1">
                           <div className="flex items-center text-sm">
                             <Phone className="h-3 w-3 mr-1" />
@@ -765,7 +770,7 @@ export default function CustomersPage() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden lg:table-cell">
                         <div>
                           {customer.business_name && (
                             <div className="font-medium">{customer.business_name}</div>
@@ -773,7 +778,7 @@ export default function CustomersPage() {
                           {getBusinessTypeBadge(customer.business_type)}
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden lg:table-cell">
                         <div className="text-sm">
                           {customer.city && customer.state ? (
                             <>
@@ -785,7 +790,7 @@ export default function CustomersPage() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden xl:table-cell">
                         <div className="text-sm">
                           {customer.gstin ? (
                             <>
@@ -797,7 +802,7 @@ export default function CustomersPage() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden md:table-cell">
                         <div className="text-sm">
                           <div>₹{customer.credit_limit.toLocaleString()}</div>
                           <div className="text-gray-600">{customer.credit_days} days</div>
@@ -823,7 +828,7 @@ export default function CustomersPage() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden sm:table-cell">
                         {getStatusBadge(customer.status)}
                       </TableCell>
                       <TableCell className="text-right">
@@ -862,6 +867,7 @@ export default function CustomersPage() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -885,7 +891,7 @@ export default function CustomersPage() {
               {/* Basic Information */}
               <div>
                 <h3 className="text-lg font-medium mb-4">Basic Information</h3>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="name">Customer Name *</Label>
                     <Input
@@ -937,7 +943,7 @@ export default function CustomersPage() {
                       rows={2}
                     />
                   </div>
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="city">City</Label>
                       <Input

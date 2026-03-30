@@ -20,12 +20,12 @@ export async function GET(request: NextRequest) {
 
     // Role-based filtering
     if (roleId === 'secondary_executive') {
-      // SE sees assignments from their manager
+      // SE sees assignments from their manager (PE's stock pool)
       if (currentUser.manager_id) {
         const { data: managerAssignments } = await supabaseAdmin
           .from('assignments')
           .select('*')
-          .eq('salesman_id', decoded.userId);
+          .eq('salesman_id', currentUser.manager_id);
         const assignments = withIds(managerAssignments || []);
         return await enrichAndReturn(assignments);
       }

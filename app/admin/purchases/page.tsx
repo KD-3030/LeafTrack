@@ -50,8 +50,7 @@ import {
 } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { scanBillImage, fileToBase64 } from '@/lib/ocrHelper';
-import { generatePurchaseBillPDF } from '@/lib/pdfGenerator';
+// OCR and PDF are dynamically imported on-demand for bundle optimization
 
 interface Seller {
   _id: string;
@@ -253,12 +252,14 @@ export default function PurchasesPage() {
       setOcrResult(null);
 
       // Show preview
+      const { fileToBase64 } = await import('@/lib/ocrHelper');
       const preview = await fileToBase64(file);
       setBillPreview(preview);
 
       toast.info('Scanning bill... This may take a moment.');
 
       // Perform OCR
+      const { scanBillImage } = await import('@/lib/ocrHelper');
       const result = await scanBillImage(file, (progress) => {
         setScanProgress(progress);
       });
@@ -458,6 +459,7 @@ export default function PurchasesPage() {
   };
 
   const handleDownloadBill = async (purchase: Purchase) => {
+    const { generatePurchaseBillPDF } = await import('@/lib/pdfGenerator');
     const success = await generatePurchaseBillPDF(purchase);
     if (success) {
       toast.success('Purchase bill downloaded successfully');
@@ -654,12 +656,12 @@ export default function PurchasesPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Serial #</TableHead>
-                    <TableHead>Date</TableHead>
+                    <TableHead className="hidden md:table-cell">Date</TableHead>
                     <TableHead>Seller</TableHead>
-                    <TableHead>Product</TableHead>
-                    <TableHead>Invoice #</TableHead>
+                    <TableHead className="hidden lg:table-cell">Product</TableHead>
+                    <TableHead className="hidden lg:table-cell">Invoice #</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead className="hidden sm:table-cell">Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -669,7 +671,7 @@ export default function PurchasesPage() {
                       <TableCell>
                         <span className="font-mono font-medium">#{purchase.serial_number}</span>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden md:table-cell">
                         {new Date(purchase.purchase_date).toLocaleDateString('en-IN')}
                       </TableCell>
                       <TableCell>
@@ -686,10 +688,10 @@ export default function PurchasesPage() {
                           <span className="text-gray-400">-</span>
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden lg:table-cell">
                         {purchase.product_name || <span className="text-gray-400">-</span>}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden lg:table-cell">
                         {purchase.invoice_number ? (
                           <span className="font-mono text-sm">{purchase.invoice_number}</span>
                         ) : (
@@ -699,7 +701,7 @@ export default function PurchasesPage() {
                       <TableCell className="text-right font-medium">
                         ₹{(purchase.final_amount || 0).toLocaleString()}
                       </TableCell>
-                      <TableCell>{getStatusBadge(purchase.payment_status)}</TableCell>
+                      <TableCell className="hidden sm:table-cell">{getStatusBadge(purchase.payment_status)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
                           <Button variant="ghost" size="icon" onClick={() => handleView(purchase)}>

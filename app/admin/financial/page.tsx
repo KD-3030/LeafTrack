@@ -679,23 +679,23 @@ export default function FinancialDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="min-h-screen bg-background p-3 sm:p-6">
+      <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Financial Dashboard</h1>
-            <p className="text-gray-600 mt-1">Complete financial overview and payment management</p>
+            <h1 className="text-xl sm:text-3xl font-bold text-gray-900">Financial Dashboard</h1>
+            <p className="text-sm sm:text-base text-gray-600 mt-1">Complete financial overview and payment management</p>
           </div>
-          <Button onClick={loadFinancialData} variant="outline">
+          <Button onClick={loadFinancialData} variant="outline" size="sm">
             <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh Data
+            Refresh
           </Button>
         </div>
 
         {/* Financial Statistics */}
         {stats && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-6">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
@@ -747,11 +747,11 @@ export default function FinancialDashboard() {
           </div>
         )}
 
-        <Tabs defaultValue="payments" className="space-y-6">
+        <Tabs defaultValue="payments" className="space-y-4 sm:space-y-6">
           <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="payments">Recent Payments</TabsTrigger>
-            <TabsTrigger value="outstanding">Outstanding Invoices</TabsTrigger>
-            <TabsTrigger value="analytics">Financial Analytics</TabsTrigger>
+            <TabsTrigger value="payments" className="text-xs sm:text-sm">Payments</TabsTrigger>
+            <TabsTrigger value="outstanding" className="text-xs sm:text-sm">Outstanding</TabsTrigger>
+            <TabsTrigger value="analytics" className="text-xs sm:text-sm">Analytics</TabsTrigger>
           </TabsList>
 
           {/* Recent Payments */}
@@ -858,16 +858,17 @@ export default function FinancialDashboard() {
                     <p className="text-gray-600">Loading payments...</p>
                   </div>
                 ) : (
+                  <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Invoice</TableHead>
                         <TableHead>Customer</TableHead>
                         <TableHead>Amount</TableHead>
-                        <TableHead>Method</TableHead>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Reconciled</TableHead>
+                        <TableHead className="hidden md:table-cell">Method</TableHead>
+                        <TableHead className="hidden lg:table-cell">Date</TableHead>
+                        <TableHead className="hidden sm:table-cell">Status</TableHead>
+                        <TableHead className="hidden lg:table-cell">Reconciled</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -897,19 +898,19 @@ export default function FinancialDashboard() {
                               </div>
                             </TableCell>
                             <TableCell>₹{(payment.amount_paid || 0).toLocaleString()}</TableCell>
-                            <TableCell>
+                            <TableCell className="hidden md:table-cell">
                               <div className="flex items-center space-x-2">
                                 <span>{getPaymentMethodIcon(payment.payment_method)}</span>
                                 <span>{payment.payment_method}</span>
                               </div>
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="hidden lg:table-cell">
                               {payment.payment_date ? new Date(payment.payment_date).toLocaleDateString() : 'N/A'}
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="hidden sm:table-cell">
                               {getStatusBadge(payment.status)}
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="hidden lg:table-cell">
                               {payment.reconciled ? (
                                 <Badge className="bg-green-100 text-green-800">
                                   <Check className="h-3 w-3 mr-1" />
@@ -972,6 +973,7 @@ export default function FinancialDashboard() {
                       )}
                     </TableBody>
                   </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -1042,15 +1044,16 @@ export default function FinancialDashboard() {
                   </div>
                 </div>
 
+                <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Invoice</TableHead>
                       <TableHead>Customer</TableHead>
-                      <TableHead>Total</TableHead>
+                      <TableHead className="hidden md:table-cell">Total</TableHead>
                       <TableHead>Balance Due</TableHead>
-                      <TableHead>Due Date</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead className="hidden sm:table-cell">Due Date</TableHead>
+                      <TableHead className="hidden sm:table-cell">Status</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -1079,13 +1082,13 @@ export default function FinancialDashboard() {
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell>₹{invoice.grand_total.toLocaleString()}</TableCell>
+                        <TableCell className="hidden md:table-cell">₹{invoice.grand_total.toLocaleString()}</TableCell>
                         <TableCell>
                           <div className="font-medium text-red-600">
                             ₹{invoice.balance_due.toLocaleString()}
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="hidden sm:table-cell">
                           <div>
                             <div>{new Date(invoice.due_date).toLocaleDateString()}</div>
                             {invoice.days_overdue > 0 && (
@@ -1095,7 +1098,7 @@ export default function FinancialDashboard() {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="hidden sm:table-cell">
                           {invoice.days_overdue > 0 ? (
                             <Badge className="bg-red-100 text-red-800">Overdue</Badge>
                           ) : (
@@ -1117,6 +1120,7 @@ export default function FinancialDashboard() {
                     )}
                   </TableBody>
                 </Table>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>

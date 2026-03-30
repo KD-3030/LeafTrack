@@ -31,7 +31,7 @@ import {
   Calendar,
   Download,
 } from 'lucide-react';
-import { generateOrderBillPDF } from '@/lib/pdfGenerator';
+// pdfGenerator is dynamically imported on-demand for bundle optimization
 
 interface OrderItem {
   product_name: string;
@@ -139,6 +139,7 @@ export default function SalesmanOrdersPage() {
         payment_terms: '',
       };
       
+      const { generateOrderBillPDF } = await import('@/lib/pdfGenerator');
       await generateOrderBillPDF(orderForPDF as typeof order & { salesman_id: string; salesman_name: string; tax_percentage: number });
       toast.success('Order bill downloaded successfully!');
     } catch (error) {

@@ -33,18 +33,20 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadStats();
+    const controller = new AbortController();
+    loadStats(controller.signal);
+    return () => controller.abort();
   }, []);
 
-  const loadStats = async () => {
+  const loadStats = async (signal?: AbortSignal) => {
     try {
       setLoading(true);
       const token = localStorage.getItem('leaftrack_token');
       
       const [productsResponse, usersResponse, ordersResponse] = await Promise.all([
-        fetch('/api/products'),
-        fetch('/api/users'),
-        fetch('/api/orders', { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch('/api/products', { signal }),
+        fetch('/api/users', { signal }),
+        fetch('/api/orders', { headers: { 'Authorization': `Bearer ${token}` }, signal }),
       ]);
       
       const productsData = await productsResponse.json();
@@ -74,6 +76,7 @@ export default function AdminDashboard() {
         setRecentOrders(pending.slice(0, 5));
       }
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
       console.error('Error loading stats:', error);
     } finally {
       setLoading(false);

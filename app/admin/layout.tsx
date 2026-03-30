@@ -1,7 +1,15 @@
+import type { Metadata } from 'next';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { Navigation } from '@/components/ui/navigation';
 import { AdminSidebar } from '@/components/admin/Sidebar';
 import { Toaster } from '@/components/ui/toaster';
+
+export const metadata: Metadata = {
+  title: {
+    default: 'Dashboard',
+    template: '%s | SohagTea Manage',
+  },
+};
 
 export default function AdminLayout({
   children,

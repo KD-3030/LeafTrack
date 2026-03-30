@@ -216,7 +216,9 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       qrDataUrl = await QRCode.toDataURL(upiUri, { width: 120, margin: 1 });
     }
 
-    const items = (invoice.items || []).map((item) => {
+    type InvoiceItemRaw = { quantity?: number | string | null; unit_price?: number | string | null; taxable_amount?: number | string | null; cgst_amount?: number | string | null; sgst_amount?: number | string | null; igst_amount?: number | string | null; gst_rate?: number | string | null; discount_percentage?: number | string | null; product_name?: string | null; hsn_code?: string | null; total_amount?: number | string | null; };
+    type ProcessedItem = { productName: string; hsnCode: string; qty: number; unit: string; price: number; discount: number; gstRate: number; gstAmount: number; amount: number; taxableAmount: number; };
+    const items = (invoice.items as InvoiceItemRaw[] || []).map((item): ProcessedItem => {
       const quantity = Number(item.quantity || 0);
       const unitPrice = Number(item.unit_price || 0);
       const taxableAmount = Number(item.taxable_amount || quantity * unitPrice);
@@ -268,6 +270,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const avgRate = totalTaxable > 0 ? (totalTax * 100) / totalTaxable : 0;
 
     const subtotal = Number(invoice.subtotal || items.reduce((sum, item) => sum + item.taxableAmount, 0));
+    const totalDiscount = Number(invoice.total_discount || 0);
     const grandTotal = Number(invoice.grand_total || 0);
     const rounded = Math.round(grandTotal);
     const roundOff = Number((rounded - grandTotal).toFixed(2));
@@ -455,6 +458,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       <div class="summary-right">
         <div class="totals-calc-grid">
           <div class="calc-label">Sub Total:</div><div class="calc-value">₹ ${formatCurrency(subtotal)}</div>
+          ${totalDiscount > 0 ? `<div class="calc-label">Discount:</div><div class="calc-value">- ₹ ${formatCurrency(totalDiscount)}</div>` : ''}
           <div class="calc-label">Round Off:</div><div class="calc-value">₹ ${formatCurrency(roundOff)}</div>
           <div class="calc-label grand-total">Total:</div><div class="calc-value grand-total">₹ ${formatCurrency(grandTotal)}</div>
           <div class="calc-label">Received:</div><div class="calc-value">₹ ${formatCurrency(paidAmount)}</div>

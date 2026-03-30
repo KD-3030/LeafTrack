@@ -12,11 +12,11 @@ const securityHeaders = [
     key: 'Content-Security-Policy',
     value: [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://www.googletagmanager.com https://www.google-analytics.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
       "font-src 'self' https://fonts.gstatic.com data:",
-      "img-src 'self' data: https: blob: https://*.tile.openstreetmap.org",
-      "connect-src 'self' https://nominatim.openstreetmap.org https://*.tile.openstreetmap.org",
+      "img-src 'self' data: https: blob: https://*.tile.openstreetmap.org https://www.google-analytics.com",
+      "connect-src 'self' https://nominatim.openstreetmap.org https://*.tile.openstreetmap.org https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",
@@ -72,6 +72,21 @@ const nextConfig = {
         source: '/api/:path*',
         headers: [
           { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate' },
+        ],
+      },
+      {
+        // Cache static assets aggressively (fonts, images, JS/CSS bundles)
+        source: '/:path*.(js|css|woff|woff2|png|jpg|jpeg|svg|webp|avif|ico)',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+        ],
+      },
+      {
+        // Service worker must not be cached
+        source: '/sw.js',
+        headers: [
+          { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
+          { key: 'Service-Worker-Allowed', value: '/' },
         ],
       },
     ];
