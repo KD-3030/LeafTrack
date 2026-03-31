@@ -6,19 +6,19 @@ import { withId } from '@/lib/supabase-helpers';
 
 export const dynamic = 'force-dynamic';
 
-async function updateCustomerOutstandingBalance(customerId: string) {
+async function updateCustomerOutstandingBalance(distributorId: string) {
   const { data: invoices } = await supabaseAdmin
     .from('invoices')
     .select('balance_due')
-    .eq('customer_id', customerId)
+    .eq('distributor_id', distributorId)
     .neq('status', 'Cancelled');
 
   const outstandingBalance = (invoices || []).reduce((sum, inv) => sum + (inv.balance_due || 0), 0);
 
   await supabaseAdmin
-    .from('customers')
+    .from('distributors')
     .update({ outstanding_balance: outstandingBalance })
-    .eq('id', customerId);
+    .eq('id', distributorId);
 }
 
 // GET - Get specific invoice
@@ -41,29 +41,29 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const roleId = normalizeRoleId(decoded.role);
 
     if (roleId === 'secondary_executive') {
-      const { data: customer } = await supabaseAdmin
-        .from('customers')
-        .select('primary_executive_id, secondary_executive_id')
-        .eq('id', invoice.customer_id)
-        .single();
+      // Check SE has assignment to this distributor
+      const { data: assign } = await supabaseAdmin
+        .from('se_distributor_assignments')
+        .select('id')
+        .eq('se_id', decoded.userId)
+        .eq('distributor_id', invoice.distributor_id)
+        .eq('is_active', true)
+        .maybeSingle();
 
-      if (!customer) {
-        return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
-      }
-      if (customer.secondary_executive_id !== decoded.userId) {
+      if (!assign) {
         return NextResponse.json({ error: 'Access denied' }, { status: 403 });
       }
     } else if (roleId === 'primary_executive') {
       const { data: customer } = await supabaseAdmin
-        .from('customers')
-        .select('primary_executive_id')
-        .eq('id', invoice.customer_id)
+        .from('distributors')
+        .select('pe_id')
+        .eq('id', invoice.distributor_id)
         .single();
 
       if (!customer) {
         return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
       }
-      if (customer.primary_executive_id !== decoded.userId) {
+      if (customer.pe_id !== decoded.userId) {
         return NextResponse.json({ error: 'Access denied' }, { status: 403 });
       }
     }
@@ -79,9 +79,9 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const balanceDue = invoice.grand_total - paidAmount;
 
     const { data: customer } = await supabaseAdmin
-      .from('customers')
+      .from('distributors')
       .select('outstanding_balance')
-      .eq('id', invoice.customer_id)
+      .eq('id', invoice.distributor_id)
       .single();
 
     // Fetch invoice items
@@ -139,7 +139,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       if (newPaymentAmount > 0) {
         await supabaseAdmin.from('payments').insert({
           invoice_id: params.id,
-          customer_id: invoice.customer_id,
+          distributor_id: invoice.distributor_id,
           amount_paid: newPaymentAmount,
           payment_method: updates.payment_method,
           payment_date: updates.payment_date ? new Date(updates.payment_date).toISOString() : new Date().toISOString(),
@@ -197,12 +197,12 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       })
       .eq('id', params.id);
 
-    await updateCustomerOutstandingBalance(updatedInvoice.customer_id);
+    await updateCustomerOutstandingBalance(updatedInvoice.distributor_id);
 
     const { data: customerData } = await supabaseAdmin
-      .from('customers')
+      .from('distributors')
       .select('outstanding_balance')
-      .eq('id', updatedInvoice.customer_id)
+      .eq('id', updatedInvoice.distributor_id)
       .single();
 
     return NextResponse.json({
@@ -232,7 +232,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
 
     const { data: invoice, error: fetchErr } = await supabaseAdmin
       .from('invoices')
-      .select('id, invoice_number, customer_id')
+      .select('id, invoice_number, distributor_id')
       .eq('id', params.id)
       .single();
 
@@ -273,7 +273,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       return NextResponse.json({ error: 'Invoice not found or already deleted' }, { status: 404 });
     }
 
-    await updateCustomerOutstandingBalance(invoice.customer_id);
+    await updateCustomerOutstandingBalance(invoice.distributor_id);
 
     return NextResponse.json({
       success: true,

@@ -60,21 +60,23 @@ interface Invoice {
   total_igst?: number;
 }
 
-interface Sale {
+interface OrderForInvoice {
   _id: string;
-  assignment_id: string;
-  product_id: {
-    name: string;
-    price: number;
-  };
-  salesman_id: {
-    name: string;
-  };
-  quantity_sold: number;
-  unit_price: number;
+  order_number: string;
+  customer_name: string;
+  salesman_name: string;
+  items: {
+    product_id: string;
+    product_name: string;
+    quantity: number;
+    unit_price: number;
+    total: number;
+  }[];
+  subtotal: number;
   total_amount: number;
-  sale_date: string;
-  invoice_generated: boolean;
+  order_date: string;
+  status: string;
+  distributor_id?: string;
 }
 
 interface Customer {
@@ -124,7 +126,7 @@ interface ManualInvoiceForm {
 export default function InvoicingPage() {
   const { toast } = useToast();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [sales, setSales] = useState<Sale[]>([]);
+  const [approvedOrders, setApprovedOrders] = useState<OrderForInvoice[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -171,7 +173,7 @@ export default function InvoicingPage() {
 
   useEffect(() => {
     loadInvoices(currentPage, itemsPerPage);
-    loadSales();
+    loadApprovedOrders();
     loadCustomers();
     loadProducts();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -219,10 +221,10 @@ export default function InvoicingPage() {
     }
   };
 
-  const loadSales = async () => {
+  const loadApprovedOrders = async () => {
     try {
       const token = localStorage.getItem('leaftrack_token');
-      const response = await fetch('/api/sales?invoice_generated=false', {
+      const response = await fetch('/api/orders?status=approved', {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -230,19 +232,19 @@ export default function InvoicingPage() {
 
       const data = await response.json();
       if (data.success) {
-        setSales(data.sales);
+        setApprovedOrders(data.orders || []);
       } else {
         toast({
           title: "Error",
-          description: "Failed to load sales",
+          description: "Failed to load approved orders",
           variant: "destructive",
         });
       }
     } catch (error) {
-      console.error('Error loading sales:', error);
+      console.error('Error loading approved orders:', error);
       toast({
         title: "Error",
-        description: "Failed to load sales",
+        description: "Failed to load approved orders",
         variant: "destructive",
       });
     }
@@ -558,7 +560,7 @@ export default function InvoicingPage() {
     }
   };
 
-  const createInvoiceFromSale = async (saleId: string) => {
+  const createInvoiceFromOrder = async (orderId: string) => {
     try {
       const token = localStorage.getItem('leaftrack_token');
       const response = await fetch('/api/invoices', {
@@ -568,7 +570,7 @@ export default function InvoicingPage() {
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
-          sale_id: saleId,
+          order_id: orderId,
         }),
       });
 
@@ -576,11 +578,11 @@ export default function InvoicingPage() {
       if (data.success) {
         toast({
           title: "Success",
-          description: "Invoice created successfully",
+          description: "Invoice created successfully from order",
         });
         setIsCreateDialogOpen(false);
         loadInvoices();
-        loadSales();
+        loadApprovedOrders();
       } else {
         toast({
           title: "Error",
@@ -589,7 +591,7 @@ export default function InvoicingPage() {
         });
       }
     } catch (error) {
-      console.error('Error creating invoice:', error);
+      console.error('Error creating invoice from order:', error);
       toast({
         title: "Error",
         description: "Failed to create invoice",
@@ -871,8 +873,8 @@ export default function InvoicingPage() {
               className="text-xs sm:text-sm"
             >
               <Plus className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline">From Sale</span>
-              <span className="sm:hidden">Sale</span>
+              <span className="hidden sm:inline">From Orders</span>
+              <span className="sm:hidden">Order</span>
             </Button>
           </div>
         </div>
@@ -959,7 +961,7 @@ export default function InvoicingPage() {
                 variant="outline" 
                 onClick={() => {
                   loadInvoices();
-                  loadSales();
+                  loadApprovedOrders();
                 }}
               >
                 <RefreshCw className="h-4 w-4 mr-2" />
@@ -1198,49 +1200,57 @@ export default function InvoicingPage() {
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogContent className="max-w-4xl">
             <DialogHeader>
-              <DialogTitle>Create Invoice from Sale</DialogTitle>
+              <DialogTitle>Create Invoice from Order</DialogTitle>
               <DialogDescription>
-                Select a sale to generate a GST-compliant invoice
+                Select an approved order to generate a GST-compliant invoice
               </DialogDescription>
             </DialogHeader>
             
             <div className="space-y-4">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Product</TableHead>
-                    <TableHead>Salesman</TableHead>
-                    <TableHead>Quantity</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead className="text-right">Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sales.map((sale) => (
-                    <TableRow key={sale._id}>
-                      <TableCell className="font-medium">
-                        {sale.product_id.name}
-                      </TableCell>
-                      <TableCell>{sale.salesman_id.name}</TableCell>
-                      <TableCell>{sale.quantity_sold}</TableCell>
-                      <TableCell>₹{sale.total_amount.toLocaleString()}</TableCell>
-                      <TableCell>
-                        {new Date(sale.sale_date).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          onClick={() => createInvoiceFromSale(sale._id)}
-                          className=""
-                        >
-                          Generate Invoice
-                        </Button>
-                      </TableCell>
+              {approvedOrders.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <FileText className="h-10 w-10 mx-auto mb-2 opacity-40" />
+                  <p>No approved orders waiting for invoicing.</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Order #</TableHead>
+                      <TableHead>Customer</TableHead>
+                      <TableHead>Salesman</TableHead>
+                      <TableHead>Items</TableHead>
+                      <TableHead>Amount</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead className="text-right">Action</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {approvedOrders.map((order) => (
+                      <TableRow key={order._id}>
+                        <TableCell className="font-medium">
+                          {order.order_number}
+                        </TableCell>
+                        <TableCell>{order.customer_name}</TableCell>
+                        <TableCell>{order.salesman_name}</TableCell>
+                        <TableCell>{order.items?.length || 0} item{(order.items?.length || 0) !== 1 ? 's' : ''}</TableCell>
+                        <TableCell>₹{order.total_amount?.toLocaleString()}</TableCell>
+                        <TableCell>
+                          {new Date(order.order_date).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            onClick={() => createInvoiceFromOrder(order._id)}
+                          >
+                            Generate Invoice
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </div>
           </DialogContent>
         </Dialog>

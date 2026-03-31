@@ -99,7 +99,7 @@ export async function PUT(
     // Admin actions: approve/reject/modify
     if (roleId === 'admin') {
       if (body.status) {
-        if (!['approved', 'rejected'].includes(body.status)) {
+        if (!['approved', 'rejected', 'dispatched'].includes(body.status)) {
           return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
         }
 
@@ -110,6 +110,44 @@ export async function PUT(
 
         if (body.status === 'rejected' && body.rejection_reason) {
           updateData.rejection_reason = body.rejection_reason;
+        }
+
+        // When dispatched, transfer stock to distributor inventory
+        if (body.status === 'dispatched' && order.distributor_id) {
+          const { data: orderItems } = await supabaseAdmin
+            .from('order_items').select('product_id, quantity').eq('order_id', params.id);
+          if (orderItems && orderItems.length > 0) {
+            for (const item of orderItems) {
+              if (!item.product_id) continue;
+              // Deduct from global stock
+              const { data: product } = await supabaseAdmin
+                .from('products').select('total_stock').eq('id', item.product_id).single();
+              if (product) {
+                await supabaseAdmin.from('products')
+                  .update({ total_stock: product.total_stock - item.quantity })
+                  .eq('id', item.product_id);
+              }
+              // Upsert distributor inventory
+              const { data: inv } = await supabaseAdmin
+                .from('distributor_inventory')
+                .select('id, current_stock')
+                .eq('distributor_id', order.distributor_id)
+                .eq('product_id', item.product_id)
+                .maybeSingle();
+              if (inv) {
+                await supabaseAdmin.from('distributor_inventory')
+                  .update({ current_stock: inv.current_stock + item.quantity, last_restocked_at: new Date().toISOString() })
+                  .eq('id', inv.id);
+              } else {
+                await supabaseAdmin.from('distributor_inventory').insert({
+                  distributor_id: order.distributor_id,
+                  product_id: item.product_id,
+                  current_stock: item.quantity,
+                  last_restocked_at: new Date().toISOString(),
+                });
+              }
+            }
+          }
         }
       }
 

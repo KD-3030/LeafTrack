@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     const to_date = searchParams.get('to_date');
 
     // Fetch invoices with items
-    let invoiceQuery = supabaseAdmin.from('invoices').select('id, invoice_number, invoice_date, customer_id, grand_total, taxable_amount, total_tax, total_cgst, total_sgst, total_igst, created_at');
+    let invoiceQuery = supabaseAdmin.from('invoices').select('id, invoice_number, invoice_date, distributor_id, grand_total, taxable_amount, total_tax, total_cgst, total_sgst, total_igst, created_at');
     if (from_date) invoiceQuery = invoiceQuery.gte('invoice_date', new Date(from_date).toISOString());
     if (to_date) invoiceQuery = invoiceQuery.lte('invoice_date', new Date(to_date).toISOString());
 
@@ -25,11 +25,11 @@ export async function GET(request: NextRequest) {
 
     // Fetch invoice items and customer data
     const invoiceIds = invs.map(i => i.id);
-    const customerIds = [...new Set(invs.map(i => i.customer_id).filter(Boolean))];
+    const customerIds = [...new Set(invs.map(i => i.distributor_id).filter(Boolean))];
 
     const [itemsRes, customersRes, settingsRes] = await Promise.all([
       invoiceIds.length ? supabaseAdmin.from('invoice_items').select('*').in('invoice_id', invoiceIds) : { data: [] },
-      customerIds.length ? supabaseAdmin.from('customers').select('id, name, gstin, state').in('id', customerIds) : { data: [] },
+      customerIds.length ? supabaseAdmin.from('distributors').select('id, name, gstin, state').in('id', customerIds) : { data: [] },
       supabaseAdmin.from('company_settings').select('*').limit(1).single(),
     ]);
 
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
       case 'gstr1': {
         // GSTR-1: Invoice-level detail
         const gstr1Data = invs.map(inv => {
-          const customer = inv.customer_id ? customerMap.get(inv.customer_id) : null;
+          const customer = inv.distributor_id ? customerMap.get(inv.distributor_id) : null;
           const isInterState = customer?.state && customer.state !== companyState;
           return {
             invoice_number: inv.invoice_number,
@@ -118,7 +118,7 @@ export async function GET(request: NextRequest) {
       case 'detailed': {
         // Item-level detailed report
         const detailedData = invs.map(inv => {
-          const customer = inv.customer_id ? customerMap.get(inv.customer_id) : null;
+          const customer = inv.distributor_id ? customerMap.get(inv.distributor_id) : null;
           const invItems = itemsByInvoice.get(inv.id) || [];
           return {
             invoice_number: inv.invoice_number,

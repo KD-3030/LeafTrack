@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
     const [uRes, pRes, cRes, aRes] = await Promise.all([
       uIds.length ? supabaseAdmin.from('users').select('id, name, email').in('id', uIds) : { data: [] },
       pIds.length ? supabaseAdmin.from('products').select('id, name, manufacturing_cost, hsn_code, gst_rate').in('id', pIds) : { data: [] },
-      cIds.length ? supabaseAdmin.from('customers').select('id, name, email, phone').in('id', cIds) : { data: [] },
+      cIds.length ? supabaseAdmin.from('distributors').select('id, name, email, phone').in('id', cIds) : { data: [] },
       aIds.length ? supabaseAdmin.from('assignments').select('*').in('id', aIds) : { data: [] },
     ]);
 
@@ -135,8 +135,7 @@ export async function POST(request: NextRequest) {
     let customerId = saleData.customer_id;
     if (!customerId && saleData.customer_details) {
       const peId = roleId === 'primary_executive' ? decoded.userId : (roleId === 'secondary_executive' ? currentUser.manager_id : undefined);
-      const seId = roleId === 'secondary_executive' ? decoded.userId : undefined;
-      const { data: newCust, error: custErr } = await supabaseAdmin.from('customers').insert({
+      const { data: newCust, error: custErr } = await supabaseAdmin.from('distributors').insert({
         name: saleData.customer_details.name,
         email: saleData.customer_details.email || `customer_${Date.now()}@leaftrack.com`,
         phone: saleData.customer_details.phone,
@@ -145,8 +144,7 @@ export async function POST(request: NextRequest) {
         gstin: saleData.customer_details.gstin,
         business_type: 'Individual',
         status: 'Active',
-        primary_executive_id: peId,
-        secondary_executive_id: seId,
+        pe_id: peId,
         created_by: decoded.userId,
       }).select('id').single();
       if (custErr) throw custErr;

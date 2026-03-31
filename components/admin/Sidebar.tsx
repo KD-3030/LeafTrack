@@ -58,7 +58,7 @@ const navGroups: NavGroup[] = [
       { name: 'Orders', href: '/admin/orders', icon: ClipboardCheck },
       { name: 'Invoicing', href: '/admin/invoicing', icon: FileText },
       { name: 'Sales Returns', href: '/admin/sales-returns', icon: RotateCcw },
-      { name: 'Customers', href: '/admin/customers', icon: UserCheck },
+      { name: 'Distributors', href: '/admin/distributors', icon: UserCheck },
     ],
   },
   {

@@ -187,7 +187,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     }
 
     const [customerRes, settingsRes] = await Promise.all([
-      supabaseAdmin.from('customers').select('outstanding_balance').eq('id', invoice.customer_id).single(),
+      supabaseAdmin.from('distributors').select('outstanding_balance').eq('id', invoice.distributor_id).single(),
       supabaseAdmin.from('company_settings').select('*').limit(1).single(),
     ]);
 

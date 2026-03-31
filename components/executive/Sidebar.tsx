@@ -22,8 +22,8 @@ const navigation = [
   { name: 'Dashboard', href: '/executive/dashboard', icon: LayoutDashboard },
   { name: 'Orders', href: '/executive/orders', icon: ClipboardCheck },
   { name: 'Team', href: '/executive/team', icon: Users },
-  { name: 'Stock Pool', href: '/executive/stock', icon: Package },
-  { name: 'Customers', href: '/executive/customers', icon: UserCheck },
+  { name: 'Distributor Stock', href: '/executive/stock', icon: Package },
+  { name: 'Distributors', href: '/executive/distributors', icon: UserCheck },
   { name: 'Invoicing', href: '/executive/invoicing', icon: FileText },
 ];
 

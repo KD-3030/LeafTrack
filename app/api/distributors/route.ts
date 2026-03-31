@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase-server';
 import { requireUserAuth } from '@/lib/authMiddleware';
 import { normalizeRoleId } from '@/lib/roles';
@@ -36,24 +36,33 @@ export async function GET(request: NextRequest) {
     if (roleId === 'primary_executive') {
       query = query.eq('pe_id', authResult.userId);
     } else if (roleId === 'secondary_executive') {
-      // SE sees distributors they are assigned to via se_distributor_assignments
-      const { data: assigns } = await supabaseAdmin.from('se_distributor_assignments').select('distributor_id').eq('se_id', authResult.userId).eq('is_active', true);
-      const assignedDistIds = (assigns || []).map(a => a.distributor_id);
-      if (!assignedDistIds.length) return NextResponse.json({ success: true, customers: [], pagination: { currentPage: page, totalPages: 0, totalCount: 0, hasNextPage: false, hasPrevPage: false } });
-      query = query.in('id', assignedDistIds);
+      // SE sees only distributors they are assigned to
+      const { data: assignments } = await supabaseAdmin
+        .from('se_distributor_assignments')
+        .select('distributor_id')
+        .eq('se_id', authResult.userId)
+        .eq('is_active', true);
+      const distIds = (assignments || []).map(a => a.distributor_id);
+      if (distIds.length === 0) {
+        return NextResponse.json({
+          success: true, distributors: [],
+          pagination: { currentPage: page, totalPages: 0, totalCount: 0, hasNextPage: false, hasPrevPage: false },
+        });
+      }
+      query = query.in('id', distIds);
     }
 
     const { data, count, error } = await query.order('created_at', { ascending: false }).range((page - 1) * limit, page * limit - 1);
     if (error) throw error;
 
     const total = count || 0;
-    const customerIds = (data || []).map((c: { id: string }) => c.id);
+    const distIds = (data || []).map((d: { id: string }) => d.id);
     const balanceMap: Record<string, number> = {};
 
-    if (customerIds.length > 0) {
+    if (distIds.length > 0) {
       const { data: invoices } = await supabaseAdmin
         .from('invoices').select('distributor_id, balance_due')
-        .in('distributor_id', customerIds).neq('status', 'Cancelled');
+        .in('distributor_id', distIds).neq('status', 'Cancelled');
       if (invoices) {
         for (const inv of invoices) {
           balanceMap[inv.distributor_id] = (balanceMap[inv.distributor_id] || 0) + (inv.balance_due || 0);
@@ -61,19 +70,19 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const customers = (data || []).map((c: Record<string, unknown>) => ({
-      ...withId(c as { id: string } & Record<string, unknown>),
-      outstanding_balance: balanceMap[(c as { id: string }).id] || (c as { outstanding_balance?: number }).outstanding_balance || 0,
-      createdAt: c.created_at, updatedAt: c.updated_at,
+    const distributors = (data || []).map((d: Record<string, unknown>) => ({
+      ...withId(d as { id: string } & Record<string, unknown>),
+      outstanding_balance: balanceMap[(d as { id: string }).id] || (d as { outstanding_balance?: number }).outstanding_balance || 0,
+      createdAt: d.created_at, updatedAt: d.updated_at,
     }));
 
     return NextResponse.json({
-      success: true, customers,
+      success: true, distributors,
       pagination: { currentPage: page, totalPages: Math.ceil(total / limit), totalCount: total, hasNextPage: page < Math.ceil(total / limit), hasPrevPage: page > 1 },
     });
   } catch (error) {
-    console.error('Error fetching customers:', error);
-    return NextResponse.json({ error: 'Failed to fetch customers' }, { status: 500 });
+    console.error('Error fetching distributors:', error);
+    return NextResponse.json({ error: 'Failed to fetch distributors' }, { status: 500 });
   }
 }
 
@@ -93,7 +102,7 @@ export async function POST(request: NextRequest) {
 
     if (body.email) {
       const { data: dup } = await supabaseAdmin.from('distributors').select('id').eq('email', body.email).maybeSingle();
-      if (dup) return NextResponse.json({ error: 'Customer with this email already exists' }, { status: 400 });
+      if (dup) return NextResponse.json({ error: 'Distributor with this email already exists' }, { status: 400 });
     }
 
     let peId: string | null = null;
@@ -104,12 +113,11 @@ export async function POST(request: NextRequest) {
       if (!currentUser.manager_id) return NextResponse.json({ error: 'Secondary executive is not assigned to a primary executive' }, { status: 400 });
       peId = currentUser.manager_id;
     } else if (roleId === 'admin') {
-      if (body.pe_id || body.primary_executive_id) {
-        const peid = body.pe_id || body.primary_executive_id;
-        const { data: pe } = await supabaseAdmin.from('users').select('role').eq('id', peid).single();
+      if (body.pe_id) {
+        const { data: pe } = await supabaseAdmin.from('users').select('role').eq('id', body.pe_id).single();
         if (!pe || normalizeRoleId(pe.role) !== 'primary_executive')
           return NextResponse.json({ error: 'pe_id must belong to a primary executive' }, { status: 400 });
-        peId = peid;
+        peId = body.pe_id;
       }
     }
 
@@ -120,19 +128,21 @@ export async function POST(request: NextRequest) {
       business_name: body.business_name || null, business_type: body.business_type || 'Individual',
       credit_limit: body.credit_limit || 0, credit_days: body.credit_days || 30,
       outstanding_balance: body.outstanding_balance || 0, status: body.status || 'Active',
+      approval_status: body.approval_status || 'approved',
       tags: body.tags || [], notes: body.notes || null,
+      documents: body.documents || [],
       pe_id: peId,
       created_by: authResult.userId,
     }).select().single();
 
     if (error) {
-      if (error.code === '23505') return NextResponse.json({ error: 'Customer with this phone or email already exists' }, { status: 400 });
+      if (error.code === '23505') return NextResponse.json({ error: 'Distributor with this phone or email already exists' }, { status: 400 });
       throw error;
     }
 
-    return NextResponse.json({ success: true, message: 'Customer created successfully', customer: { ...withId(data), createdAt: data.created_at, updatedAt: data.updated_at } });
+    return NextResponse.json({ success: true, message: 'Distributor created successfully', distributor: { ...withId(data), createdAt: data.created_at, updatedAt: data.updated_at } });
   } catch (error) {
-    console.error('Error creating customer:', error);
-    return NextResponse.json({ error: 'Failed to create customer' }, { status: 500 });
+    console.error('Error creating distributor:', error);
+    return NextResponse.json({ error: 'Failed to create distributor' }, { status: 500 });
   }
 }

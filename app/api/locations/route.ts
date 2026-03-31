@@ -6,12 +6,11 @@ import { withId, withIds } from '@/lib/supabase-helpers';
 
 export const dynamic = 'force-dynamic';
 
-// GET - Retrieve locations (admin can get all, salesman can get own)
+// GET - Retrieve locations (admin only)
 export async function GET(request: NextRequest) {
   try {
-    const authResult = requireAuth(request);
+    const authResult = requireAdminAuth(request);
     if (authResult instanceof NextResponse) return authResult;
-    const decoded = authResult;
 
     const { searchParams } = new URL(request.url);
     const salesmanId = searchParams.get('salesman_id');
@@ -28,28 +27,7 @@ export async function GET(request: NextRequest) {
       .order('timestamp', { ascending: false })
       .limit(limit);
 
-    const roleId = normalizeRoleId(decoded.role);
-
-    if (roleId === 'secondary_executive') {
-      query = query.eq('salesman_id', decoded.userId);
-    } else if (roleId === 'primary_executive') {
-      const { data: secondaries } = await supabaseAdmin
-        .from('users')
-        .select('id')
-        .eq('manager_id', decoded.userId)
-        .eq('role', 'secondary_executive')
-        .eq('approval_status', 'approved');
-
-      const teamIds = [decoded.userId, ...(secondaries || []).map(s => s.id)];
-      if (salesmanId) {
-        if (!teamIds.includes(salesmanId)) {
-          return NextResponse.json({ error: 'Access denied' }, { status: 403 });
-        }
-        query = query.eq('salesman_id', salesmanId);
-      } else {
-        query = query.in('salesman_id', teamIds);
-      }
-    } else if (salesmanId) {
+    if (salesmanId) {
       query = query.eq('salesman_id', salesmanId);
     }
 

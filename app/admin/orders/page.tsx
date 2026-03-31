@@ -66,7 +66,7 @@ interface Order {
   tax_amount: number;
   discount_amount: number;
   total_amount: number;
-  status: 'pending_primary' | 'pending' | 'approved' | 'rejected';
+  status: 'pending_primary' | 'pending' | 'approved' | 'dispatched' | 'rejected';
   submitted_at: string;
   reviewed_at?: string;
   reviewer_name?: string;
@@ -83,6 +83,7 @@ interface OrderSummary {
   total_orders: number;
   pending_count: number;
   approved_count: number;
+  dispatched_count: number;
   rejected_count: number;
   total_value: number;
   pending_value: number;
@@ -334,6 +335,36 @@ export default function AdminOrdersPage() {
     }
   };
 
+  const handleDispatch = async (orderId: string) => {
+    if (!confirm('Mark this order as dispatched? This will transfer stock to the distributor.')) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch(`/api/orders/${orderId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status: 'dispatched' }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast.success('Order dispatched — stock transferred to distributor');
+        await fetchOrders();
+      } else {
+        toast.error(data.error || 'Failed to dispatch order');
+      }
+    } catch (error) {
+      console.error('Error dispatching order:', error);
+      toast.error('Failed to dispatch order');
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'pending_primary':
@@ -342,6 +373,8 @@ export default function AdminOrdersPage() {
         return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-300"><Clock className="mr-1 h-3 w-3" />Pending</Badge>;
       case 'approved':
         return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300"><CheckCircle className="mr-1 h-3 w-3" />Approved</Badge>;
+      case 'dispatched':
+        return <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-300"><Package className="mr-1 h-3 w-3" />Dispatched</Badge>;
       case 'rejected':
         return <Badge variant="outline" className="bg-red-50 text-red-700 border-red-300"><XCircle className="mr-1 h-3 w-3" />Rejected</Badge>;
       default:
@@ -382,7 +415,7 @@ export default function AdminOrdersPage() {
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4">
           <Card>
             <CardHeader className="pb-2">
               <CardDescription>Total Orders</CardDescription>
@@ -422,6 +455,13 @@ export default function AdminOrdersPage() {
             </CardContent>
           </Card>
 
+          <Card className="border-indigo-200 bg-indigo-50">
+            <CardHeader className="pb-2">
+              <CardDescription className="text-indigo-700">Dispatched</CardDescription>
+              <CardTitle className="text-3xl text-indigo-700">{summary.dispatched_count || 0}</CardTitle>
+            </CardHeader>
+          </Card>
+
           <Card className="border-red-200 bg-red-50">
             <CardHeader className="pb-2">
               <CardDescription className="text-red-700">Rejected</CardDescription>
@@ -439,7 +479,7 @@ export default function AdminOrdersPage() {
               <div className="relative">
                 <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                 <Input
-                  placeholder="Search by order number, customer, salesman..."
+                  placeholder="Search by order number, distributor, salesman..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
@@ -464,6 +504,12 @@ export default function AdminOrdersPage() {
                 onClick={() => setStatusFilter('approved')}
               >
                 Approved
+              </Button>
+              <Button
+                variant={statusFilter === 'dispatched' ? 'default' : 'outline'}
+                onClick={() => setStatusFilter('dispatched')}
+              >
+                Dispatched
               </Button>
               <Button
                 variant={statusFilter === 'rejected' ? 'default' : 'outline'}
@@ -564,6 +610,18 @@ export default function AdminOrdersPage() {
                             title="Approve/Edit"
                           >
                             <Edit className="h-4 w-4 text-green-600" />
+                          </Button>
+                        )}
+                        {order.status === 'approved' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDispatch(order._id)}
+                            title="Dispatch to Distributor"
+                            className="text-indigo-600 hover:text-indigo-700"
+                          >
+                            <Package className="h-4 w-4 mr-1" />
+                            Dispatch
                           </Button>
                         )}
                         <Button

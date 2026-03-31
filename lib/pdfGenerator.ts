@@ -28,7 +28,7 @@ interface Order {
   tax_amount: number;
   discount_amount: number;
   total_amount: number;
-  status: 'pending_primary' | 'pending' | 'approved' | 'rejected';
+  status: 'pending_primary' | 'pending' | 'approved' | 'dispatched' | 'rejected';
   submitted_at: string;
   reviewed_at?: string;
   reviewer_name?: string;

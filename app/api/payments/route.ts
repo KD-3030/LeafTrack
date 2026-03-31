@@ -77,10 +77,10 @@ export async function GET(request: NextRequest) {
 
     // Enrich with invoice and customer data
     const invIds = [...new Set(payments.map(p => p.invoice_id).filter(Boolean))];
-    const custIds = [...new Set(payments.map(p => p.customer_id).filter(Boolean))];
+    const custIds = [...new Set(payments.map(p => p.distributor_id).filter(Boolean))];
     const [invRes, custRes] = await Promise.all([
       invIds.length ? supabaseAdmin.from('invoices').select('id, invoice_number, grand_total, due_date').in('id', invIds) : { data: [] },
-      custIds.length ? supabaseAdmin.from('customers').select('id, name, email, phone').in('id', custIds) : { data: [] },
+      custIds.length ? supabaseAdmin.from('distributors').select('id, name, email, phone').in('id', custIds) : { data: [] },
     ]);
     const invMap = new Map((invRes.data || []).map(i => [i.id, i]));
     const custMap = new Map((custRes.data || []).map(c => [c.id, c]));
@@ -88,7 +88,7 @@ export async function GET(request: NextRequest) {
     const enriched = payments.map(p => ({
       ...withId(p),
       invoice_id: p.invoice_id && invMap.has(p.invoice_id) ? { _id: p.invoice_id, ...invMap.get(p.invoice_id) } : p.invoice_id,
-      customer_id: p.customer_id && custMap.has(p.customer_id) ? { _id: p.customer_id, ...custMap.get(p.customer_id) } : p.customer_id,
+      customer_id: p.distributor_id && custMap.has(p.distributor_id) ? { _id: p.distributor_id, ...custMap.get(p.distributor_id) } : p.distributor_id,
     }));
 
     // Summary statistics - fetch all matching payments for summary
@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Amount paid must be greater than 0' }, { status: 400 });
     }
 
-    const { data: invoice } = await supabaseAdmin.from('invoices').select('grand_total, customer_id').eq('id', invoice_id).single();
+    const { data: invoice } = await supabaseAdmin.from('invoices').select('grand_total, distributor_id').eq('id', invoice_id).single();
     if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
 
     const { data: existingPayments } = await supabaseAdmin.from('payments').select('amount_paid').eq('invoice_id', invoice_id).eq('status', 'Confirmed');
@@ -150,12 +150,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Payment amount exceeds remaining balance (${remainingBalance})` }, { status: 400 });
     }
 
-    const finalCustomerId = customer_id || invoice.customer_id;
+    const finalCustomerId = customer_id || invoice.distributor_id;
     if (!finalCustomerId) return NextResponse.json({ error: 'Customer ID is required' }, { status: 400 });
 
     const paymentData: Record<string, unknown> = {
       invoice_id,
-      customer_id: finalCustomerId,
+      distributor_id: finalCustomerId,
       amount_paid: parseFloat(amount_paid),
       payment_method,
       payment_date: payment_date ? new Date(payment_date).toISOString() : new Date().toISOString(),
@@ -178,7 +178,7 @@ export async function POST(request: NextRequest) {
 
     // Enrich response
     const invInfo = { _id: invoice_id, grand_total: invoice.grand_total };
-    const { data: custInfo } = await supabaseAdmin.from('customers').select('id, name, email, phone').eq('id', finalCustomerId).single();
+    const { data: custInfo } = await supabaseAdmin.from('distributors').select('id, name, email, phone').eq('id', finalCustomerId).single();
 
     return NextResponse.json({
       success: true,

@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     let query = supabaseAdmin.from('invoices').select('*', { count: 'exact' });
     query = query.gt('balance_due', 0);
     if (status) query = query.eq('payment_status', status);
-    if (customer_id) query = query.eq('customer_id', customer_id);
+    if (customer_id) query = query.eq('distributor_id', customer_id);
     if (overdue_only) query = query.lt('due_date', now.toISOString());
 
     // Sorting
@@ -43,16 +43,16 @@ export async function GET(request: NextRequest) {
     const total = count || 0;
 
     // Enrich with customer data
-    const customerIds = [...new Set(invoices.map(i => i.customer_id).filter(Boolean))];
+    const customerIds = [...new Set(invoices.map(i => i.distributor_id).filter(Boolean))];
     let customerMap = new Map<string, Record<string, unknown>>();
     if (customerIds.length) {
-      const { data: customers } = await supabaseAdmin.from('customers').select('id, name, email, phone, gstin').in('id', customerIds);
+      const { data: customers } = await supabaseAdmin.from('distributors').select('id, name, email, phone, gstin').in('id', customerIds);
       customerMap = new Map((customers || []).map(c => [c.id, c]));
     }
 
     // Calculate days overdue for each invoice
     const enrichedInvoices = invoices.map(inv => {
-      const customer = inv.customer_id ? customerMap.get(inv.customer_id) : null;
+      const customer = inv.distributor_id ? customerMap.get(inv.distributor_id) : null;
       const dueDate = inv.due_date ? new Date(inv.due_date) : null;
       const daysOverdue = dueDate && dueDate < now
         ? Math.ceil((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24))
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
 
       return {
         ...withId(inv),
-        customer_id: customer ? { _id: inv.customer_id, ...customer } : inv.customer_id,
+        customer_id: customer ? { _id: inv.distributor_id, ...customer } : inv.distributor_id,
         days_overdue: daysOverdue,
         is_overdue: daysOverdue > 0,
       };

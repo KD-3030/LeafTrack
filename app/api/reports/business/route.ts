@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
 }
 
 async function getOverviewReport(from_date: string | null, to_date: string | null) {
-  let invoiceQuery = supabaseAdmin.from('invoices').select('id, grand_total, balance_due, payment_status, salesman_id, customer_id, created_at');
+  let invoiceQuery = supabaseAdmin.from('invoices').select('id, grand_total, balance_due, payment_status, salesman_id, distributor_id, created_at');
   let purchaseQuery = supabaseAdmin.from('purchases').select('id, final_amount, payment_status, created_at');
 
   if (from_date) {
@@ -49,7 +49,7 @@ async function getOverviewReport(from_date: string | null, to_date: string | nul
   const [invoicesRes, purchasesRes, customersRes, productsRes] = await Promise.all([
     invoiceQuery,
     purchaseQuery,
-    supabaseAdmin.from('customers').select('id, name'),
+    supabaseAdmin.from('distributors').select('id, name'),
     supabaseAdmin.from('products').select('id, name'),
   ]);
 
@@ -186,7 +186,7 @@ async function getProfitLossReport(from_date: string | null, to_date: string | n
 }
 
 async function getSalesPerformanceReport(from_date: string | null, to_date: string | null) {
-  let invoiceQuery = supabaseAdmin.from('invoices').select('id, grand_total, balance_due, payment_status, salesman_id, customer_id, created_at');
+  let invoiceQuery = supabaseAdmin.from('invoices').select('id, grand_total, balance_due, payment_status, salesman_id, distributor_id, created_at');
   if (from_date) invoiceQuery = invoiceQuery.gte('created_at', new Date(from_date).toISOString());
   if (to_date) invoiceQuery = invoiceQuery.lte('created_at', new Date(to_date).toISOString());
 
@@ -202,7 +202,7 @@ async function getSalesPerformanceReport(from_date: string | null, to_date: stri
     existing.outstanding += Number(inv.balance_due || 0);
     existing.collected += Number(inv.grand_total || 0) - Number(inv.balance_due || 0);
     existing.invoiceCount++;
-    if (inv.customer_id) existing.customers.add(inv.customer_id);
+    if (inv.distributor_id) existing.customers.add(inv.distributor_id);
     salesmanStats.set(sid, existing);
   }
 
@@ -232,10 +232,10 @@ async function getCustomerLedgerReport(customer_id: string | null, from_date: st
     return NextResponse.json({ error: 'customer_id is required for ledger report' }, { status: 400 });
   }
 
-  const { data: customer } = await supabaseAdmin.from('customers').select('*').eq('id', customer_id).single();
+  const { data: customer } = await supabaseAdmin.from('distributors').select('*').eq('id', customer_id).single();
   if (!customer) return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
 
-  let invoiceQuery = supabaseAdmin.from('invoices').select('id, invoice_number, grand_total, balance_due, payment_status, created_at, due_date').eq('customer_id', customer_id);
+  let invoiceQuery = supabaseAdmin.from('invoices').select('id, invoice_number, grand_total, balance_due, payment_status, created_at, due_date').eq('distributor_id', customer_id);
   if (from_date) invoiceQuery = invoiceQuery.gte('created_at', new Date(from_date).toISOString());
   if (to_date) invoiceQuery = invoiceQuery.lte('created_at', new Date(to_date).toISOString());
 

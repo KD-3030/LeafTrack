@@ -188,12 +188,12 @@ export async function DELETE(
         }
       }
 
-      // If deleting an SE, clear secondary_executive_id from customers
+      // If deleting an SE, remove their distributor assignments
       if (targetRoleId === 'secondary_executive') {
         await supabaseAdmin
-          .from('customers')
-          .update({ secondary_executive_id: null })
-          .eq('secondary_executive_id', id);
+          .from('se_distributor_assignments')
+          .delete()
+          .eq('se_id', id);
       }
     }
 

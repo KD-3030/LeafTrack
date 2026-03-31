@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (status) query = query.eq('status', status);
-    if (customer_id) query = query.eq('customer_id', customer_id);
+    if (customer_id) query = query.eq('distributor_id', customer_id);
     if (from_date) query = query.gte('return_date', new Date(from_date).toISOString());
     if (to_date) query = query.lte('return_date', new Date(to_date).toISOString());
 
@@ -50,12 +50,12 @@ export async function GET(request: NextRequest) {
     const total = count || 0;
 
     // Enrich with customer, salesman, and invoice data
-    const customerIds = [...new Set(returns.map(r => r.customer_id).filter(Boolean))];
+    const customerIds = [...new Set(returns.map(r => r.distributor_id).filter(Boolean))];
     const salesmanIds = [...new Set(returns.map(r => r.salesman_id).filter(Boolean))];
     const invoiceIds = [...new Set(returns.map(r => r.original_invoice_id).filter(Boolean))];
 
     const [customersRes, salesmenRes, invoicesRes] = await Promise.all([
-      customerIds.length ? supabaseAdmin.from('customers').select('id, name, email, phone').in('id', customerIds) : { data: [] },
+      customerIds.length ? supabaseAdmin.from('distributors').select('id, name, email, phone').in('id', customerIds) : { data: [] },
       salesmanIds.length ? supabaseAdmin.from('users').select('id, name, email').in('id', salesmanIds) : { data: [] },
       invoiceIds.length ? supabaseAdmin.from('invoices').select('id, invoice_number, grand_total').in('id', invoiceIds) : { data: [] },
     ]);
@@ -66,9 +66,9 @@ export async function GET(request: NextRequest) {
 
     const enriched = returns.map(r => ({
       ...withId(r),
-      customer_id: r.customer_id && customersMap.has(r.customer_id)
-        ? { _id: r.customer_id, ...customersMap.get(r.customer_id) }
-        : r.customer_id,
+      customer_id: r.distributor_id && customersMap.has(r.distributor_id)
+        ? { _id: r.distributor_id, ...customersMap.get(r.distributor_id) }
+        : r.distributor_id,
       salesman_id: r.salesman_id && salesmenMap.has(r.salesman_id)
         ? { _id: r.salesman_id, ...salesmenMap.get(r.salesman_id) }
         : r.salesman_id,
@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
     const saleReturnData: Record<string, unknown> = {
       original_invoice_id: body.original_invoice_id || body.invoice_id || null,
       original_sale_id: body.original_sale_id || null,
-      customer_id: body.customer_id || null,
+      distributor_id: body.customer_id || null,
       salesman_id: body.salesman_id || decoded.userId,
       is_manual_entry: body.is_manual_entry || !body.original_invoice_id,
       customer_name: body.customer_name || '',
@@ -176,19 +176,19 @@ export async function POST(request: NextRequest) {
     if (saleReturnData.original_invoice_id) {
       const { data: invoice } = await supabaseAdmin
         .from('invoices')
-        .select('id, customer_id, salesman_id')
+        .select('id, distributor_id, salesman_id')
         .eq('id', saleReturnData.original_invoice_id)
         .single();
       if (!invoice) {
         return NextResponse.json({ error: 'Original invoice not found' }, { status: 404 });
       }
-      if (!saleReturnData.customer_id) saleReturnData.customer_id = invoice.customer_id;
+      if (!saleReturnData.distributor_id) saleReturnData.distributor_id = invoice.distributor_id;
       if (!saleReturnData.salesman_id) saleReturnData.salesman_id = invoice.salesman_id;
     }
 
-    // Enrich customer info if customer_id provided but no name
-    if (saleReturnData.customer_id && !saleReturnData.customer_name) {
-      const { data: customer } = await supabaseAdmin.from('customers').select('name, email, phone').eq('id', saleReturnData.customer_id).single();
+    // Enrich customer info if distributor_id provided but no name
+    if (saleReturnData.distributor_id && !saleReturnData.customer_name) {
+      const { data: customer } = await supabaseAdmin.from('distributors').select('name, email, phone').eq('id', saleReturnData.distributor_id).single();
       if (customer) {
         saleReturnData.customer_name = customer.name;
         saleReturnData.customer_email = customer.email || '';

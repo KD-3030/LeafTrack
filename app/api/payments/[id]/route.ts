@@ -71,15 +71,15 @@ export async function GET(
       payment.invoice_id
         ? supabaseAdmin.from('invoices').select('id, invoice_number, grand_total, due_date, customer_details').eq('id', payment.invoice_id).single()
         : Promise.resolve({ data: null }),
-      payment.customer_id
-        ? supabaseAdmin.from('customers').select('id, name, email, phone').eq('id', payment.customer_id).single()
+      payment.distributor_id
+        ? supabaseAdmin.from('distributors').select('id, name, email, phone').eq('id', payment.distributor_id).single()
         : Promise.resolve({ data: null }),
     ]);
 
     const enriched = {
       ...withId(payment),
       invoice_id: invoiceRes.data ? withId(invoiceRes.data) : payment.invoice_id,
-      customer_id: customerRes.data ? withId(customerRes.data) : payment.customer_id,
+      customer_id: customerRes.data ? withId(customerRes.data) : payment.distributor_id,
     };
 
     return NextResponse.json({ success: true, payment: enriched });

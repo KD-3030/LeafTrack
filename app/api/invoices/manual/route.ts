@@ -6,9 +6,9 @@ import { withId } from '@/lib/supabase-helpers';
 export const dynamic = 'force-dynamic';
 
 async function updateCustomerOutstandingBalance(customerId: string) {
-  const { data: invoices } = await supabaseAdmin.from('invoices').select('balance_due').eq('customer_id', customerId).neq('status', 'Cancelled');
+  const { data: invoices } = await supabaseAdmin.from('invoices').select('balance_due').eq('distributor_id', customerId).neq('status', 'Cancelled');
   const outstandingBalance = (invoices || []).reduce((sum, inv) => sum + (inv.balance_due || 0), 0);
-  await supabaseAdmin.from('customers').update({ outstanding_balance: outstandingBalance }).eq('id', customerId);
+  await supabaseAdmin.from('distributors').update({ outstanding_balance: outstandingBalance }).eq('id', customerId);
 }
 
 export async function POST(request: NextRequest) {
@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate customer
-    const { data: customer } = await supabaseAdmin.from('customers').select('*').eq('id', customer_id).single();
+    const { data: customer } = await supabaseAdmin.from('distributors').select('*').eq('id', customer_id).single();
     if (!customer) return NextResponse.json({ success: false, error: 'Customer not found' }, { status: 400 });
 
     // Get company settings
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
     const { data: invoice, error: invErr } = await supabaseAdmin.from('invoices').insert({
       invoice_number: invoiceNumber, manually_created: true,
       invoice_date: new Date(invoice_date).toISOString(), due_date: new Date(due_date).toISOString(),
-      customer_id: customer.id, salesman_id: authResult.userId,
+      distributor_id: customer.id, salesman_id: authResult.userId,
       customer_name: customer.name, customer_email: customer.email, customer_phone: customer.phone,
       customer_address: customer.address, customer_state: customer.state, customer_gstin: customer.gstin,
       company_name: settings.company_name,

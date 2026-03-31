@@ -97,8 +97,8 @@ export async function GET(
       { data: approver },
     ] = await Promise.all([
       supabaseAdmin.from('sale_return_items').select('*').eq('sale_return_id', id),
-      saleReturn.customer_id
-        ? supabaseAdmin.from('customers').select('id, name, email, phone').eq('id', saleReturn.customer_id).single()
+      saleReturn.distributor_id
+        ? supabaseAdmin.from('distributors').select('id, name, email, phone').eq('id', saleReturn.distributor_id).single()
         : Promise.resolve({ data: null }),
       saleReturn.salesman_id
         ? supabaseAdmin.from('users').select('id, name, email').eq('id', saleReturn.salesman_id).single()

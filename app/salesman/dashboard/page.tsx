@@ -6,27 +6,36 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { AlertCircle, CheckCircle, Clock, Package, Plus, ShoppingCart, XCircle } from 'lucide-react';
+import { AlertCircle, IndianRupee, MapPin, Package, Plus, Store } from 'lucide-react';
 import { toast } from 'sonner';
 
-interface Order {
+interface DailySale {
   _id: string;
-  order_number: string;
-  order_date: string;
-  customer_name: string;
-  total_amount: number;
-  status: 'pending_primary' | 'pending' | 'approved' | 'rejected';
-  items: Array<{ product_name: string }>;
+  distributor_name: string | null;
+  product_name: string | null;
+  retailer_name: string | null;
+  quantity_sold: number;
+  unit: string;
+  sale_amount: number;
+  payment_type: string;
+  sale_date: string;
+  location_lat: number | null;
+  location_lng: number | null;
 }
 
-interface OrderSummary {
-  total_orders: number;
-  pending_count: number;
-  approved_count: number;
-  rejected_count: number;
-  total_value: number;
-  pending_value: number;
-  approved_value: number;
+interface Distributor {
+  _id: string;
+  name: string;
+  city?: string;
+  phone?: string;
+}
+
+interface InventoryItem {
+  product_id: string;
+  product_name: string;
+  current_stock: number;
+  distributor_id: string;
+  distributor_name: string;
 }
 
 export default function SalesmanDashboard() {
@@ -35,35 +44,42 @@ export default function SalesmanDashboard() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [summary, setSummary] = useState<OrderSummary | null>(null);
+  const [sales, setSales] = useState<DailySale[]>([]);
+  const [distributors, setDistributors] = useState<Distributor[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+
+  const getToken = () => localStorage.getItem('leaftrack_token');
 
   useEffect(() => {
     if (!user) return;
-    loadOrders();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadData();
   }, [user]);
 
-  const loadOrders = async () => {
+  const loadData = async () => {
     try {
       setIsLoading(true);
-      const token = localStorage.getItem('leaftrack_token');
+      const token = getToken();
       if (!token) throw new Error('No authentication token found.');
 
-      const response = await fetch('/api/orders', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await response.json();
+      const [salesRes, distRes, invRes] = await Promise.all([
+        fetch('/api/daily-sales', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/distributors', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/distributor-inventory', { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
 
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to fetch orders');
-      }
+      const [salesData, distData, invData] = await Promise.all([
+        salesRes.json(),
+        distRes.json(),
+        invRes.json(),
+      ]);
 
-      setOrders(data.orders || []);
-      setSummary(data.summary || null);
+      if (salesData.success) setSales(salesData.daily_sales || []);
+      if (distData.success) setDistributors(distData.distributors || []);
+      if (invData.success) setInventory(invData.inventory || []);
+
       setError(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load orders';
+      const message = err instanceof Error ? err.message : 'Failed to load dashboard';
       setError(message);
       toast.error(message);
     } finally {
@@ -71,18 +87,11 @@ export default function SalesmanDashboard() {
     }
   };
 
-  const statusBadge = (status: string) => {
-    switch (status) {
-      case 'approved':
-        return <Badge className="bg-brand-100 text-brand-700 border-brand-200">Approved</Badge>;
-      case 'rejected':
-        return <Badge variant="destructive">Rejected</Badge>;
-      case 'pending_primary':
-        return <Badge className="bg-blue-100 text-blue-700 border-blue-200">PE Review</Badge>;
-      default:
-        return <Badge className="bg-amber-100 text-amber-700 border-amber-200">Pending</Badge>;
-    }
-  };
+  const todayStr = new Date().toISOString().split('T')[0];
+  const todaySales = sales.filter(s => s.sale_date === todayStr);
+  const todayTotal = todaySales.reduce((sum, s) => sum + s.sale_amount, 0);
+  const totalSalesAmount = sales.reduce((sum, s) => sum + s.sale_amount, 0);
+  const totalProducts = inventory.reduce((sum, i) => sum + i.current_stock, 0);
 
   if (isLoading) {
     return (
@@ -95,7 +104,7 @@ export default function SalesmanDashboard() {
     );
   }
 
-  if (error && !summary) {
+  if (error && distributors.length === 0) {
     return (
       <div className="flex items-center justify-center py-20">
         <Card className="w-full max-w-md">
@@ -104,7 +113,7 @@ export default function SalesmanDashboard() {
           </CardHeader>
           <CardContent className="text-center">
             <p className="text-muted-foreground mb-4">{error}</p>
-            <Button onClick={loadOrders}>Try Again</Button>
+            <Button onClick={loadData}>Try Again</Button>
           </CardContent>
         </Card>
       </div>
@@ -119,7 +128,7 @@ export default function SalesmanDashboard() {
           <p className="text-muted-foreground text-sm mt-1">Welcome back, {user?.name}</p>
         </div>
         <Button onClick={() => router.push('/salesman/orders/new')}>
-          <Plus className="mr-2 h-4 w-4" />New Order
+          <Plus className="mr-2 h-4 w-4" />Log Sale
         </Button>
       </div>
 
@@ -130,62 +139,122 @@ export default function SalesmanDashboard() {
         </div>
       )}
 
-      {summary && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Total Orders</CardTitle>
-              <Package className="h-4 w-4 text-brand-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-semibold">{summary.total_orders}</div>
-              <p className="text-xs text-muted-foreground">₹{summary.total_value.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-            </CardContent>
-          </Card>
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Assigned Distributors</CardTitle>
+            <Store className="h-4 w-4 text-brand-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-semibold">{distributors.length}</div>
+            <p className="text-xs text-muted-foreground">{totalProducts} total units in stock</p>
+          </CardContent>
+        </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Pending</CardTitle>
-              <Clock className="h-4 w-4 text-amber-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-semibold text-amber-600">{summary.pending_count}</div>
-              <p className="text-xs text-muted-foreground">₹{summary.pending_value.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-            </CardContent>
-          </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Today&apos;s Sales</CardTitle>
+            <Package className="h-4 w-4 text-amber-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-semibold text-amber-600">{todaySales.length}</div>
+            <p className="text-xs text-muted-foreground">
+              ₹{todayTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            </p>
+          </CardContent>
+        </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Approved</CardTitle>
-              <CheckCircle className="h-4 w-4 text-brand-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-semibold text-brand-600">{summary.approved_count}</div>
-              <p className="text-xs text-muted-foreground">₹{summary.approved_value.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-            </CardContent>
-          </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Total Sales</CardTitle>
+            <IndianRupee className="h-4 w-4 text-brand-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-semibold text-brand-600">{sales.length}</div>
+            <p className="text-xs text-muted-foreground">
+              ₹{totalSalesAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            </p>
+          </CardContent>
+        </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Rejected</CardTitle>
-              <XCircle className="h-4 w-4 text-destructive" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-semibold text-destructive">{summary.rejected_count}</div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">GPS Tracked</CardTitle>
+            <MapPin className="h-4 w-4 text-green-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-semibold text-green-600">
+              {sales.filter(s => s.location_lat && s.location_lng).length}
+            </div>
+            <p className="text-xs text-muted-foreground">of {sales.length} total sales</p>
+          </CardContent>
+        </Card>
+      </div>
 
+      {/* Assigned Distributors */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-base flex items-center gap-2">
-                <ShoppingCart className="h-4 w-4 text-brand-600" />
-                Recent Orders
+                <Store className="h-4 w-4 text-brand-600" />
+                My Distributors
               </CardTitle>
-              <CardDescription>Your latest submitted orders</CardDescription>
+              <CardDescription>Distributors assigned to you</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {distributors.length === 0 ? (
+            <div className="text-center py-8">
+              <Store className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
+              <p className="text-muted-foreground text-sm">No distributors assigned yet</p>
+              <p className="text-muted-foreground text-xs mt-1">Contact your manager to get assigned</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {distributors.map((dist) => {
+                const distStock = inventory.filter(i => i.distributor_id === (dist._id));
+                const stockCount = distStock.reduce((sum, i) => sum + i.current_stock, 0);
+                const productCount = distStock.length;
+                return (
+                  <div
+                    key={dist._id}
+                    className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm">{dist.name}</span>
+                        {dist.city && (
+                          <Badge variant="outline" className="text-xs">{dist.city}</Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {productCount} product(s) &middot; {stockCount} total units
+                      </p>
+                    </div>
+                    {dist.phone && (
+                      <span className="text-xs text-muted-foreground">{dist.phone}</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Recent Sales */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <IndianRupee className="h-4 w-4 text-brand-600" />
+                Recent Sales
+              </CardTitle>
+              <CardDescription>Your latest logged sales</CardDescription>
             </div>
             <Button variant="outline" size="sm" onClick={() => router.push('/salesman/orders')}>
               View All
@@ -193,34 +262,37 @@ export default function SalesmanDashboard() {
           </div>
         </CardHeader>
         <CardContent>
-          {orders.length === 0 ? (
+          {sales.length === 0 ? (
             <div className="text-center py-8">
-              <ShoppingCart className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
-              <p className="text-muted-foreground text-sm">No orders yet</p>
+              <Package className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
+              <p className="text-muted-foreground text-sm">No sales logged yet</p>
               <Button variant="outline" size="sm" className="mt-3" onClick={() => router.push('/salesman/orders/new')}>
-                Create your first order
+                Log your first sale
               </Button>
             </div>
           ) : (
             <div className="space-y-2">
-              {orders.slice(0, 8).map((order) => (
+              {sales.slice(0, 8).map((sale) => (
                 <div
-                  key={order._id}
+                  key={sale._id}
                   className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors cursor-pointer"
                   onClick={() => router.push('/salesman/orders')}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm">{order.order_number}</span>
-                      {statusBadge(order.status)}
+                      <span className="font-medium text-sm">{sale.product_name}</span>
+                      <Badge variant="outline" className="text-xs capitalize">{sale.payment_type}</Badge>
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      {order.customer_name} &middot; {new Date(order.order_date).toLocaleDateString('en-IN')}
+                      {sale.distributor_name} &middot; {sale.retailer_name || 'Walk-in'} &middot; {new Date(sale.sale_date).toLocaleDateString('en-IN')}
                     </p>
                   </div>
-                  <span className="font-medium text-sm">
-                    ₹{order.total_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                  </span>
+                  <div className="text-right">
+                    <span className="font-medium text-sm">
+                      ₹{sale.sale_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    </span>
+                    <p className="text-xs text-muted-foreground">{sale.quantity_sold} {sale.unit}</p>
+                  </div>
                 </div>
               ))}
             </div>

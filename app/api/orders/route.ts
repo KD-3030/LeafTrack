@@ -57,6 +57,7 @@ export async function GET(request: NextRequest) {
       pending_count: pendingForAdmin.length,
       primary_review_count: pendingForPrimary.length,
       approved_count: mapped.filter(o => o.status === 'approved').length,
+      dispatched_count: mapped.filter(o => o.status === 'dispatched').length,
       rejected_count: mapped.filter(o => o.status === 'rejected').length,
       total_value: mapped.reduce((s, o) => s + (o.total_amount || 0), 0),
       pending_value: (roleId === 'admin' ? pendingForAdmin : [...pendingForAdmin, ...pendingForPrimary])
@@ -102,6 +103,8 @@ export async function POST(request: NextRequest) {
       customer_address: body.customer_address || null,
       customer_gstin: body.customer_gstin || null,
       customer_email: body.customer_email || null,
+      distributor_id: body.distributor_id || null,
+      order_type: body.order_type || 'restock',
       subtotal: body.subtotal,
       tax_percentage: body.tax_percentage || 0,
       tax_amount: body.tax_amount || 0,

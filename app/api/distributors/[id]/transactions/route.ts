@@ -12,9 +12,9 @@ export async function GET(
     const authResult = requireUserAuth(request);
     if (authResult instanceof NextResponse) return authResult;
 
-    const customerId = params.id;
-    if (!customerId) {
-      return NextResponse.json({ error: 'Customer ID is required' }, { status: 400 });
+    const distributorId = params.id;
+    if (!distributorId) {
+      return NextResponse.json({ error: 'Distributor ID is required' }, { status: 400 });
     }
 
     // Fetch invoices and payments in parallel
@@ -22,13 +22,13 @@ export async function GET(
       supabaseAdmin
         .from('invoices')
         .select('id, invoice_number, invoice_date, grand_total, paid_amount, balance_due, payment_status, status, taxable_amount, total_tax')
-        .eq('distributor_id', customerId)
+        .eq('distributor_id', distributorId)
         .neq('status', 'Cancelled')
         .order('invoice_date', { ascending: false }),
       supabaseAdmin
         .from('payments')
         .select('id, invoice_id, amount_paid, payment_method, payment_date, status, transaction_id, bank_reference, cheque_number, notes')
-        .eq('distributor_id', customerId)
+        .eq('distributor_id', distributorId)
         .order('payment_date', { ascending: false }),
     ]);
 
@@ -86,9 +86,9 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error('Error fetching customer transactions:', error);
+    console.error('Error fetching distributor transactions:', error);
     return NextResponse.json({
-      error: 'Failed to fetch customer transactions',
+      error: 'Failed to fetch distributor transactions',
       details: error instanceof Error ? error.message : 'Unknown error',
     }, { status: 500 });
   }
