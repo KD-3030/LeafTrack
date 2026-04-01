@@ -25,14 +25,16 @@ export async function GET(request: NextRequest) {
       query = query.or(`name.ilike.%${search}%,shop_name.ilike.%${search}%,phone.ilike.%${search}%`);
     }
 
-    // Role-based filtering: SE sees retailers of assigned distributors only
+    // Role-based filtering: SE sees retailers of their PE's distributors
     if (roleId === 'secondary_executive') {
-      const { data: assignments } = await supabaseAdmin
-        .from('se_distributor_assignments')
-        .select('distributor_id')
-        .eq('se_id', authResult.userId)
-        .eq('is_active', true);
-      const distIds = (assignments || []).map(a => a.distributor_id);
+      const { data: seUser } = await supabaseAdmin
+        .from('users').select('manager_id').eq('id', authResult.userId).single();
+      if (!seUser?.manager_id) {
+        return NextResponse.json({ success: true, retailers: [] });
+      }
+      const { data: dists } = await supabaseAdmin
+        .from('distributors').select('id').eq('pe_id', seUser.manager_id);
+      const distIds = (dists || []).map(d => d.id);
       if (distIds.length === 0) {
         return NextResponse.json({ success: true, retailers: [] });
       }
@@ -75,16 +77,11 @@ export async function POST(request: NextRequest) {
       .from('distributors').select('id, pe_id').eq('id', body.distributor_id).single();
     if (!dist) return NextResponse.json({ error: 'Distributor not found' }, { status: 404 });
 
-    // SE must be assigned to this distributor
+    // SE must be under a PE that owns this distributor
     if (roleId === 'secondary_executive') {
-      const { data: assignment } = await supabaseAdmin
-        .from('se_distributor_assignments')
-        .select('id')
-        .eq('se_id', authResult.userId)
-        .eq('distributor_id', body.distributor_id)
-        .eq('is_active', true)
-        .maybeSingle();
-      if (!assignment) {
+      const { data: seUser } = await supabaseAdmin
+        .from('users').select('manager_id').eq('id', authResult.userId).single();
+      if (!seUser?.manager_id || dist.pe_id !== seUser.manager_id) {
         return NextResponse.json({ error: 'You are not assigned to this distributor' }, { status: 403 });
       }
     } else if (roleId === 'primary_executive') {

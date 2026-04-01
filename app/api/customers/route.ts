@@ -36,11 +36,10 @@ export async function GET(request: NextRequest) {
     if (roleId === 'primary_executive') {
       query = query.eq('pe_id', authResult.userId);
     } else if (roleId === 'secondary_executive') {
-      // SE sees distributors they are assigned to via se_distributor_assignments
-      const { data: assigns } = await supabaseAdmin.from('se_distributor_assignments').select('distributor_id').eq('se_id', authResult.userId).eq('is_active', true);
-      const assignedDistIds = (assigns || []).map(a => a.distributor_id);
-      if (!assignedDistIds.length) return NextResponse.json({ success: true, customers: [], pagination: { currentPage: page, totalPages: 0, totalCount: 0, hasNextPage: false, hasPrevPage: false } });
-      query = query.in('id', assignedDistIds);
+      // SE sees distributors belonging to their PE via manager_id chain
+      const { data: seUser } = await supabaseAdmin.from('users').select('manager_id').eq('id', authResult.userId).single();
+      if (!seUser?.manager_id) return NextResponse.json({ success: true, customers: [], pagination: { currentPage: page, totalPages: 0, totalCount: 0, hasNextPage: false, hasPrevPage: false } });
+      query = query.eq('pe_id', seUser.manager_id);
     }
 
     const { data, count, error } = await query.order('created_at', { ascending: false }).range((page - 1) * limit, page * limit - 1);

@@ -26,10 +26,13 @@ export async function GET(request: NextRequest) {
       if (distIds.length === 0) return NextResponse.json({ success: true, inventory: [] });
       query = query.in('distributor_id', distIds);
     } else if (roleId === 'secondary_executive') {
-      const { data: assignments } = await supabaseAdmin
-        .from('se_distributor_assignments').select('distributor_id')
-        .eq('se_id', authResult.userId).eq('is_active', true);
-      const distIds = (assignments || []).map(a => a.distributor_id);
+      // SE sees inventory of distributors belonging to their PE
+      const { data: seUser } = await supabaseAdmin
+        .from('users').select('manager_id').eq('id', authResult.userId).single();
+      if (!seUser?.manager_id) return NextResponse.json({ success: true, inventory: [] });
+      const { data: dists } = await supabaseAdmin
+        .from('distributors').select('id').eq('pe_id', seUser.manager_id);
+      const distIds = (dists || []).map(d => d.id);
       if (distIds.length === 0) return NextResponse.json({ success: true, inventory: [] });
       query = query.in('distributor_id', distIds);
     }

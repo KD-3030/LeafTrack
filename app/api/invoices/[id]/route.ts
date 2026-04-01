@@ -41,16 +41,12 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const roleId = normalizeRoleId(decoded.role);
 
     if (roleId === 'secondary_executive') {
-      // Check SE has assignment to this distributor
-      const { data: assign } = await supabaseAdmin
-        .from('se_distributor_assignments')
-        .select('id')
-        .eq('se_id', decoded.userId)
-        .eq('distributor_id', invoice.distributor_id)
-        .eq('is_active', true)
-        .maybeSingle();
-
-      if (!assign) {
+      // SE sees invoices for distributors of their PE
+      const { data: seUser } = await supabaseAdmin
+        .from('users').select('manager_id').eq('id', decoded.userId).single();
+      const { data: dist } = await supabaseAdmin
+        .from('distributors').select('pe_id').eq('id', invoice.distributor_id).single();
+      if (!seUser?.manager_id || !dist || dist.pe_id !== seUser.manager_id) {
         return NextResponse.json({ error: 'Access denied' }, { status: 403 });
       }
     } else if (roleId === 'primary_executive') {
@@ -90,9 +86,23 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       .select('*')
       .eq('invoice_id', params.id);
 
+    // Fetch salesman info
+    let salesmanInfo = { name: 'Unknown', email: '' };
+    if (invoice.salesman_id) {
+      const { data: salesman } = await supabaseAdmin.from('users').select('name, email').eq('id', invoice.salesman_id).single();
+      if (salesman) salesmanInfo = { name: salesman.name, email: salesman.email };
+    }
+
     const invoiceWithPayments = {
       ...withId(invoice),
       items: invoice.items || (invoiceItems || []).map(withId),
+      customer_details: {
+        name: invoice.customer_name || 'Unknown',
+        email: invoice.customer_email || '',
+        phone: invoice.customer_phone || '',
+        gstin: invoice.customer_gstin || '',
+      },
+      salesman_id: salesmanInfo,
       paid_amount: paidAmount,
       balance_due: balanceDue,
       payment_status: balanceDue <= 0 ? 'Paid' : (paidAmount > 0 ? 'Partial' : 'Pending'),

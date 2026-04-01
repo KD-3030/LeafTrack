@@ -19,7 +19,10 @@ function canAccessCustomer(
   if (roleId === 'primary_executive') {
     return customer.pe_id === userId;
   }
-  // For SE, access check is done via se_distributor_assignments in the route handler
+  if (roleId === 'secondary_executive') {
+    return false; // SE access is checked via PE chain in the route handler
+  }
+  // For SE, access check uses PE chain in the route handler
   return false;
 }
 
@@ -40,16 +43,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     if (!canAccessCustomer(customer, roleId, authResult.userId)) {
-      // For SE, check via assignment table
+      // For SE, check via PE chain
       if (roleId === 'secondary_executive') {
-        const { data: assign } = await supabaseAdmin
-          .from('se_distributor_assignments')
-          .select('id')
-          .eq('se_id', authResult.userId)
-          .eq('distributor_id', params.id)
-          .eq('is_active', true)
-          .maybeSingle();
-        if (!assign) {
+        const { data: seUser } = await supabaseAdmin
+          .from('users').select('manager_id').eq('id', authResult.userId).single();
+        if (!seUser?.manager_id || customer.pe_id !== seUser.manager_id) {
           return NextResponse.json({ error: 'Access denied' }, { status: 403 });
         }
       } else {
@@ -103,16 +101,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     if (!canAccessCustomer(existingCustomer, roleId, authResult.userId)) {
-      // For SE, check via assignment table
+      // For SE, check via PE chain
       if (roleId === 'secondary_executive') {
-        const { data: assign } = await supabaseAdmin
-          .from('se_distributor_assignments')
-          .select('id')
-          .eq('se_id', authResult.userId)
-          .eq('distributor_id', params.id)
-          .eq('is_active', true)
-          .maybeSingle();
-        if (!assign) {
+        const { data: seUser } = await supabaseAdmin
+          .from('users').select('manager_id').eq('id', authResult.userId).single();
+        if (!seUser?.manager_id || existingCustomer.pe_id !== seUser.manager_id) {
           return NextResponse.json({ error: 'Access denied' }, { status: 403 });
         }
       } else {

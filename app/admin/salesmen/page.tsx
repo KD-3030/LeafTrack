@@ -80,18 +80,6 @@ interface DistributorItem {
   pe_id?: string;
 }
 
-interface SEAssignmentItem {
-  _id: string;
-  se_id: string;
-  distributor_id: string;
-  is_active: boolean;
-  assigned_by: string;
-  created_at: string;
-  se?: { name: string; email: string };
-  distributor?: { name: string; phone: string };
-}
-
-
 
 function getInitials(name?: string | null): string {
   if (!name) return '?';
@@ -107,18 +95,12 @@ function getInitials(name?: string | null): string {
 export default function ExecutiveManagementPage() {
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [distributors, setDistributors] = useState<DistributorItem[]>([]);
-  const [seAssignments, setSEAssignments] = useState<SEAssignmentItem[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteRole, setInviteRole] = useState<'PrimaryExecutive' | 'SecondaryExecutive'>('PrimaryExecutive');
   const [inviteEmail, setInviteEmail] = useState('');
   const [generatedInviteLink, setGeneratedInviteLink] = useState('');
-
-  // SE↔Distributor assignment state
-  const [assignSEId, setAssignSEId] = useState('');
-  const [assignDistributorId, setAssignDistributorId] = useState('');
-  const [savingSEAssignment, setSavingSEAssignment] = useState(false);
 
   // Edit user sheet state
   const [editingUser, setEditingUser] = useState<ManagedUser | null>(null);
@@ -139,12 +121,12 @@ export default function ExecutiveManagementPage() {
   const getToken = () => typeof window !== 'undefined' ? localStorage.getItem('leaftrack_token') : null;
 
   const primaryExecutives = useMemo(
-    () => users.filter((u) => normalizeRoleId(u.role) === 'primary_executive'),
+    () => users.filter((u) => normalizeRoleId(u.role) === 'primary_executive' && u.approval_status === 'approved'),
     [users]
   );
 
   const secondaryExecutives = useMemo(
-    () => users.filter((u) => normalizeRoleId(u.role) === 'secondary_executive'),
+    () => users.filter((u) => normalizeRoleId(u.role) === 'secondary_executive' && u.approval_status === 'approved'),
     [users]
   );
 
@@ -215,21 +197,10 @@ export default function ExecutiveManagementPage() {
     }
   };
 
-  const loadSEAssignments = async () => {
-    try {
-      const res = await fetch('/api/se-assignments', { headers: { Authorization: `Bearer ${getToken()}` } });
-      const data = await res.json();
-      const items = Array.isArray(data) ? data : data?.assignments || [];
-      setSEAssignments(items);
-    } catch (err) {
-      console.error('loadSEAssignments error:', err);
-    }
-  };
-
   const loadAll = async () => {
     setLoading(true);
     try {
-      await Promise.all([loadUsers(), loadDistributors(), loadSEAssignments()]);
+      await Promise.all([loadUsers(), loadDistributors()]);
     } finally {
       setLoading(false);
     }
@@ -279,45 +250,6 @@ export default function ExecutiveManagementPage() {
       await loadUsers();
     } catch {
       toast.error('Failed to reassign executive');
-    }
-  };
-
-  // SE↔Distributor assignment
-  const createSEAssignment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!assignSEId || !assignDistributorId) return toast.error('Select both SE and distributor');
-    setSavingSEAssignment(true);
-    try {
-      const res = await fetch('/api/se-assignments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ se_id: assignSEId, distributor_id: assignDistributorId }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to assign');
-      toast.success('SE assigned to distributor');
-      setAssignSEId('');
-      setAssignDistributorId('');
-      await loadSEAssignments();
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Error assigning SE');
-    } finally {
-      setSavingSEAssignment(false);
-    }
-  };
-
-  const removeSEAssignment = async (assignmentId: string) => {
-    try {
-      const res = await fetch(`/api/se-assignments?id=${assignmentId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to remove');
-      toast.success('SE assignment removed');
-      await loadSEAssignments();
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Error removing assignment');
     }
   };
 
@@ -736,128 +668,17 @@ export default function ExecutiveManagementPage() {
           </Card>
         </TabsContent>
 
-        {/* ── SE↔DISTRIBUTOR ASSIGNMENT TAB ── */}
+        {/* ── DISTRIBUTOR OVERVIEW TAB ── */}
         <TabsContent value="distributors" className="space-y-4">
-          {/* Assign SE to Distributor */}
+          {/* Distributor List */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Users2 className="h-5 w-5 text-blue-600" />
-                Assign SE to Distributor
+                PE → Distributor Assignments
               </CardTitle>
               <CardDescription>
-                Map a secondary executive to a distributor. The SE will handle daily sales and retailer visits for that distributor.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={createSEAssignment} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-                <div className="space-y-2">
-                  <Label>Secondary Executive</Label>
-                  <Select value={assignSEId} onValueChange={setAssignSEId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select SE" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {secondaryExecutives.map((se) => (
-                        <SelectItem key={se._id} value={se._id}>{se.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Distributor</Label>
-                  <Select value={assignDistributorId} onValueChange={setAssignDistributorId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select distributor" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {distributors.map((d) => (
-                        <SelectItem key={d._id} value={d._id}>{d.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Button type="submit" className="w-full" disabled={savingSEAssignment}>
-                    <Link2 className="h-4 w-4 mr-2" />
-                    {savingSEAssignment ? 'Assigning...' : 'Assign'}
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-
-          {/* Current SE↔Distributor Assignments */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-base">Active Assignments</CardTitle>
-                  <CardDescription>
-                    {seAssignments.length} active SE↔Distributor mapping{seAssignments.length !== 1 ? 's' : ''}
-                  </CardDescription>
-                </div>
-                <Button variant="outline" size="icon" onClick={() => loadSEAssignments()} title="Refresh">
-                  <RefreshCw className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {seAssignments.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Users2 className="h-10 w-10 mx-auto mb-2 opacity-40" />
-                  <p>No SE↔Distributor assignments yet.</p>
-                  <p className="text-sm">Use the form above to assign an SE to a distributor.</p>
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Secondary Executive</TableHead>
-                      <TableHead>Distributor</TableHead>
-                      <TableHead>Assigned On</TableHead>
-                      <TableHead className="w-[80px]">Action</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {seAssignments.map((sa) => {
-                      const seName = sa.se?.name || secondaryExecutives.find(se => se._id === sa.se_id)?.name || 'Unknown';
-                      const distName = sa.distributor?.name || distributors.find(d => d._id === sa.distributor_id)?.name || 'Unknown';
-                      return (
-                        <TableRow key={sa._id}>
-                          <TableCell className="font-medium">{seName}</TableCell>
-                          <TableCell>{distName}</TableCell>
-                          <TableCell className="text-muted-foreground text-sm">
-                            {new Date(sa.created_at).toLocaleDateString('en-IN', {
-                              day: '2-digit', month: 'short', year: 'numeric',
-                            })}
-                          </TableCell>
-                          <TableCell>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                              onClick={() => removeSEAssignment(sa._id)}
-                              title="Remove assignment"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Distributor List */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">All Distributors</CardTitle>
-              <CardDescription>
-                {distributors.length} distributor{distributors.length !== 1 ? 's' : ''} in the system
+                Distributors are assigned to Primary Executives. Secondary Executives under a PE can see and sell for all of that PE&apos;s distributors.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -878,15 +699,13 @@ export default function ExecutiveManagementPage() {
                       <TableHead>Distributor</TableHead>
                       <TableHead>Phone</TableHead>
                       <TableHead>Primary Executive</TableHead>
-                      <TableHead>Assigned SEs</TableHead>
+                      <TableHead>SEs with Access</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredDistributors.map((dist) => {
                       const pe = primaryExecutives.find(p => p._id === dist.pe_id);
-                      const assignedSEs = seAssignments
-                        .filter(sa => sa.distributor_id === dist._id)
-                        .map(sa => sa.se?.name || secondaryExecutives.find(se => se._id === sa.se_id)?.name || 'Unknown');
+                      const sesWithAccess = pe ? (teamByPrimary.get(pe._id) || []) : [];
                       return (
                         <TableRow key={dist._id}>
                           <TableCell className="font-medium">{dist.name}</TableCell>
@@ -899,14 +718,14 @@ export default function ExecutiveManagementPage() {
                             )}
                           </TableCell>
                           <TableCell>
-                            {assignedSEs.length > 0 ? (
+                            {sesWithAccess.length > 0 ? (
                               <div className="flex flex-wrap gap-1">
-                                {assignedSEs.map((name, i) => (
-                                  <Badge key={i} variant="outline" className="text-xs">{name}</Badge>
+                                {sesWithAccess.map((se) => (
+                                  <Badge key={se._id} variant="outline" className="text-xs">{se.name}</Badge>
                                 ))}
                               </div>
                             ) : (
-                              <span className="text-muted-foreground text-sm">No SEs assigned</span>
+                              <span className="text-muted-foreground text-sm">No SEs</span>
                             )}
                           </TableCell>
                         </TableRow>
@@ -932,15 +751,7 @@ export default function ExecutiveManagementPage() {
             primaryExecutives={primaryExecutives}
             secondaryExecutives={secondaryExecutives}
             distributors={distributors}
-            seAssignments={seAssignments}
             teamByPrimary={teamByPrimary}
-            onRemoveAssignment={removeSEAssignment}
-            onCreateAssignment={createSEAssignment}
-            assignSEId={assignSEId}
-            setAssignSEId={setAssignSEId}
-            assignDistributorId={assignDistributorId}
-            setAssignDistributorId={setAssignDistributorId}
-            savingSEAssignment={savingSEAssignment}
           />
         </TabsContent>
       </Tabs>
@@ -1049,41 +860,18 @@ function MappingView({
   primaryExecutives,
   secondaryExecutives,
   distributors,
-  seAssignments,
   teamByPrimary,
-  onRemoveAssignment,
-  onCreateAssignment,
-  assignSEId,
-  setAssignSEId,
-  assignDistributorId,
-  setAssignDistributorId,
-  savingSEAssignment,
 }: {
   primaryExecutives: ManagedUser[];
   secondaryExecutives: ManagedUser[];
   distributors: DistributorItem[];
-  seAssignments: SEAssignmentItem[];
   teamByPrimary: Map<string, ManagedUser[]>;
-  onRemoveAssignment: (id: string) => Promise<void>;
-  onCreateAssignment: (e: React.FormEvent) => Promise<void>;
-  assignSEId: string;
-  setAssignSEId: (v: string) => void;
-  assignDistributorId: string;
-  setAssignDistributorId: (v: string) => void;
-  savingSEAssignment: boolean;
 }) {
   const [viewMode, setViewMode] = useState<'graph' | 'list'>('graph');
-  const [showAssignForm, setShowAssignForm] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
 
-  // Build graph data — only show assigned distributors
+  // Build graph data — PE→SE from manager, PE→Distributor from pe_id
   const graphData = useMemo(() => {
-    // Collect distributor IDs that have at least one active SE assignment
-    const assignedDistIds = new Set(
-      seAssignments.filter(sa => sa.is_active).map(sa => sa.distributor_id)
-    );
-    const assignedDistributors = distributors.filter(d => assignedDistIds.has(d._id));
-
     const peNodes = primaryExecutives.map((pe, i) => ({
       id: pe._id,
       label: pe.name,
@@ -1102,6 +890,8 @@ function MappingView({
       index: i,
     }));
 
+    // Only show distributors assigned to a PE
+    const assignedDistributors = distributors.filter(d => d.pe_id);
     const distNodes = assignedDistributors.map((d, i) => ({
       id: d._id,
       label: d.name,
@@ -1119,18 +909,13 @@ function MappingView({
       }
     }
 
-    // SE→Distributor links from seAssignments
-    const seDistLinks = seAssignments
-      .filter(sa => sa.is_active)
-      .map(sa => ({ source: sa.se_id, target: sa.distributor_id }));
-
-    // PE→Distributor links from pe_id on assigned distributors only
+    // PE→Distributor links from pe_id
     const peDistLinks = assignedDistributors
       .filter(d => d.pe_id)
       .map(d => ({ source: d.pe_id!, target: d._id }));
 
-    return { peNodes, seNodes, distNodes, peSeLinks, seDistLinks, peDistLinks };
-  }, [primaryExecutives, secondaryExecutives, distributors, seAssignments, teamByPrimary]);
+    return { peNodes, seNodes, distNodes, peSeLinks, peDistLinks };
+  }, [primaryExecutives, secondaryExecutives, distributors, teamByPrimary]);
 
   // Layout calculation
   const layout = useMemo(() => {
@@ -1181,25 +966,14 @@ function MappingView({
     return map;
   }, [layout]);
 
-  // Tree data for list view — only show distributors with active SE assignments
+  // Tree data for list view
   const treeData = useMemo(() => {
-    const assignedDistIds = new Set(
-      seAssignments.filter(sa => sa.is_active).map(sa => sa.distributor_id)
-    );
     return primaryExecutives.map(pe => {
       const team = teamByPrimary.get(pe._id) || [];
-      // Only PE distributors that are also SE-assigned
-      const peDistributors = distributors.filter(d => d.pe_id === pe._id && assignedDistIds.has(d._id));
-      const seWithDists = team.map(se => {
-        const assignedDists = seAssignments
-          .filter(sa => sa.se_id === se._id && sa.is_active)
-          .map(sa => distributors.find(d => d._id === sa.distributor_id))
-          .filter(Boolean) as DistributorItem[];
-        return { se, distributors: assignedDists };
-      });
-      return { pe, peDistributors, seWithDists };
+      const peDistributors = distributors.filter(d => d.pe_id === pe._id);
+      return { pe, peDistributors, team };
     });
-  }, [primaryExecutives, secondaryExecutives, distributors, seAssignments, teamByPrimary]);
+  }, [primaryExecutives, distributors, teamByPrimary]);
 
   return (
     <Card>
@@ -1211,82 +985,32 @@ function MappingView({
               Organization Mapping
             </CardTitle>
             <CardDescription>
-              Visualize PE → SE → Distributor relationships
+              Visualize PE → SE and PE → Distributor relationships
             </CardDescription>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
             <Button
-              variant={showAssignForm ? 'default' : 'outline'}
+              variant={viewMode === 'graph' ? 'default' : 'ghost'}
               size="sm"
               className="h-8 px-3"
-              onClick={() => setShowAssignForm(!showAssignForm)}
+              onClick={() => setViewMode('graph')}
             >
-              <Pencil className="h-4 w-4 mr-1" />
-              Edit
+              <GitBranch className="h-4 w-4 mr-1" />
+              Graph
             </Button>
-            <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
-              <Button
-                variant={viewMode === 'graph' ? 'default' : 'ghost'}
-                size="sm"
-                className="h-8 px-3"
-                onClick={() => setViewMode('graph')}
-              >
-                <GitBranch className="h-4 w-4 mr-1" />
-                Graph
-              </Button>
-              <Button
-                variant={viewMode === 'list' ? 'default' : 'ghost'}
-                size="sm"
-                className="h-8 px-3"
-                onClick={() => setViewMode('list')}
-              >
+            <Button
+              variant={viewMode === 'list' ? 'default' : 'ghost'}
+              size="sm"
+              className="h-8 px-3"
+              onClick={() => setViewMode('list')}
+            >
               <LayoutList className="h-4 w-4 mr-1" />
               List
             </Button>
           </div>
-          </div>
         </div>
       </CardHeader>
       <CardContent>
-        {/* Inline assignment form */}
-        {showAssignForm && (
-          <div className="mb-4 p-4 border rounded-lg bg-blue-50/50 space-y-3">
-            <p className="text-sm font-medium">Quick Assign SE → Distributor</p>
-            <form onSubmit={onCreateAssignment} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Secondary Executive</Label>
-                <Select value={assignSEId} onValueChange={setAssignSEId}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Select SE" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {secondaryExecutives.map((se) => (
-                      <SelectItem key={se._id} value={se._id}>{se.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Distributor</Label>
-                <Select value={assignDistributorId} onValueChange={setAssignDistributorId}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Select distributor" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {distributors.map((d) => (
-                      <SelectItem key={d._id} value={d._id}>{d.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button type="submit" size="sm" className="h-9" disabled={savingSEAssignment}>
-                <Link2 className="h-4 w-4 mr-1" />
-                {savingSEAssignment ? 'Assigning...' : 'Assign'}
-              </Button>
-            </form>
-          </div>
-        )}
-
         {viewMode === 'graph' ? (
           <div className="overflow-auto border rounded-lg bg-slate-50/50">
             {/* Legend */}
@@ -1304,10 +1028,7 @@ function MappingView({
                 <span className="inline-block w-6 h-0.5 bg-emerald-400" /> PE→SE (manages)
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="inline-block w-6 h-0.5 bg-violet-400" /> SE→Distributor (assigned)
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block w-6 h-0.5 bg-amber-400 border-dashed border-t-2 border-amber-400 bg-transparent" /> PE→Distributor (owner)
+                <span className="inline-block w-6 h-0.5 bg-amber-400 border-dashed border-t-2 border-amber-400 bg-transparent" /> PE→Distributor (owns)
               </span>
             </div>
 
@@ -1328,7 +1049,7 @@ function MappingView({
                 DISTRIBUTORS
               </text>
 
-              {/* PE→Distributor links (dashed, behind other links) */}
+              {/* PE→Distributor links (dashed) */}
               {graphData.peDistLinks.map((link, i) => {
                 const src = nodeMap.get(link.source);
                 const tgt = nodeMap.get(link.target);
@@ -1359,24 +1080,6 @@ function MappingView({
                     d={`M ${src.x + 50} ${src.y} C ${midX} ${src.y}, ${midX} ${tgt.y}, ${tgt.x - 50} ${tgt.y}`}
                     fill="none"
                     stroke="#6ee7b7"
-                    strokeWidth={2}
-                    opacity={0.7}
-                  />
-                );
-              })}
-
-              {/* SE→Distributor links */}
-              {graphData.seDistLinks.map((link, i) => {
-                const src = nodeMap.get(link.source);
-                const tgt = nodeMap.get(link.target);
-                if (!src || !tgt) return null;
-                const midX = (src.x + tgt.x) / 2;
-                return (
-                  <path
-                    key={`se-dist-${i}`}
-                    d={`M ${src.x + 50} ${src.y} C ${midX} ${src.y}, ${midX} ${tgt.y}, ${tgt.x - 50} ${tgt.y}`}
-                    fill="none"
-                    stroke="#c4b5fd"
                     strokeWidth={2}
                     opacity={0.7}
                   />
@@ -1454,7 +1157,7 @@ function MappingView({
                 <p>No mapping data yet.</p>
               </div>
             ) : (
-              treeData.map(({ pe, peDistributors, seWithDists }) => (
+              treeData.map(({ pe, peDistributors, team }) => (
                 <div key={pe._id} className="border rounded-lg overflow-hidden">
                   {/* PE Header */}
                   <div className="bg-emerald-50 px-4 py-3 flex items-center gap-3 border-b">
@@ -1466,77 +1169,46 @@ function MappingView({
                       <p className="text-xs text-emerald-700">{pe.email} · Primary Executive</p>
                     </div>
                     <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
-                      {seWithDists.length} SE{seWithDists.length !== 1 ? 's' : ''} · {peDistributors.length} Dist{peDistributors.length !== 1 ? 's' : ''}
+                      {team.length} SE{team.length !== 1 ? 's' : ''} · {peDistributors.length} Dist{peDistributors.length !== 1 ? 's' : ''}
                     </Badge>
                   </div>
 
                   <div className="divide-y">
-                    {/* Direct distributors (owned by PE) */}
-                    {peDistributors.length > 0 && (
-                      <div className="px-4 py-2 bg-amber-50/50">
+                    {/* Team members (SEs) */}
+                    {team.length > 0 && (
+                      <div className="px-4 py-2 bg-violet-50/50">
                         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
-                          Direct Distributors
+                          Secondary Executives
                         </p>
                         <div className="flex flex-wrap gap-2">
-                          {peDistributors.map(d => (
-                            <Badge key={d._id} variant="outline" className="bg-amber-50 border-amber-300 text-amber-800">
-                              {d.name}
+                          {team.map(se => (
+                            <Badge key={se._id} variant="outline" className="bg-violet-50 border-violet-300 text-violet-800">
+                              {se.name}
                             </Badge>
                           ))}
                         </div>
                       </div>
                     )}
 
-                    {/* SE → Distributors */}
-                    {seWithDists.map(({ se, distributors: assignedDists }) => (
-                      <div key={se._id} className="px-4 py-3">
-                        <div className="flex items-center gap-3 ml-4">
-                          <div className="w-px h-4 bg-emerald-300 -mt-4 -ml-2" />
-                          <div className="flex items-center gap-2 flex-1">
-                            <div className="h-7 w-7 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 text-xs font-bold">
-                              {getInitials(se.name)}
-                            </div>
-                            <div>
-                              <p className="font-medium text-sm">{se.name}</p>
-                              <p className="text-xs text-muted-foreground">{se.email} · Secondary Executive</p>
-                            </div>
-                          </div>
-                          {assignedDists.length > 0 && (
-                            <Badge variant="outline" className="text-xs">
-                              {assignedDists.length} distributor{assignedDists.length !== 1 ? 's' : ''}
+                    {/* Distributors */}
+                    {peDistributors.length > 0 && (
+                      <div className="px-4 py-2 bg-amber-50/50">
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                          Distributors
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {peDistributors.map(d => (
+                            <Badge key={d._id} variant="outline" className="bg-amber-50 border-amber-300 text-amber-800">
+                              {d.name} · {d.phone}
                             </Badge>
-                          )}
+                          ))}
                         </div>
-                        {assignedDists.length > 0 && (
-                          <div className="ml-12 mt-2 flex flex-wrap gap-1.5">
-                            {assignedDists.map(d => {
-                              const assignment = seAssignments.find(sa => sa.se_id === se._id && sa.distributor_id === d._id && sa.is_active);
-                              return (
-                                <Badge key={d._id} variant="outline" className="text-xs bg-amber-50 border-amber-200 text-amber-700 gap-1 pr-1">
-                                  {d.name} · {d.phone}
-                                  {showAssignForm && assignment && (
-                                    <button
-                                      onClick={() => onRemoveAssignment(assignment._id)}
-                                      className="ml-1 rounded-full hover:bg-red-100 p-0.5"
-                                      title="Remove assignment"
-                                    >
-                                      <Trash2 className="h-3 w-3 text-red-500" />
-                                    </button>
-                                  )}
-                                </Badge>
-                              );
-                            })}
-                          </div>
-                        )}
-                        {assignedDists.length === 0 && (
-                          <p className="ml-12 mt-1 text-xs text-muted-foreground italic">No distributors assigned</p>
-                        )}
                       </div>
-                    ))}
+                    )}
 
-                    {seWithDists.length === 0 && (
+                    {team.length === 0 && peDistributors.length === 0 && (
                       <div className="px-4 py-3 text-xs text-muted-foreground italic ml-4">
-                        No secondary executives under this PE
+                        No team members or distributors under this PE
                       </div>
                     )}
                   </div>

@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     const { data: allInvoices } = await supabaseAdmin.from('invoices').select('invoice_number');
     let maxSequence = 0;
     (allInvoices || []).forEach(inv => {
-      const match = inv.invoice_number.match(/(\d{4})$/);
+      const match = inv.invoice_number.match(/(\d+)\s*$/);
       if (match) { const seq = parseInt(match[1]); if (seq > maxSequence) maxSequence = seq; }
     });
 

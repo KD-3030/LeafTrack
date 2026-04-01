@@ -25,8 +25,13 @@ export async function GET(request: NextRequest) {
     // For SE/PE, first get accessible distributor IDs
     let distributorIdFilter: string[] | null = null;
     if (roleId === 'secondary_executive') {
-      const { data: assigns } = await supabaseAdmin.from('se_distributor_assignments').select('distributor_id').eq('se_id', authResult.userId).eq('is_active', true);
-      distributorIdFilter = (assigns || []).map(a => a.distributor_id);
+      // SE sees invoices for distributors of their PE
+      const { data: seUser } = await supabaseAdmin.from('users').select('manager_id').eq('id', authResult.userId).single();
+      if (!seUser?.manager_id) {
+        return NextResponse.json({ success: true, invoices: [], pagination: { currentPage: page, totalPages: 0, totalCount: 0, hasNextPage: false, hasPrevPage: false } });
+      }
+      const { data: dists } = await supabaseAdmin.from('distributors').select('id').eq('pe_id', seUser.manager_id);
+      distributorIdFilter = (dists || []).map(d => d.id);
       if (!distributorIdFilter.length) {
         return NextResponse.json({ success: true, invoices: [], pagination: { currentPage: page, totalPages: 0, totalCount: 0, hasNextPage: false, hasPrevPage: false } });
       }
@@ -71,15 +76,39 @@ export async function GET(request: NextRequest) {
       (payments || []).forEach(p => { paymentsMap[p.invoice_id] = (paymentsMap[p.invoice_id] || 0) + p.amount_paid; });
     }
 
+    // Get order statuses for invoices linked to orders
+    const orderIds = (invoices || []).filter(i => i.order_id).map(i => i.order_id);
+    let orderStatusMap: Record<string, string> = {};
+    if (orderIds.length > 0) {
+      const { data: orders } = await supabaseAdmin.from('orders').select('id, status').in('id', orderIds);
+      (orders || []).forEach(o => { orderStatusMap[o.id] = o.status; });
+    }
+
+    // Fetch salesman names for these invoices
+    const salesmanIds = [...new Set((invoices || []).filter(i => i.salesman_id).map(i => i.salesman_id))];
+    let salesmanMap: Record<string, { name: string; email: string }> = {};
+    if (salesmanIds.length > 0) {
+      const { data: salesmen } = await supabaseAdmin.from('users').select('id, name, email').in('id', salesmanIds);
+      (salesmen || []).forEach(s => { salesmanMap[s.id] = { name: s.name, email: s.email }; });
+    }
+
     const mapped = (invoices || []).map(inv => {
       const paidAmount = paymentsMap[inv.id] || 0;
       const balanceDue = inv.grand_total - paidAmount;
       return {
         ...withId(inv),
         items: inv.invoice_items || [],
+        customer_details: {
+          name: inv.customer_name || 'Unknown',
+          email: inv.customer_email || '',
+          phone: inv.customer_phone || '',
+          gstin: inv.customer_gstin || '',
+        },
+        salesman_id: salesmanMap[inv.salesman_id] || { name: 'Unknown', email: '' },
         paid_amount: paidAmount,
         balance_due: balanceDue,
         payment_status: balanceDue <= 0 ? 'Paid' : (paidAmount > 0 ? 'Partial' : 'Pending'),
+        order_status: inv.order_id ? (orderStatusMap[inv.order_id] || null) : null,
         createdAt: inv.created_at,
         updatedAt: inv.updated_at,
       };
@@ -124,7 +153,7 @@ export async function POST(request: NextRequest) {
 
       // Get distributor if available
       let customer;
-      const distId = order.distributor_id || customer_id;
+      const distId = order.distributor_id || order.customer_id || customer_id;
       if (distId) {
         const { data } = await supabaseAdmin.from('distributors').select('*').eq('id', distId).single();
         customer = data;
@@ -150,7 +179,7 @@ export async function POST(request: NextRequest) {
 
       for (const item of (order.order_items || [])) {
         const { data: product } = await supabaseAdmin.from('products').select('*').eq('id', item.product_id).single();
-        const unitPrice = item.unit_price || product?.manufacturing_cost || 0;
+        const unitPrice = item.price_per_unit || product?.manufacturing_cost || 0;
         const qty = item.quantity || 1;
         const taxableAmount = unitPrice * qty;
         const gstRate = product?.gst_rate || 18;
@@ -180,11 +209,11 @@ export async function POST(request: NextRequest) {
 
       const grandTotal = subtotal + totalTax;
 
-      // Generate invoice number
+      // Generate invoice number — find max trailing number across ALL invoice numbers
       const { data: allInvoices } = await supabaseAdmin.from('invoices').select('invoice_number');
       let maxSeq = 0;
       (allInvoices || []).forEach(inv => {
-        const match = inv.invoice_number.match(/(\d{4})$/);
+        const match = inv.invoice_number.match(/(\d+)\s*$/);
         if (match) { const seq = parseInt(match[1]); if (seq > maxSeq) maxSeq = seq; }
       });
       const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
@@ -230,8 +259,7 @@ export async function POST(request: NextRequest) {
         await supabaseAdmin.from('invoice_items').insert({ invoice_id: invoice.id, ...item });
       }
 
-      // Mark order as dispatched
-      await supabaseAdmin.from('orders').update({ status: 'dispatched' }).eq('id', order_id);
+      // Order stays in current status — dispatch is a separate step via the Dispatch button
 
       return NextResponse.json({ success: true, message: 'Invoice created from order', invoice: withId(invoice) });
     }
@@ -266,11 +294,11 @@ export async function POST(request: NextRequest) {
     const gstAmount = (taxableAmount * gstRate) / 100;
     const totalAmount = taxableAmount + gstAmount;
 
-    // Generate invoice number
+    // Generate invoice number — find max trailing number across ALL invoice numbers
     const { data: allInvoices } = await supabaseAdmin.from('invoices').select('invoice_number');
     let maxSeq = 0;
     (allInvoices || []).forEach(inv => {
-      const match = inv.invoice_number.match(/(\d{4})$/);
+      const match = inv.invoice_number.match(/(\d+)\s*$/);
       if (match) { const seq = parseInt(match[1]); if (seq > maxSeq) maxSeq = seq; }
     });
     const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');

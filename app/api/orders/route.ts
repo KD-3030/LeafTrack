@@ -113,6 +113,8 @@ export async function POST(request: NextRequest) {
       status: isSecondary ? 'pending_primary' : 'pending',
       submitted_at: new Date().toISOString(),
       notes: body.notes || null,
+      location_lat: body.location_lat || null,
+      location_lng: body.location_lng || null,
     }).select().single();
     if (error) throw error;
 

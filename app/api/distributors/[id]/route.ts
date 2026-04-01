@@ -20,14 +20,10 @@ async function canAccessDistributor(
     return distributor.pe_id === userId;
   }
   if (roleId === 'secondary_executive') {
-    const { data: assignment } = await supabaseAdmin
-      .from('se_distributor_assignments')
-      .select('id')
-      .eq('se_id', userId)
-      .eq('distributor_id', distributor.id as string)
-      .eq('is_active', true)
-      .maybeSingle();
-    return Boolean(assignment);
+    // SE accesses distributors via PE chain
+    const { data: seUser } = await supabaseAdmin
+      .from('users').select('manager_id').eq('id', userId).single();
+    return Boolean(seUser?.manager_id && distributor.pe_id === seUser.manager_id);
   }
   return false;
 }

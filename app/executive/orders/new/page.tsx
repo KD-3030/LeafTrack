@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/table';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
-import { ArrowLeft, Plus, Trash2, User, Package, IndianRupee, Save } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, User, Package, IndianRupee, Save, MapPin } from 'lucide-react';
 
 interface OrderItem {
   product_id?: string;
@@ -50,6 +50,7 @@ export default function ExecutiveNewOrderPage() {
   const [loading, setLoading] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [productsLoading, setProductsLoading] = useState(true);
 
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [customerName, setCustomerName] = useState('');
@@ -65,10 +66,30 @@ export default function ExecutiveNewOrderPage() {
   const [taxPercentage, setTaxPercentage] = useState('18');
   const [discountAmount, setDiscountAmount] = useState('0');
   const [notes, setNotes] = useState('');
+  const [locationLat, setLocationLat] = useState<number | null>(null);
+  const [locationLng, setLocationLng] = useState<number | null>(null);
+  const [locationStatus, setLocationStatus] = useState<'pending' | 'captured' | 'denied' | 'unavailable'>('pending');
 
   useEffect(() => {
     fetchCustomers();
     fetchProducts();
+    // Capture GPS location on mount
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setLocationLat(position.coords.latitude);
+          setLocationLng(position.coords.longitude);
+          setLocationStatus('captured');
+        },
+        (error) => {
+          console.warn('Geolocation error:', error.message);
+          setLocationStatus(error.code === 1 ? 'denied' : 'unavailable');
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+      );
+    } else {
+      setLocationStatus('unavailable');
+    }
   }, []);
 
   const fetchCustomers = async () => {
@@ -86,33 +107,22 @@ export default function ExecutiveNewOrderPage() {
 
   const fetchProducts = async () => {
     try {
+      setProductsLoading(true);
       const token = localStorage.getItem('leaftrack_token');
-      // PE fetches their assignments to see available stock
-      const response = await fetch('/api/assignments', {
+      const response = await fetch('/api/products?limit=100', {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await response.json();
-      if (data.success && data.assignments) {
-        // Extract unique products from assignments
-        const productMap = new Map<string, Product>();
-        for (const assignment of data.assignments) {
-          const p = assignment.productId;
-          if (p && p._id) {
-            const existing = productMap.get(p._id);
-            productMap.set(p._id, {
-              _id: p._id,
-              name: p.name,
-              manufacturingCost: p.manufacturing_cost || 0,
-              totalStock: (existing?.totalStock || 0) + (assignment.quantity || 0),
-              hsn_code: p.hsn_code || '',
-              gst_rate: p.gst_rate || 0,
-            });
-          }
-        }
-        setProducts(Array.from(productMap.values()));
+      console.log('Products API response:', data);
+      if (data.success && data.products) {
+        setProducts(data.products);
+      } else if (data.products) {
+        setProducts(data.products);
       }
     } catch (error) {
       console.error('Error fetching products:', error);
+    } finally {
+      setProductsLoading(false);
     }
   };
 
@@ -197,6 +207,7 @@ export default function ExecutiveNewOrderPage() {
 
     const payload = {
       customer_id: selectedCustomerId || undefined,
+      distributor_id: selectedCustomerId || undefined,
       customer_name: customerName,
       customer_contact: customerContact,
       customer_address: customerAddress,
@@ -216,6 +227,8 @@ export default function ExecutiveNewOrderPage() {
       discount_amount: parseFloat(discountAmount),
       total_amount: total,
       notes,
+      location_lat: locationLat,
+      location_lng: locationLng,
     };
 
     setLoading(true);
@@ -260,6 +273,23 @@ export default function ExecutiveNewOrderPage() {
               This order will be sent directly to admin for approval
             </CardDescription>
           </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-2 text-sm">
+              <MapPin className={`h-4 w-4 ${locationStatus === 'captured' ? 'text-green-600' : locationStatus === 'pending' ? 'text-yellow-500' : 'text-red-500'}`} />
+              {locationStatus === 'captured' && (
+                <span className="text-green-700">Location captured ({locationLat?.toFixed(4)}, {locationLng?.toFixed(4)})</span>
+              )}
+              {locationStatus === 'pending' && (
+                <span className="text-yellow-600">Capturing location...</span>
+              )}
+              {locationStatus === 'denied' && (
+                <span className="text-red-600">Location access denied — please enable location permissions</span>
+              )}
+              {locationStatus === 'unavailable' && (
+                <span className="text-red-600">Location unavailable</span>
+              )}
+            </div>
+          </CardContent>
         </Card>
 
         {/* Customer Information */}
@@ -336,12 +366,15 @@ export default function ExecutiveNewOrderPage() {
                 {items.map((item, index) => (
                   <TableRow key={index}>
                     <TableCell>
-                      <Select value={item.product_id} onValueChange={(v) => handleProductSelect(index, v)}>
-                        <SelectTrigger><SelectValue placeholder="Select product..." /></SelectTrigger>
+                      <Select value={item.product_id || ''} onValueChange={(v) => handleProductSelect(index, v)}>
+                        <SelectTrigger><SelectValue placeholder={productsLoading ? 'Loading products...' : 'Select product...'} /></SelectTrigger>
                         <SelectContent>
+                          {products.length === 0 && !productsLoading && (
+                            <div className="px-3 py-2 text-sm text-muted-foreground">No products found</div>
+                          )}
                           {products.map((p) => (
                             <SelectItem key={p._id} value={p._id}>
-                              {p.name} (Stock: {p.totalStock})
+                              {p.name} {p.totalStock > 0 ? `(Stock: ${p.totalStock})` : '(No stock)'}
                             </SelectItem>
                           ))}
                         </SelectContent>

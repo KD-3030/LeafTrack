@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
     } else {
       const { data: allInvoices } = await supabaseAdmin.from('invoices').select('invoice_number');
       let maxSeq = 0;
-      (allInvoices || []).forEach(inv => { const m = inv.invoice_number.match(/(\d{4})$/); if (m) { const s = parseInt(m[1]); if (s > maxSeq) maxSeq = s; } });
+      (allInvoices || []).forEach(inv => { const m = inv.invoice_number.match(/(\d+)\s*$/); if (m) { const s = parseInt(m[1]); if (s > maxSeq) maxSeq = s; } });
       const customSeq = invoice_sequence ? parseInt(invoice_sequence.toString()) : null;
       const seqNum = customSeq || (maxSeq + 1);
       const dateStr = new Date(invoice_date).toISOString().split('T')[0].replace(/-/g, '');

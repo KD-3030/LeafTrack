@@ -53,7 +53,14 @@ interface Distributor {
   tags?: string[];
   notes?: string;
   outstanding_balance?: number; // Outstanding amount to be collected
+  pe_id?: string;
   createdAt: string;
+}
+
+interface PrimaryExecutive {
+  _id: string;
+  name: string;
+  email: string;
 }
 
 interface DistributorTransaction {
@@ -118,6 +125,7 @@ interface DistributorFormData {
   credit_days: number;
   status: 'Active' | 'Inactive';
   notes: string;
+  pe_id: string;
 }
 
 const initialFormData: DistributorFormData = {
@@ -136,6 +144,7 @@ const initialFormData: DistributorFormData = {
   credit_days: 30,
   status: 'Active',
   notes: '',
+  pe_id: '',
 };
 
 export default function DistributorsPage() {
@@ -152,6 +161,7 @@ export default function DistributorsPage() {
   const [isLoadingTransactions, setisLoadingTransactions] = useState(false);
   const [formData, setFormData] = useState<DistributorFormData>(initialFormData);
   const [editingDistributor, seteditingDistributor] = useState<Distributor | null>(null);
+  const [primaryExecutives, setPrimaryExecutives] = useState<PrimaryExecutive[]>([]);
   
   // Invoice filtering and sorting state
   const [invoiceSearchTerm, setInvoiceSearchTerm] = useState('');
@@ -167,6 +177,7 @@ export default function DistributorsPage() {
 
   useEffect(() => {
     loadDistributors();
+    loadPrimaryExecutives();
   }, []);
 
   const loadDistributors = async () => {
@@ -190,6 +201,30 @@ export default function DistributorsPage() {
       toast.error('Failed to load Distributors');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const loadPrimaryExecutives = async () => {
+    try {
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch('/api/users', {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (data.success) {
+        const pes = data.users
+          .filter((u: { role: string; approval_status: string }) => 
+            u.role === 'PrimaryExecutive' && u.approval_status === 'approved'
+          )
+          .map((u: { id: string; _id?: string; name: string; email: string }) => ({
+            _id: u._id || u.id,
+            name: u.name,
+            email: u.email,
+          }));
+        setPrimaryExecutives(pes);
+      }
+    } catch (error) {
+      console.error('Error loading primary executives:', error);
     }
   };
 
@@ -569,6 +604,7 @@ export default function DistributorsPage() {
       credit_days: dist.credit_days,
       status: dist.status,
       notes: dist.notes || '',
+      pe_id: dist.pe_id || '',
     });
     setIsCreateDialogOpen(true);
   };
@@ -738,8 +774,9 @@ export default function DistributorsPage() {
                   <TableRow>
                     <TableHead>Distributor</TableHead>
                     <TableHead className="hidden md:table-cell">Contact</TableHead>
+                    <TableHead className="hidden lg:table-cell">Primary Executive</TableHead>
                     <TableHead className="hidden lg:table-cell">Business</TableHead>
-                    <TableHead className="hidden lg:table-cell">Location</TableHead>
+                    <TableHead className="hidden xl:table-cell">Location</TableHead>
                     <TableHead className="hidden xl:table-cell">GST Info</TableHead>
                     <TableHead className="hidden md:table-cell">Credit</TableHead>
                     <TableHead className="text-right">Outstanding</TableHead>
@@ -771,6 +808,17 @@ export default function DistributorsPage() {
                         </div>
                       </TableCell>
                       <TableCell className="hidden lg:table-cell">
+                        <div className="text-sm">
+                          {dist.pe_id ? (
+                            <span className="font-medium">
+                              {primaryExecutives.find(pe => pe._id === dist.pe_id)?.name || 'Assigned'}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">Unassigned</span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell">
                         <div>
                           {dist.business_name && (
                             <div className="font-medium">{dist.business_name}</div>
@@ -778,7 +826,7 @@ export default function DistributorsPage() {
                           {getBusinessTypeBadge(dist.business_type)}
                         </div>
                       </TableCell>
-                      <TableCell className="hidden lg:table-cell">
+                      <TableCell className="hidden xl:table-cell">
                         <div className="text-sm">
                           {dist.city && dist.state ? (
                             <>
@@ -917,6 +965,25 @@ export default function DistributorsPage() {
                       onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                       required
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="pe_id">Assigned Primary Executive</Label>
+                    <Select 
+                      value={formData.pe_id || 'none'} 
+                      onValueChange={(value) => setFormData(prev => ({ ...prev, pe_id: value === 'none' ? '' : value }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select PE (optional)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">— No PE Assigned —</SelectItem>
+                        {primaryExecutives.map((pe) => (
+                          <SelectItem key={pe._id} value={pe._id}>
+                            {pe.name} ({pe.email})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="business_name">Business Name</Label>

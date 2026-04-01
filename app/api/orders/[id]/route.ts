@@ -112,8 +112,14 @@ export async function PUT(
           updateData.rejection_reason = body.rejection_reason;
         }
 
+        // Prevent re-dispatching
+        if (body.status === 'dispatched' && order.status === 'dispatched') {
+          return NextResponse.json({ error: 'Order is already dispatched' }, { status: 400 });
+        }
+
         // When dispatched, transfer stock to distributor inventory
-        if (body.status === 'dispatched' && order.distributor_id) {
+        const distId = order.distributor_id || order.customer_id;
+        if (body.status === 'dispatched' && distId) {
           const { data: orderItems } = await supabaseAdmin
             .from('order_items').select('product_id, quantity').eq('order_id', params.id);
           if (orderItems && orderItems.length > 0) {
@@ -131,7 +137,7 @@ export async function PUT(
               const { data: inv } = await supabaseAdmin
                 .from('distributor_inventory')
                 .select('id, current_stock')
-                .eq('distributor_id', order.distributor_id)
+                .eq('distributor_id', distId)
                 .eq('product_id', item.product_id)
                 .maybeSingle();
               if (inv) {
@@ -140,7 +146,7 @@ export async function PUT(
                   .eq('id', inv.id);
               } else {
                 await supabaseAdmin.from('distributor_inventory').insert({
-                  distributor_id: order.distributor_id,
+                  distributor_id: distId,
                   product_id: item.product_id,
                   current_stock: item.quantity,
                   last_restocked_at: new Date().toISOString(),

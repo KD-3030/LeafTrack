@@ -46,7 +46,13 @@ export default function ExecutiveStockPage() {
         throw new Error(data.error || 'Failed to fetch inventory');
       }
 
-      setInventory(Array.isArray(data) ? data : []);
+      // Map API response to expected structure
+      const items = (data.inventory || data || []).map((item: Record<string, unknown>) => ({
+        ...item,
+        distributor: { name: (item.distributor_name as string) || 'Unknown', phone: '' },
+        product: { name: (item.product_name as string) || 'Unknown', hsn_code: '' },
+      }));
+      setInventory(items);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load inventory';
       toast.error(message);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -37,7 +37,10 @@ import {
   Edit,
   Trash2,
   Download,
+  MapPin,
 } from 'lucide-react';
+
+const SalesMap = lazy(() => import('@/components/SalesMap'));
 // pdfGenerator is dynamically imported on-demand for bundle optimization
 
 interface OrderItem {
@@ -77,6 +80,8 @@ interface Order {
   delivery_date?: string;
   payment_terms?: string;
   notes?: string;
+  location_lat?: number | null;
+  location_lng?: number | null;
 }
 
 interface OrderSummary {
@@ -100,6 +105,7 @@ export default function AdminOrdersPage() {
   // Dialog states
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isApprovalDialogOpen, setIsApprovalDialogOpen] = useState(false);
+  const [isMapDialogOpen, setIsMapDialogOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
   // Approval form states
@@ -594,6 +600,16 @@ export default function AdminOrdersPage() {
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
+                        {order.location_lat && order.location_lng && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => { setSelectedOrder(order); setIsMapDialogOpen(true); }}
+                            title="View SE Location"
+                          >
+                            <MapPin className="h-4 w-4 text-green-600" />
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon"
@@ -753,6 +769,26 @@ export default function AdminOrdersPage() {
                 <div>
                   <h3 className="font-semibold mb-2 text-red-600">Rejection Reason</h3>
                   <p className="text-sm text-gray-600">{selectedOrder.rejection_reason}</p>
+                </div>
+              )}
+
+              {/* SE Location */}
+              {selectedOrder.location_lat && selectedOrder.location_lng && (
+                <div>
+                  <h3 className="font-semibold mb-2 flex items-center gap-2">
+                    <MapPin className="h-4 w-4 text-green-600" />SE Location When Order Was Placed
+                  </h3>
+                  <Suspense fallback={<div className="h-[300px] bg-gray-100 rounded-lg flex items-center justify-center text-sm text-gray-500">Loading map...</div>}>
+                    <SalesMap
+                      markers={[{
+                        lat: selectedOrder.location_lat,
+                        lng: selectedOrder.location_lng,
+                        popup: `${selectedOrder.salesman_name} — ${selectedOrder.order_number}`,
+                        color: 'green',
+                      }]}
+                      className="h-[300px]"
+                    />
+                  </Suspense>
                 </div>
               )}
             </div>
@@ -929,6 +965,36 @@ export default function AdminOrdersPage() {
               <CheckCircle className="mr-2 h-4 w-4" />
               Approve Order
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Location Map Dialog */}
+      <Dialog open={isMapDialogOpen} onOpenChange={setIsMapDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MapPin className="h-5 w-5 text-green-600" />SE Location
+            </DialogTitle>
+            <DialogDescription>
+              Location of {selectedOrder?.salesman_name} when placing order {selectedOrder?.order_number}
+            </DialogDescription>
+          </DialogHeader>
+          {selectedOrder?.location_lat && selectedOrder?.location_lng && (
+            <Suspense fallback={<div className="h-[400px] bg-gray-100 rounded-lg flex items-center justify-center text-sm text-gray-500">Loading map...</div>}>
+              <SalesMap
+                markers={[{
+                  lat: selectedOrder.location_lat,
+                  lng: selectedOrder.location_lng,
+                  popup: `${selectedOrder.salesman_name}<br/>${selectedOrder.customer_name}<br/>₹${selectedOrder.total_amount.toLocaleString('en-IN')}`,
+                  color: 'green',
+                }]}
+                zoom={14}
+              />
+            </Suspense>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setIsMapDialogOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

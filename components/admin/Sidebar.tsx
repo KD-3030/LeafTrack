@@ -24,7 +24,8 @@ import {
   ChevronDown,
   Store,
   ClipboardCheck,
-  Leaf
+  Leaf,
+  MapPin
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
@@ -58,6 +59,7 @@ const navGroups: NavGroup[] = [
       { name: 'Orders', href: '/admin/orders', icon: ClipboardCheck },
       { name: 'Invoicing', href: '/admin/invoicing', icon: FileText },
       { name: 'Sales Returns', href: '/admin/sales-returns', icon: RotateCcw },
+      { name: 'Field Sales', href: '/admin/field-sales', icon: MapPin },
       { name: 'Distributors', href: '/admin/distributors', icon: UserCheck },
     ],
   },

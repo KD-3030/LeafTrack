@@ -13,7 +13,7 @@ interface Order {
   customer_name: string;
   salesman_name: string;
   total_amount: number;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'dispatched';
   created_at: string;
 }
 
@@ -43,10 +43,11 @@ export default function AdminDashboard() {
       setLoading(true);
       const token = localStorage.getItem('leaftrack_token');
       
+      const headers = { 'Authorization': `Bearer ${token}` };
       const [productsResponse, usersResponse, ordersResponse] = await Promise.all([
-        fetch('/api/products', { signal }),
-        fetch('/api/users', { signal }),
-        fetch('/api/orders', { headers: { 'Authorization': `Bearer ${token}` }, signal }),
+        fetch('/api/products', { headers, signal }),
+        fetch('/api/users', { headers, signal }),
+        fetch('/api/orders', { headers, signal }),
       ]);
       
       const productsData = await productsResponse.json();
@@ -54,19 +55,21 @@ export default function AdminDashboard() {
       const ordersData = await ordersResponse.json();
       
       if (productsData.success && usersData.success && ordersData.success) {
-        const salesmen = usersData.users.filter((user: User) => user.role?.toLowerCase() === 'salesman');
+        const activeUsers = usersData.users.filter((u: User) => 
+          u.approval_status === 'approved' && u.role?.toLowerCase() !== 'admin'
+        );
         const totalStock = productsData.products.reduce((sum: number, product: Product) => sum + (product.totalStock || 0), 0);
         
         const orders = ordersData.orders || [];
         const pending = orders.filter((o: Order) => o.status === 'pending');
-        const approved = orders.filter((o: Order) => o.status === 'approved');
+        const approved = orders.filter((o: Order) => o.status === 'approved' || o.status === 'dispatched');
         const rejected = orders.filter((o: Order) => o.status === 'rejected');
         const totalValue = approved.reduce((sum: number, o: Order) => sum + (o.total_amount || 0), 0);
         
         setStats({
           totalProducts: productsData.products.length,
           totalStock,
-          totalSalesmen: salesmen.length,
+          totalSalesmen: activeUsers.length,
           pendingOrders: pending.length,
           approvedOrders: approved.length,
           rejectedOrders: rejected.length,
@@ -285,11 +288,11 @@ export default function AdminDashboard() {
             </button>
 
             <button 
-              onClick={() => router.push('/admin/customers')}
+              onClick={() => router.push('/admin/distributors')}
               className="p-4 border rounded-lg hover:bg-accent/50 transition-colors text-left group"
             >
               <Users className="h-6 w-6 text-brand-600 mb-2 group-hover:scale-110 transition-transform" />
-              <h3 className="font-medium text-sm">Customers</h3>
+              <h3 className="font-medium text-sm">Distributors</h3>
               <p className="text-xs text-muted-foreground mt-0.5">Manage accounts</p>
             </button>
           </div>

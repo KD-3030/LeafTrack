@@ -159,13 +159,23 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
     const { data: invoice, error: invErr } = await supabaseAdmin
       .from('invoices')
-      .select('*')
+      .select('*, invoice_items(*)')
       .eq('id', params.id)
       .single();
 
     if (invErr || !invoice) {
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
+
+    // Normalize customer details from flat columns
+    const customerDetails = {
+      name: invoice.customer_name || '-',
+      email: invoice.customer_email || '',
+      phone: invoice.customer_phone || '-',
+      address: invoice.customer_address || '-',
+      state: invoice.customer_state || '-',
+      gstin: invoice.customer_gstin || '-',
+    };
 
     const roleId = normalizeRoleId(decoded.role);
     if (roleId === 'secondary_executive') {
@@ -195,16 +205,16 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const settings = settingsRes.data as Record<string, unknown> | null;
 
     const origin = request.nextUrl.origin;
-    const companyName = (settings?.company_name as string | undefined) || invoice.company_details?.name || 'Company Name';
+    const companyName = (settings?.company_name as string | undefined) || invoice.company_name || 'Company Name';
     const companyAddress = [
       settings?.address as string | undefined,
       settings?.city as string | undefined,
       settings?.state as string | undefined,
       settings?.pincode as string | undefined,
-    ].filter(Boolean).join(', ') || invoice.company_details?.address || '-';
-    const companyPhone = (settings?.phone as string | undefined) || invoice.company_details?.phone || '-';
-    const companyEmail = (settings?.email as string | undefined) || invoice.company_details?.email || '-';
-    const companyGstin = (settings?.gstin as string | undefined) || invoice.company_details?.gstin || '-';
+    ].filter(Boolean).join(', ') || invoice.company_address || '-';
+    const companyPhone = (settings?.phone as string | undefined) || invoice.company_phone || '-';
+    const companyEmail = (settings?.email as string | undefined) || invoice.company_email || '-';
+    const companyGstin = (settings?.gstin as string | undefined) || invoice.company_gstin || '-';
 
     const logoUrl = toAbsoluteAssetUrl(settings?.logo_url as string | undefined, origin);
     const signatureUrl = toAbsoluteAssetUrl(settings?.signature_url as string | undefined, origin);
@@ -218,7 +228,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
     type InvoiceItemRaw = { quantity?: number | string | null; unit_price?: number | string | null; taxable_amount?: number | string | null; cgst_amount?: number | string | null; sgst_amount?: number | string | null; igst_amount?: number | string | null; gst_rate?: number | string | null; discount_percentage?: number | string | null; product_name?: string | null; hsn_code?: string | null; total_amount?: number | string | null; };
     type ProcessedItem = { productName: string; hsnCode: string; qty: number; unit: string; price: number; discount: number; gstRate: number; gstAmount: number; amount: number; taxableAmount: number; };
-    const items = (invoice.items as InvoiceItemRaw[] || []).map((item): ProcessedItem => {
+    const rawItems = (invoice.invoice_items || []) as InvoiceItemRaw[];
+    const items = rawItems.map((item): ProcessedItem => {
       const quantity = Number(item.quantity || 0);
       const unitPrice = Number(item.unit_price || 0);
       const taxableAmount = Number(item.taxable_amount || quantity * unitPrice);
@@ -348,12 +359,12 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     <div class="info-grid">
       <div class="info-col left">
         <h3>Bill To:</h3>
-        <p class="text-bold">${escapeHtml(invoice.customer_details?.name || '-')}</p>
-        <p>${escapeHtml(invoice.customer_details?.address || '-')}</p>
+        <p class="text-bold">${escapeHtml(customerDetails.name)}</p>
+        <p>${escapeHtml(customerDetails.address)}</p>
         <div class="detail-grid" style="margin-top: 6px;">
-          <span>Contact No:</span><span>${escapeHtml(invoice.customer_details?.phone || '-')}</span>
-          <span>GSTIN:</span><span>${escapeHtml(invoice.customer_details?.gstin || '-')}</span>
-          <span>State:</span><span>${escapeHtml(invoice.customer_details?.state || '-')}</span>
+          <span>Contact No:</span><span>${escapeHtml(customerDetails.phone)}</span>
+          <span>GSTIN:</span><span>${escapeHtml(customerDetails.gstin)}</span>
+          <span>State:</span><span>${escapeHtml(customerDetails.state)}</span>
         </div>
       </div>
       <div class="info-col">
@@ -361,14 +372,14 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         <div class="detail-grid">
           <span>Invoice No:</span><span>${escapeHtml(invoice.invoice_number || '-')}</span>
           <span>Date:</span><span>${escapeHtml(formatDate(invoice.invoice_date))}</span>
-          <span>Place Of Supply:</span><span>${escapeHtml(invoice.customer_details?.state || '-')}</span>
+          <span>Place Of Supply:</span><span>${escapeHtml(customerDetails.state)}</span>
         </div>
       </div>
     </div>
 
     <div class="ship-box">
       <h3>Ship To:</h3>
-      <p>${escapeHtml(invoice.customer_details?.address || '-')}</p>
+      <p>${escapeHtml(customerDetails.address)}</p>
     </div>
 
     <table class="data-table">

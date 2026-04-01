@@ -10,13 +10,15 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { FileText, Plus, Search, Edit, Download, RefreshCw, DollarSign, TrendingUp, AlertCircle, Calendar, Filter, Eye, Trash2, Edit2 } from 'lucide-react';
+import { FileText, Plus, Search, Edit, Download, RefreshCw, DollarSign, TrendingUp, AlertCircle, Calendar, Filter, Eye, Trash2, Edit2, Package } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 // pdfGenerator is dynamically imported on-demand for bundle optimization
 
 interface Invoice {
   _id: string;
   customer_id?: string;
+  order_id?: string;
+  order_status?: string | null;
   invoice_number: string;
   invoice_date: string;
   due_date: string;
@@ -69,8 +71,8 @@ interface OrderForInvoice {
     product_id: string;
     product_name: string;
     quantity: number;
-    unit_price: number;
-    total: number;
+    price_per_unit: number;
+    total_price: number;
   }[];
   subtotal: number;
   total_amount: number;
@@ -232,7 +234,21 @@ export default function InvoicingPage() {
 
       const data = await response.json();
       if (data.success) {
-        setApprovedOrders(data.orders || []);
+        // Filter out orders that already have invoices
+        const orders = data.orders || [];
+        const orderIds = orders.map((o: OrderForInvoice) => o._id);
+        if (orderIds.length > 0) {
+          const invRes = await fetch(`/api/invoices?limit=1000`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+          const invData = await invRes.json();
+          const invoicedOrderIds = new Set(
+            (invData.invoices || []).filter((inv: Invoice) => inv.order_id).map((inv: Invoice) => inv.order_id)
+          );
+          setApprovedOrders(orders.filter((o: OrderForInvoice) => !invoicedOrderIds.has(o._id)));
+        } else {
+          setApprovedOrders([]);
+        }
       } else {
         toast({
           title: "Error",
@@ -595,6 +611,44 @@ export default function InvoicingPage() {
       toast({
         title: "Error",
         description: "Failed to create invoice",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDispatchOrder = async (orderId: string) => {
+    if (!confirm('Mark this order as dispatched? This will transfer stock to the distributor.')) {
+      return;
+    }
+    try {
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch(`/api/orders/${orderId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status: 'dispatched' }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        toast({
+          title: "Success",
+          description: "Order dispatched — stock transferred to distributor",
+        });
+        loadInvoices();
+      } else {
+        toast({
+          title: "Error",
+          description: data.error || "Failed to dispatch order",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error dispatching order:', error);
+      toast({
+        title: "Error",
+        description: "Failed to dispatch order",
         variant: "destructive",
       });
     }
@@ -1044,6 +1098,24 @@ export default function InvoicingPage() {
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
+                        {invoice.order_id && invoice.order_status === 'approved' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-indigo-600 border-indigo-300 hover:bg-indigo-50"
+                            onClick={() => handleDispatchOrder(invoice.order_id!)}
+                            title="Dispatch to Distributor"
+                          >
+                            <Package className="h-4 w-4 mr-1" />
+                            Dispatch
+                          </Button>
+                        )}
+                        {invoice.order_id && invoice.order_status === 'dispatched' && (
+                          <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-300 text-xs">
+                            <Package className="h-3 w-3 mr-1" />
+                            Dispatched
+                          </Badge>
+                        )}
                         {invoice.status !== 'Cancelled' && invoice.status !== 'Paid' && (
                           <Button
                             size="sm"

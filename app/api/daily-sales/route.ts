@@ -100,16 +100,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'distributor_id, product_id, quantity_sold, and sale_amount are required' }, { status: 400 });
     }
 
-    // Verify SE is assigned to this distributor
+    // Verify SE has access to this distributor via PE chain
     if (roleId === 'secondary_executive') {
-      const { data: assignment } = await supabaseAdmin
-        .from('se_distributor_assignments')
-        .select('id')
-        .eq('se_id', authResult.userId)
-        .eq('distributor_id', distributor_id)
-        .eq('is_active', true)
-        .maybeSingle();
-      if (!assignment) {
+      const { data: seUser } = await supabaseAdmin
+        .from('users').select('manager_id').eq('id', authResult.userId).single();
+      const { data: dist } = await supabaseAdmin
+        .from('distributors').select('pe_id').eq('id', distributor_id).single();
+      if (!seUser?.manager_id || !dist || dist.pe_id !== seUser.manager_id) {
         return NextResponse.json({ error: 'You are not assigned to this distributor' }, { status: 403 });
       }
     }
