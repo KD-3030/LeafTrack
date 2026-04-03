@@ -35,28 +35,43 @@ interface Payment {
 }
 
 interface FinancialStats {
-  total_revenue: number;
-  total_paid: number;
-  total_pending: number;
-  overdue_amount: number;
-  payments_today: number;
-  payments_this_month: number;
-  average_payment_time: number;
+  totalRevenue: number;
+  totalPaid: number;
+  totalOutstanding: number;
+  totalOverdue: number;
+  overdueCount: number;
+  paymentsToday: number;
+  paymentsTodayCount: number;
+  paymentsThisMonth: number;
+  collectionRate: number;
+  avgPaymentDays: number;
+  totalInvoices: number;
+  totalPayments: number;
+  statusBreakdown: {
+    paid: number;
+    partial: number;
+    unpaid: number;
+    overdue: number;
+  };
 }
 
 interface OutstandingInvoice {
   _id: string;
   invoice_number: string;
-  customer_id: string;
-  customer_details: {
+  customer_id: {
+    _id: string;
+    id: string;
     name: string;
     email: string;
+    phone?: string;
+    gstin?: string;
   };
   grand_total: number;
   paid_amount: number;
   balance_due: number;
   due_date: string;
   days_overdue: number;
+  is_overdue: boolean;
 }
 
 export default function FinancialDashboard() {
@@ -238,7 +253,7 @@ export default function FinancialDashboard() {
         },
         body: JSON.stringify({
           invoice_id: selectedInvoice._id,
-          customer_id: selectedInvoice.customer_id,
+          customer_id: selectedInvoice.customer_id?._id || selectedInvoice.customer_id?.id,
           ...paymentForm,
         }),
       });
@@ -469,14 +484,14 @@ export default function FinancialDashboard() {
     // Search filter
     const matchesSearch = 
       invoice.invoice_number?.toLowerCase().includes(invoiceSearchTerm.toLowerCase()) ||
-      invoice.customer_details?.name?.toLowerCase().includes(invoiceSearchTerm.toLowerCase()) ||
-      invoice.customer_details?.email?.toLowerCase().includes(invoiceSearchTerm.toLowerCase());
+      invoice.customer_id?.name?.toLowerCase().includes(invoiceSearchTerm.toLowerCase()) ||
+      invoice.customer_id?.email?.toLowerCase().includes(invoiceSearchTerm.toLowerCase());
 
     // Status filter (overdue or pending)
     const matchesStatus = 
       invoiceStatusFilter === 'all' ||
-      (invoiceStatusFilter === 'overdue' && invoice.days_overdue > 0) ||
-      (invoiceStatusFilter === 'pending' && invoice.days_overdue <= 0);
+      (invoiceStatusFilter === 'overdue' && (invoice.is_overdue || invoice.days_overdue > 0)) ||
+      (invoiceStatusFilter === 'pending' && !invoice.is_overdue && invoice.days_overdue <= 0);
 
     return matchesSearch && matchesStatus;
   });
@@ -541,24 +556,24 @@ export default function FinancialDashboard() {
     const customerMap = new Map<string, CustomerInvoiceGroup>();
 
     filteredInvoices.forEach(invoice => {
-      const customerId = invoice.customer_details?.name || 'Unknown';
+      const customerId = invoice.customer_id?.name || 'Unknown';
       const existing = customerMap.get(customerId);
       
       if (existing) {
         existing.invoices.push(invoice);
         existing.invoice_count++;
         existing.total_outstanding += invoice.balance_due;
-        if (invoice.days_overdue > 0) {
+        if (invoice.is_overdue || invoice.days_overdue > 0) {
           existing.overdue_amount += invoice.balance_due;
         }
       } else {
         customerMap.set(customerId, {
           customer_id: customerId,
-          customer_name: invoice.customer_details?.name || 'Unknown',
-          customer_email: invoice.customer_details?.email || 'N/A',
+          customer_name: invoice.customer_id?.name || 'Unknown',
+          customer_email: invoice.customer_id?.email || 'N/A',
           total_outstanding: invoice.balance_due,
           invoice_count: 1,
-          overdue_amount: invoice.days_overdue > 0 ? invoice.balance_due : 0,
+          overdue_amount: (invoice.is_overdue || invoice.days_overdue > 0) ? invoice.balance_due : 0,
           invoices: [invoice],
         });
       }
@@ -702,7 +717,7 @@ export default function FinancialDashboard() {
                 <DollarSign className="h-4 w-4 text-green-600" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">₹{stats.total_revenue.toLocaleString()}</div>
+                <div className="text-2xl font-bold">₹{stats.totalRevenue.toLocaleString('en-IN')}</div>
                 <p className="text-xs text-gray-600">All time revenue</p>
               </CardContent>
             </Card>
@@ -713,12 +728,9 @@ export default function FinancialDashboard() {
                 <TrendingUp className="h-4 w-4 text-blue-600" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">₹{stats.total_paid.toLocaleString()}</div>
+                <div className="text-2xl font-bold">₹{stats.totalPaid.toLocaleString('en-IN')}</div>
                 <p className="text-xs text-gray-600">
-                  {stats.total_revenue > 0 
-                    ? `${((stats.total_paid / stats.total_revenue) * 100).toFixed(1)}% collection rate`
-                    : '0.0% collection rate'
-                  }
+                  {stats.collectionRate ? `${stats.collectionRate.toFixed(1)}% collection rate` : '0.0% collection rate'}
                 </p>
               </CardContent>
             </Card>
@@ -729,7 +741,7 @@ export default function FinancialDashboard() {
                 <TrendingDown className="h-4 w-4 text-orange-600" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">₹{stats.total_pending.toLocaleString()}</div>
+                <div className="text-2xl font-bold">₹{stats.totalOutstanding.toLocaleString('en-IN')}</div>
                 <p className="text-xs text-gray-600">Pending collection</p>
               </CardContent>
             </Card>
@@ -740,8 +752,8 @@ export default function FinancialDashboard() {
                 <AlertCircle className="h-4 w-4 text-red-600" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">₹{stats.overdue_amount.toLocaleString()}</div>
-                <p className="text-xs text-gray-600">Needs immediate attention</p>
+                <div className="text-2xl font-bold">₹{stats.totalOverdue.toLocaleString('en-IN')}</div>
+                <p className="text-xs text-gray-600">{stats.overdueCount} overdue invoices</p>
               </CardContent>
             </Card>
           </div>
@@ -1075,10 +1087,10 @@ export default function FinancialDashboard() {
                         <TableCell>
                           <div>
                             <div className="font-medium">
-                              {invoice.customer_details?.name || 'Unknown Customer'}
+                              {invoice.customer_id?.name || 'Unknown Customer'}
                             </div>
                             <div className="text-sm text-gray-600">
-                              {invoice.customer_details?.email || 'No email'}
+                              {invoice.customer_id?.email || 'No email'}
                             </div>
                           </div>
                         </TableCell>
@@ -1099,7 +1111,7 @@ export default function FinancialDashboard() {
                           </div>
                         </TableCell>
                         <TableCell className="hidden sm:table-cell">
-                          {invoice.days_overdue > 0 ? (
+                          {(invoice.is_overdue || invoice.days_overdue > 0) ? (
                             <Badge className="bg-red-100 text-red-800">Overdue</Badge>
                           ) : (
                             <Badge className="bg-yellow-100 text-yellow-800">Pending</Badge>
@@ -1146,23 +1158,20 @@ export default function FinancialDashboard() {
                         <div className="flex justify-between">
                           <span>Collection Rate:</span>
                           <span className="font-semibold">
-                            {stats.total_revenue > 0 
-                              ? `${((stats.total_paid / stats.total_revenue) * 100).toFixed(1)}%`
-                              : '0.0%'
-                            }
+                            {stats.collectionRate ? `${stats.collectionRate.toFixed(1)}%` : '0.0%'}
                           </span>
                         </div>
                         <div className="flex justify-between">
                           <span>Average Payment Time:</span>
-                          <span className="font-semibold">{stats.average_payment_time || 0} days</span>
+                          <span className="font-semibold">{stats.avgPaymentDays || 0} days</span>
                         </div>
                         <div className="flex justify-between">
                           <span>Payments Today:</span>
-                          <span className="font-semibold">₹{stats.payments_today.toLocaleString()}</span>
+                          <span className="font-semibold">₹{stats.paymentsToday.toLocaleString('en-IN')}</span>
                         </div>
                         <div className="flex justify-between">
                           <span>Payments This Month:</span>
-                          <span className="font-semibold">₹{stats.payments_this_month.toLocaleString()}</span>
+                          <span className="font-semibold">₹{stats.paymentsThisMonth.toLocaleString('en-IN')}</span>
                         </div>
                       </div>
                     </div>
@@ -1172,16 +1181,16 @@ export default function FinancialDashboard() {
                       <div className="space-y-2">
                         <div className="flex justify-between">
                           <span>Total Outstanding:</span>
-                          <span className="font-semibold">₹{stats.total_pending.toLocaleString()}</span>
+                          <span className="font-semibold">₹{stats.totalOutstanding.toLocaleString('en-IN')}</span>
                         </div>
                         <div className="flex justify-between">
                           <span>Overdue Amount:</span>
-                          <span className="font-semibold text-red-600">₹{stats.overdue_amount.toLocaleString()}</span>
+                          <span className="font-semibold text-red-600">₹{stats.totalOverdue.toLocaleString('en-IN')}</span>
                         </div>
                         <div className="flex justify-between">
                           <span>Overdue Ratio:</span>
                           <span className="font-semibold text-red-600">
-                            {stats.total_pending > 0 ? ((stats.overdue_amount / stats.total_pending) * 100).toFixed(1) : 0}%
+                            {stats.totalOutstanding > 0 ? ((stats.totalOverdue / stats.totalOutstanding) * 100).toFixed(1) : 0}%
                           </span>
                         </div>
                       </div>
@@ -1424,10 +1433,10 @@ export default function FinancialDashboard() {
                       <span className="font-medium">Invoice:</span> {selectedInvoice?.invoice_number || 'N/A'}
                     </div>
                     <div>
-                      <span className="font-medium">Customer:</span> {selectedInvoice.customer_details?.name || 'Unknown Customer'}
+                      <span className="font-medium">Customer:</span> {selectedInvoice.customer_id?.name || 'Unknown Customer'}
                     </div>
                     <div>
-                      <span className="font-medium">Total Amount:</span> ₹{(selectedInvoice?.grand_total || 0).toLocaleString()}
+                      <span className="font-medium">Total Amount:</span> ₹{(selectedInvoice?.grand_total || 0).toLocaleString('en-IN')}
                     </div>
                     <div>
                       <span className="font-medium">Balance Due:</span> ₹{(selectedInvoice?.balance_due || 0).toLocaleString()}
