@@ -214,14 +214,15 @@ export default function ExecutiveManagementPage() {
     if (!inviteEmail) return toast.error('Email is required');
     setInviteLoading(true);
     try {
-      const res = await fetch('/api/auth/invite', {
+      const res = await fetch('/api/invitations/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create invite');
-      const link = data.inviteLink || data.invite_link || `${window.location.origin}/signup?token=${data.token}`;
+      const raw = data.inviteLink || data.invite_link || `/signup?token=${data.token}`;
+      const link = raw.startsWith('http') ? raw : `${window.location.origin}${raw}`;
       setGeneratedInviteLink(link);
       toast.success('Invite link generated');
       setInviteEmail('');
