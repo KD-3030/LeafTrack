@@ -1,12 +1,18 @@
 // Cleanup script: remove all users except kinjaldutta005@gmail.com,
 // delete all transactional data, and reset product stock to 0.
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env.local') });
 const { createClient } = require('@supabase/supabase-js');
 
-const supabase = createClient(
-  'http://100.109.194.15:54321',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJzZXJ2aWNlX3JvbGUiLAogICAgImlzcyI6ICJzdXBhYmFzZS1kZW1vIiwKICAgICJpYXQiOiAxNjQxNzY5MjAwLAogICAgImV4cCI6IDE3OTk1MzU2MDAKfQ.DaYlNEoUrrEn2Ig7tqibS-PHK5vgusbcbo7X36XVt4Q',
-  { db: { schema: 'sohag' } }
-);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  console.error('ERROR: Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env.local');
+  process.exit(1);
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey, { db: { schema: 'sohag' } });
 
 const KEEP_EMAIL = 'kinjaldutta005@gmail.com';
 

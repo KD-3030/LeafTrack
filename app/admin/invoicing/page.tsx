@@ -169,8 +169,8 @@ export default function InvoicingPage() {
   const [editDiscountMode, setEditDiscountMode] = useState<'amount' | 'percentage'>('amount');
   const [editDiscountValue, setEditDiscountValue] = useState<number>(0);
   const [selectedProduct, setSelectedProduct] = useState('');
-  const [itemQuantity, setItemQuantity] = useState(1);
-  const [itemUnitPrice, setItemUnitPrice] = useState(0);
+  const [itemQuantity, setItemQuantity] = useState<string>('1');
+  const [itemUnitPrice, setItemUnitPrice] = useState<string>('');
   const [gstApplicationMode, setGstApplicationMode] = useState<'applied' | 'not_applied' | 'inclusive'>('applied');
 
   useEffect(() => {
@@ -360,7 +360,10 @@ export default function InvoicingPage() {
       return;
     }
 
-    if (itemQuantity <= 0) {
+    const parsedQty = parseInt(itemQuantity, 10) || 0;
+    const parsedPrice = parseFloat(itemUnitPrice) || 0;
+
+    if (parsedQty <= 0) {
       toast({
         title: "Error",
         description: "Quantity must be greater than 0",
@@ -369,7 +372,7 @@ export default function InvoicingPage() {
       return;
     }
 
-    if (itemUnitPrice <= 0) {
+    if (parsedPrice <= 0) {
       toast({
         title: "Error",
         description: "Unit price must be greater than 0",
@@ -386,32 +389,32 @@ export default function InvoicingPage() {
     // Calculate based on GST application mode
     if (gstApplicationMode === 'not_applied') {
       // GST Not Applied - No tax calculation
-      taxableAmount = itemQuantity * itemUnitPrice;
+      taxableAmount = parsedQty * parsedPrice;
       taxAmount = 0;
       totalAmount = taxableAmount;
-      unitPriceToStore = itemUnitPrice;
+      unitPriceToStore = parsedPrice;
     } else if (gstApplicationMode === 'inclusive') {
       // GST Inclusive - Amount already includes GST, need to extract it
       // User enters price WITH GST included, so final amount = entered amount
-      const totalWithGst = itemQuantity * itemUnitPrice;
-      const baseUnitPrice = itemUnitPrice / (1 + product.gst_rate / 100);
-      taxableAmount = itemQuantity * baseUnitPrice;
+      const totalWithGst = parsedQty * parsedPrice;
+      const baseUnitPrice = parsedPrice / (1 + product.gst_rate / 100);
+      taxableAmount = parsedQty * baseUnitPrice;
       taxAmount = totalWithGst - taxableAmount;
       totalAmount = totalWithGst; // Final amount is what user entered
       unitPriceToStore = baseUnitPrice; // Store the extracted base price
     } else {
       // GST Applied (default) - Add GST to the amount
-      taxableAmount = itemQuantity * itemUnitPrice;
+      taxableAmount = parsedQty * parsedPrice;
       taxAmount = (taxableAmount * product.gst_rate) / 100;
       totalAmount = taxableAmount + taxAmount;
-      unitPriceToStore = itemUnitPrice;
+      unitPriceToStore = parsedPrice;
     }
 
     const newItem: ManualInvoiceItem = {
       product_id: product._id,
       product_name: product.name,
       hsn_code: product.hsn_code,
-      quantity: itemQuantity,
+      quantity: parsedQty,
       unit_price: unitPriceToStore,
       gst_rate: gstApplicationMode === 'not_applied' ? 0 : product.gst_rate,
       taxable_amount: taxableAmount,
@@ -426,8 +429,8 @@ export default function InvoicingPage() {
 
     // Reset form
     setSelectedProduct('');
-    setItemQuantity(1);
-    setItemUnitPrice(0);
+    setItemQuantity('1');
+    setItemUnitPrice('');
   };
 
   const removeItemFromManualInvoice = (index: number) => {
@@ -447,6 +450,16 @@ export default function InvoicingPage() {
       ? (baseTotal * sanitizedValue) / 100
       : sanitizedValue;
     return Math.min(rawDiscount, baseTotal);
+  };
+
+  // Recalculate grand total with discount applied BEFORE tax
+  const recalcWithDiscount = (itemsList: Invoice['items'], mode: 'amount' | 'percentage', value: number) => {
+    const { subtotal, totalTax } = calculateItemTotals(itemsList);
+    const discount = calculateDiscountAmount(subtotal, mode, value);
+    const discountedSubtotal = Math.max(0, subtotal - discount);
+    const adjustedTax = subtotal > 0 ? Math.round((totalTax * (discountedSubtotal / subtotal)) * 100) / 100 : 0;
+    const grandTotal = Math.round((discountedSubtotal + adjustedTax) * 100) / 100;
+    return { discount, grandTotal };
   };
 
   const calculateItemTotals = (items: Invoice['items']) => {
@@ -469,20 +482,22 @@ export default function InvoicingPage() {
 
   const getManualInvoiceTotals = () => {
     const subtotal = manualInvoiceForm.items.reduce((sum, item) => sum + item.taxable_amount, 0);
-    const totalTax = manualInvoiceForm.items.reduce((sum, item) => sum + item.tax_amount, 0);
-    const grossTotal = subtotal + totalTax;
+    const rawTotalTax = manualInvoiceForm.items.reduce((sum, item) => sum + item.tax_amount, 0);
 
+    // Discount applies to subtotal (pre-tax), then tax is proportionally adjusted
     const clampedDiscount = calculateDiscountAmount(
-      grossTotal,
+      subtotal,
       manualInvoiceForm.discount_mode,
       manualInvoiceForm.discount_value,
     );
-    const grandTotal = Math.max(0, grossTotal - clampedDiscount);
+    const discountedSubtotal = Math.max(0, subtotal - clampedDiscount);
+    const totalTax = subtotal > 0 ? Math.round((rawTotalTax * (discountedSubtotal / subtotal)) * 100) / 100 : 0;
+    const grandTotal = Math.round((discountedSubtotal + totalTax) * 100) / 100;
 
     return {
       subtotal,
       totalTax,
-      grossTotal,
+      grossTotal: subtotal + rawTotalTax,
       discountAmount: clampedDiscount,
       grandTotal,
     };
@@ -751,11 +766,13 @@ export default function InvoicingPage() {
     try {
       const token = localStorage.getItem('leaftrack_token');
       
-      const { subtotal, totalTax, grossTotal } = calculateItemTotals(selectedInvoice.items);
-      const totalDiscount = calculateDiscountAmount(grossTotal, editDiscountMode, editDiscountValue);
-      const totalCgst = totalTax / 2;
-      const totalSgst = totalTax / 2;
-      const grandTotal = Math.max(0, subtotal + totalTax - totalDiscount);
+      const { subtotal, totalTax } = calculateItemTotals(selectedInvoice.items);
+      const totalDiscount = calculateDiscountAmount(subtotal, editDiscountMode, editDiscountValue);
+      const discountedSubtotal = Math.max(0, subtotal - totalDiscount);
+      const adjustedTax = subtotal > 0 ? Math.round((totalTax * (discountedSubtotal / subtotal)) * 100) / 100 : 0;
+      const totalCgst = Math.round((adjustedTax / 2) * 100) / 100;
+      const totalSgst = Math.round((adjustedTax - totalCgst) * 100) / 100;
+      const grandTotal = Math.round((discountedSubtotal + adjustedTax) * 100) / 100;
       const balanceDue = Math.max(0, grandTotal - selectedInvoice.paid_amount);
       
       const response = await fetch(`/api/invoices/${selectedInvoice._id}`, {
@@ -769,7 +786,7 @@ export default function InvoicingPage() {
           due_date: selectedInvoice.due_date,
           notes: selectedInvoice.notes,
           items: selectedInvoice.items,
-          subtotal: subtotal,
+          subtotal: discountedSubtotal,
           total_discount: totalDiscount,
           discount_mode: editDiscountMode,
           discount_value: Math.max(0, editDiscountValue || 0),
@@ -777,7 +794,7 @@ export default function InvoicingPage() {
           balance_due: balanceDue,
           total_cgst: totalCgst,
           total_sgst: totalSgst,
-          total_tax: totalTax,
+          total_tax: adjustedTax,
         }),
       });
 
@@ -1657,12 +1674,9 @@ export default function InvoicingPage() {
                       <Input
                         id="quantity"
                         type="number"
-                        min="0"
+                        min="1"
                         value={itemQuantity}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setItemQuantity(val === '' ? 0 : parseInt(val, 10));
-                        }}
+                        onChange={(e) => setItemQuantity(e.target.value)}
                         placeholder="Enter quantity"
                       />
                     </div>
@@ -1679,10 +1693,7 @@ export default function InvoicingPage() {
                         min="0"
                         step="0.01"
                         value={itemUnitPrice}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setItemUnitPrice(val === '' ? 0 : parseFloat(val));
-                        }}
+                        onChange={(e) => setItemUnitPrice(e.target.value)}
                         placeholder="Enter unit price"
                       />
                     </div>
@@ -2027,10 +2038,8 @@ export default function InvoicingPage() {
                                   updatedItems[index].taxable_amount = taxableAmount;
                                   updatedItems[index].total_amount = taxableAmount + taxAmount;
                                   
-                                  // Recalculate grand total
-                                  const { grossTotal } = calculateItemTotals(updatedItems);
-                                  const discount = calculateDiscountAmount(grossTotal, editDiscountMode, editDiscountValue);
-                                  const newGrandTotal = Math.max(0, grossTotal - discount);
+                                  // Recalculate grand total (discount before tax)
+                                  const { discount, grandTotal: newGrandTotal } = recalcWithDiscount(updatedItems, editDiscountMode, editDiscountValue);
                                   setSelectedInvoice({ 
                                     ...selectedInvoice, 
                                     items: updatedItems,
@@ -2057,10 +2066,8 @@ export default function InvoicingPage() {
                                   updatedItems[index].taxable_amount = taxableAmount;
                                   updatedItems[index].total_amount = taxableAmount + taxAmount;
                                   
-                                  // Recalculate grand total
-                                  const { grossTotal } = calculateItemTotals(updatedItems);
-                                  const discount = calculateDiscountAmount(grossTotal, editDiscountMode, editDiscountValue);
-                                  const newGrandTotal = Math.max(0, grossTotal - discount);
+                                  // Recalculate grand total (discount before tax)
+                                  const { discount, grandTotal: newGrandTotal } = recalcWithDiscount(updatedItems, editDiscountMode, editDiscountValue);
                                   setSelectedInvoice({ 
                                     ...selectedInvoice, 
                                     items: updatedItems,
@@ -2088,10 +2095,8 @@ export default function InvoicingPage() {
                                   updatedItems[index].taxable_amount = taxableAmount;
                                   updatedItems[index].total_amount = taxableAmount + taxAmount;
                                   
-                                  // Recalculate grand total
-                                  const { grossTotal } = calculateItemTotals(updatedItems);
-                                  const discount = calculateDiscountAmount(grossTotal, editDiscountMode, editDiscountValue);
-                                  const newGrandTotal = Math.max(0, grossTotal - discount);
+                                  // Recalculate grand total (discount before tax)
+                                  const { discount, grandTotal: newGrandTotal } = recalcWithDiscount(updatedItems, editDiscountMode, editDiscountValue);
                                   setSelectedInvoice({ 
                                     ...selectedInvoice, 
                                     items: updatedItems,
@@ -2122,9 +2127,7 @@ export default function InvoicingPage() {
                             onValueChange={(value: 'amount' | 'percentage') => {
                               const nextMode = value;
                               setEditDiscountMode(nextMode);
-                              const { grossTotal } = calculateItemTotals(selectedInvoice.items);
-                              const discount = calculateDiscountAmount(grossTotal, nextMode, editDiscountValue);
-                              const newGrandTotal = Math.max(0, grossTotal - discount);
+                              const { discount, grandTotal: newGrandTotal } = recalcWithDiscount(selectedInvoice.items, nextMode, editDiscountValue);
                               setSelectedInvoice({
                                 ...selectedInvoice,
                                 total_discount: discount,
@@ -2156,9 +2159,7 @@ export default function InvoicingPage() {
                             onChange={(e) => {
                               const nextValue = Math.max(0, parseFloat(e.target.value) || 0);
                               setEditDiscountValue(nextValue);
-                              const { grossTotal } = calculateItemTotals(selectedInvoice.items);
-                              const discount = calculateDiscountAmount(grossTotal, editDiscountMode, nextValue);
-                              const newGrandTotal = Math.max(0, grossTotal - discount);
+                              const { discount, grandTotal: newGrandTotal } = recalcWithDiscount(selectedInvoice.items, editDiscountMode, nextValue);
                               setSelectedInvoice({
                                 ...selectedInvoice,
                                 total_discount: discount,

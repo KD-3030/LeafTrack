@@ -196,9 +196,14 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       }
     }
 
-    const [customerRes, settingsRes] = await Promise.all([
+    const [customerRes, settingsRes, prevInvoicesRes] = await Promise.all([
       supabaseAdmin.from('distributors').select('outstanding_balance').eq('id', invoice.distributor_id).single(),
       supabaseAdmin.from('company_settings').select('*').limit(1).single(),
+      // Fetch all earlier invoices for this distributor to compute previous balance
+      supabaseAdmin.from('invoices')
+        .select('grand_total, paid_amount, balance_due')
+        .eq('distributor_id', invoice.distributor_id)
+        .lt('created_at', invoice.created_at)
     ]);
 
     const customer = customerRes.data;
@@ -219,35 +224,65 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const logoUrl = toAbsoluteAssetUrl(settings?.logo_url as string | undefined, origin);
     const signatureUrl = toAbsoluteAssetUrl(settings?.signature_url as string | undefined, origin);
 
+    const customQrUrl = toAbsoluteAssetUrl(settings?.qr_code_url as string | undefined, origin);
     const upiId = settings?.upi_id as string | undefined;
-    let qrDataUrl = '';
-    if (upiId) {
+    let qrDataUrl = customQrUrl || '';
+    if (!qrDataUrl && upiId) {
       const upiUri = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(companyName)}&cu=INR`;
       qrDataUrl = await QRCode.toDataURL(upiUri, { width: 120, margin: 1 });
     }
 
-    type InvoiceItemRaw = { quantity?: number | string | null; unit_price?: number | string | null; taxable_amount?: number | string | null; cgst_amount?: number | string | null; sgst_amount?: number | string | null; igst_amount?: number | string | null; gst_rate?: number | string | null; discount_percentage?: number | string | null; product_name?: string | null; hsn_code?: string | null; total_amount?: number | string | null; };
-    type ProcessedItem = { productName: string; hsnCode: string; qty: number; unit: string; price: number; discount: number; gstRate: number; gstAmount: number; amount: number; taxableAmount: number; };
+    type InvoiceItemRaw = { quantity?: number | string | null; unit_price?: number | string | null; taxable_amount?: number | string | null; cgst_amount?: number | string | null; sgst_amount?: number | string | null; igst_amount?: number | string | null; gst_rate?: number | string | null; discount_percentage?: number | string | null; discount_amount?: number | string | null; product_name?: string | null; hsn_code?: string | null; total_amount?: number | string | null; };
+    type ProcessedItem = { productName: string; hsnCode: string; qty: number; price: number; discount: number; gstRate: number; cgstAmount: number; sgstAmount: number; gstAmount: number; amount: number; taxableAmount: number; };
     const rawItems = (invoice.invoice_items || []) as InvoiceItemRaw[];
+
+    // Invoice-level discount info for proportional distribution
+    const invoiceTotalDiscount = Number(invoice.total_discount || 0);
+    const invoiceDiscountPct = Number(invoice.discount_value || 0);
+    const invoiceDiscountMode = invoice.discount_mode as string | undefined;
+    const grossSubtotal = rawItems.reduce((s, it) => s + (Number(it.quantity || 0) * Number(it.unit_price || 0)), 0);
+
     const items = rawItems.map((item): ProcessedItem => {
       const quantity = Number(item.quantity || 0);
       const unitPrice = Number(item.unit_price || 0);
-      const taxableAmount = Number(item.taxable_amount || quantity * unitPrice);
-      const cgst = Number(item.cgst_amount || 0);
-      const sgst = Number(item.sgst_amount || 0);
-      const igst = Number(item.igst_amount || 0);
-      const taxAmount = cgst + sgst + igst || Number((taxableAmount * Number(item.gst_rate || 0)) / 100);
-      const discountAmount = Number((quantity * unitPrice * Number(item.discount_percentage || 0)) / 100);
+      const grossAmount = quantity * unitPrice;
+
+      // 1. If stored taxable_amount is already discounted, derive from it
+      const storedTaxable = Number(item.taxable_amount || 0);
+      let discountAmount: number;
+      if (storedTaxable > 0 && storedTaxable < grossAmount) {
+        discountAmount = Math.round((grossAmount - storedTaxable) * 100) / 100;
+      }
+      // 2. Distribute invoice-level discount proportionally across items
+      else if (invoiceTotalDiscount > 0 && grossSubtotal > 0) {
+        discountAmount = Math.round((grossAmount / grossSubtotal) * invoiceTotalDiscount * 100) / 100;
+      }
+      // 3. Use per-item percentage if available
+      else if (invoiceDiscountMode === 'percentage' && invoiceDiscountPct > 0) {
+        discountAmount = Math.round((grossAmount * invoiceDiscountPct / 100) * 100) / 100;
+      }
+      // 4. Fallback: item-level fields
+      else {
+        discountAmount = Number(item.discount_amount || 0) || Math.round((grossAmount * Number(item.discount_percentage || 0)) / 100 * 100) / 100;
+      }
+
+      const taxableAmount = grossAmount - discountAmount;
+      const gstRate = Number(item.gst_rate || 0);
+      const computedTax = (taxableAmount * gstRate) / 100;
+      const cgstAmount = Math.round((computedTax / 2) * 100) / 100;
+      const sgstAmount = Math.round((computedTax - cgstAmount) * 100) / 100;
+      const gstAmount = cgstAmount + sgstAmount;
       return {
         productName: item.product_name || '-',
         hsnCode: item.hsn_code || '-',
         qty: quantity,
-        unit: 'Pcs',
         price: unitPrice,
         discount: discountAmount,
-        gstRate: Number(item.gst_rate || 0),
-        gstAmount: taxAmount,
-        amount: Number(item.total_amount || taxableAmount + taxAmount),
+        gstRate,
+        cgstAmount,
+        sgstAmount,
+        gstAmount,
+        amount: Math.round((taxableAmount + gstAmount) * 100) / 100,
         taxableAmount,
       };
     });
@@ -280,16 +315,24 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const totalTax = taxSummaryRows.reduce((sum, row) => sum + row.totalTax, 0);
     const avgRate = totalTaxable > 0 ? (totalTax * 100) / totalTaxable : 0;
 
-    const subtotal = Number(invoice.subtotal || items.reduce((sum, item) => sum + item.taxableAmount, 0));
-    const totalDiscount = Number(invoice.total_discount || 0);
+    const itemLevelDiscount = items.reduce((s, it) => s + it.discount, 0);
+    const totalDiscount = itemLevelDiscount > 0 ? itemLevelDiscount : Number(invoice.total_discount || 0);
+    const showDiscount = totalDiscount > 0;
     const grandTotal = Number(invoice.grand_total || 0);
     const rounded = Math.round(grandTotal);
     const roundOff = Number((rounded - grandTotal).toFixed(2));
 
     const paidAmount = Number(invoice.paid_amount || 0);
-    const balanceDue = Number(invoice.balance_due || Math.max(0, grandTotal - paidAmount));
-    const currentBalance = Number(customer?.outstanding_balance || balanceDue);
-    const previousBalance = Math.max(0, currentBalance - balanceDue);
+    const balanceDue = Math.max(0, rounded - paidAmount);
+
+    // Previous balance = sum of unpaid balances from all invoices created before this one
+    const previousInvoices = prevInvoicesRes.data || [];
+    const previousBalance = previousInvoices.reduce((sum, inv) => {
+      const invTotal = Math.round(Number(inv.grand_total || 0));
+      const invPaid = Number(inv.paid_amount || 0);
+      return sum + Math.max(0, invTotal - invPaid);
+    }, 0);
+    const currentBalance = previousBalance + balanceDue;
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -300,16 +343,16 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     body { font-family: Helvetica, Arial, sans-serif; font-size: 12px; color: #111; line-height: 1.35; }
     .invoice-document { width: 100%; padding: 12px; border: 1px solid #555; }
     h1 { font-size: 20px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.4px; }
-    h2 { font-size: 15px; font-weight: 700; margin-bottom: 3px; }
+    h2 { font-size: 18px; font-weight: 900; margin-bottom: 3px; letter-spacing: 0.5px; }
     h3 { font-size: 13px; font-weight: 700; border-bottom: 1px solid #555; padding-bottom: 3px; margin-bottom: 6px; }
     .text-bold { font-weight: 700; }
     .text-right { text-align: right; }
     .text-center { text-align: center; }
     .uppercase { text-transform: uppercase; }
     .header-grid { display: grid; grid-template-columns: 2fr 1fr; border: 1px solid #555; padding: 8px; margin-bottom: 8px; }
-    .company-row { display: grid; grid-template-columns: 48px 1fr; gap: 8px; }
-    .logo-box { width: 44px; height: 44px; border: 1px solid #777; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-    .logo-box img { max-width: 42px; max-height: 42px; }
+    .company-row { display: grid; grid-template-columns: 76px 1fr; gap: 8px; }
+    .logo-box { width: 72px; height: 72px; border: 1px solid #777; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .logo-box img { max-width: 70px; max-height: 70px; }
     .header-meta { text-align: right; }
     .header-meta p { font-size: 11px; color: #444; margin-top: 4px; }
     .info-grid { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #555; border-top: none; }
@@ -317,6 +360,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     .info-col.left { border-right: 1px solid #555; }
     .detail-grid { display: grid; grid-template-columns: 95px 1fr; row-gap: 3px; font-size: 12px; }
     .detail-grid span:first-child { font-weight: 700; }
+    .eway-note { font-size: 9px; color: #666; margin-top: 4px; font-style: italic; }
     .ship-box { border: 1px solid #555; border-top: none; padding: 6px; margin-bottom: 8px; }
     .data-table, .tax-table { width: 100%; border-collapse: collapse; font-size: 11px; }
     .data-table th, .data-table td, .tax-table th, .tax-table td { border: 1px solid #555; padding: 5px; vertical-align: top; }
@@ -363,8 +407,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         <p>${escapeHtml(customerDetails.address)}</p>
         <div class="detail-grid" style="margin-top: 6px;">
           <span>Contact No:</span><span>${escapeHtml(customerDetails.phone)}</span>
-          <span>GSTIN:</span><span>${escapeHtml(customerDetails.gstin)}</span>
-          <span>State:</span><span>${escapeHtml(customerDetails.state)}</span>
+          <span>GSTIN:</span><span>${escapeHtml((!customerDetails.gstin || customerDetails.gstin === '-' || customerDetails.gstin.trim() === '') ? 'URP' : customerDetails.gstin)}</span>
+          <span>State:</span><span>${escapeHtml((!customerDetails.state || customerDetails.state === '-' || customerDetails.state.trim() === '') ? 'WEST BENGAL' : customerDetails.state)}</span>
         </div>
       </div>
       <div class="info-col">
@@ -372,8 +416,9 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         <div class="detail-grid">
           <span>Invoice No:</span><span>${escapeHtml(invoice.invoice_number || '-')}</span>
           <span>Date:</span><span>${escapeHtml(formatDate(invoice.invoice_date))}</span>
-          <span>Place Of Supply:</span><span>${escapeHtml(customerDetails.state)}</span>
+          <span>Place Of Supply:</span><span>19 - West Bengal</span>
         </div>
+        <p class="eway-note">Ewaybill # &mdash; only applicable for invoice amount &#8377;1,00,000 or above</p>
       </div>
     </div>
 
@@ -385,15 +430,16 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     <table class="data-table">
       <thead>
         <tr>
-          <th style="width:5%">#</th>
-          <th style="width:31%; text-align:left;">Item name</th>
-          <th style="width:10%">HSN/ SAC</th>
-          <th style="width:7%">Quantity</th>
-          <th style="width:7%">Unit</th>
-          <th style="width:12%; text-align:right;">Price / Unit(₹)</th>
-          <th style="width:10%; text-align:right;">Discount(₹)</th>
-          <th style="width:10%; text-align:right;">GST(₹)</th>
-          <th style="width:13%; text-align:right;">Amount(₹)</th>
+          <th style="width:4%">#</th>
+          <th style="width:22%; text-align:left;">Item name</th>
+          <th style="width:9%">HSN/ SAC</th>
+          <th style="width:7%">Qty in Pcs.</th>
+          <th style="width:10%; text-align:right;">Price / Unit(₹)</th>
+          <th style="width:8%; text-align:right;">Discount(₹)</th>
+          <th style="width:11%; text-align:right;">Taxable Amt.(₹)</th>
+          <th style="width:10%; text-align:right;">CGST(₹)</th>
+          <th style="width:10%; text-align:right;">SGST(₹)</th>
+          <th style="width:11%; text-align:right;">Amount(₹)</th>
         </tr>
       </thead>
       <tbody>
@@ -403,10 +449,11 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
             <td>${escapeHtml(item.productName)}</td>
             <td class="text-center">${escapeHtml(item.hsnCode)}</td>
             <td class="text-center">${item.qty}</td>
-            <td class="text-center">${escapeHtml(item.unit)}</td>
             <td class="text-right">${formatCurrency(item.price)}</td>
             <td class="text-right">${formatCurrency(item.discount)}</td>
-            <td class="text-right">${formatCurrency(item.gstAmount)} (${item.gstRate.toFixed(0)}%)</td>
+            <td class="text-right">${formatCurrency(item.taxableAmount)}</td>
+            <td class="text-right">${formatCurrency(item.cgstAmount)}<br/><span style="font-size:9px;color:#555">(${(item.gstRate / 2).toFixed(1)}%)</span></td>
+            <td class="text-right">${formatCurrency(item.sgstAmount)}<br/><span style="font-size:9px;color:#555">(${(item.gstRate / 2).toFixed(1)}%)</span></td>
             <td class="text-right">${formatCurrency(item.amount)}</td>
           </tr>
         `).join('')}
@@ -416,10 +463,11 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
           <td></td>
           <td class="text-center text-bold">${items.reduce((sum, item) => sum + item.qty, 0)}</td>
           <td></td>
-          <td></td>
           <td class="text-right text-bold">${formatCurrency(items.reduce((sum, item) => sum + item.discount, 0))}</td>
-          <td class="text-right text-bold">${formatCurrency(items.reduce((sum, item) => sum + item.gstAmount, 0))}</td>
-          <td class="text-right text-bold">${formatCurrency(grandTotal)}</td>
+          <td class="text-right text-bold">${formatCurrency(items.reduce((sum, item) => sum + item.taxableAmount, 0))}</td>
+          <td class="text-right text-bold">${formatCurrency(items.reduce((sum, item) => sum + item.cgstAmount, 0))}</td>
+          <td class="text-right text-bold">${formatCurrency(items.reduce((sum, item) => sum + item.sgstAmount, 0))}</td>
+          <td class="text-right text-bold">${formatCurrency(items.reduce((sum, item) => sum + item.amount, 0))}</td>
         </tr>
       </tbody>
     </table>
@@ -463,15 +511,17 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
           </tbody>
         </table>
         <p class="text-bold" style="margin-bottom:4px;">Invoice Amount in Words:</p>
-        <p style="font-style: italic;">${escapeHtml(toWordsIndian(grandTotal))} Rupees only</p>
+        <p style="font-style: italic;">${escapeHtml(toWordsIndian(rounded))} Rupees only</p>
       </div>
 
       <div class="summary-right">
         <div class="totals-calc-grid">
-          <div class="calc-label">Sub Total:</div><div class="calc-value">₹ ${formatCurrency(subtotal)}</div>
-          ${totalDiscount > 0 ? `<div class="calc-label">Discount:</div><div class="calc-value">- ₹ ${formatCurrency(totalDiscount)}</div>` : ''}
-          <div class="calc-label">Round Off:</div><div class="calc-value">₹ ${formatCurrency(roundOff)}</div>
-          <div class="calc-label grand-total">Total:</div><div class="calc-value grand-total">₹ ${formatCurrency(grandTotal)}</div>
+          <div class="calc-label">Taxable Amount:</div><div class="calc-value">₹ ${formatCurrency(items.reduce((s, it) => s + it.taxableAmount, 0))}</div>
+          <div class="calc-label">CGST:</div><div class="calc-value">₹ ${formatCurrency(items.reduce((s, it) => s + it.cgstAmount, 0))}</div>
+          <div class="calc-label">SGST:</div><div class="calc-value">₹ ${formatCurrency(items.reduce((s, it) => s + it.sgstAmount, 0))}</div>
+          ${showDiscount ? `<div class="calc-label">Discount:</div><div class="calc-value">- ₹ ${formatCurrency(totalDiscount)}</div>` : ''}
+          <div class="calc-label">Round Off:</div><div class="calc-value">${roundOff >= 0 ? '' : '- '}₹ ${formatCurrency(Math.abs(roundOff))}</div>
+          <div class="calc-label grand-total">Total Invoice Amount:</div><div class="calc-value grand-total">₹ ${formatCurrency(rounded)}</div>
           <div class="calc-label">Received:</div><div class="calc-value">₹ ${formatCurrency(paidAmount)}</div>
           <div class="calc-label">Balance:</div><div class="calc-value">₹ ${formatCurrency(balanceDue)}</div>
           <div class="calc-label">Previous Bal:</div><div class="calc-value">₹ ${formatCurrency(previousBalance)}</div>

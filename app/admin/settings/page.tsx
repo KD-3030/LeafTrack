@@ -1,14 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-// Image import removed - branding section removed
+import { useState, useEffect, useRef } from 'react';
+import Image from 'next/image';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 
-import { Building, Settings, Save, RefreshCw, CreditCard } from 'lucide-react';
+import { Building, Settings, Save, RefreshCw, CreditCard, ImageIcon, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface CompanySettings {
@@ -31,6 +31,7 @@ interface CompanySettings {
   account_holder_name?: string;
   logo_url?: string;
   signature_url?: string;
+  qr_code_url?: string;
   invoice_prefix: string;
   invoice_counter: number;
   invoice_terms: string;
@@ -58,6 +59,7 @@ const initialSettings: CompanySettings = {
   account_holder_name: '',
   logo_url: '',
   signature_url: '',
+  qr_code_url: '',
   invoice_prefix: 'INV',
   invoice_counter: 1,
   invoice_terms: 'Payment is due within 30 days from the date of invoice.',
@@ -70,6 +72,10 @@ export default function CompanySettingsPage() {
   const [settings, setSettings] = useState<CompanySettings>(initialSettings);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [uploading, setUploading] = useState<string | null>(null);
+  const logoRef = useRef<HTMLInputElement>(null);
+  const signatureRef = useRef<HTMLInputElement>(null);
+  const qrRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadSettings();
@@ -141,6 +147,35 @@ export default function CompanySettingsPage() {
       ...prev,
       [field]: value,
     }));
+  };
+
+  const handleFileUpload = async (field: 'logo' | 'signature' | 'qr_code', file: File) => {
+    try {
+      setUploading(field);
+      const token = localStorage.getItem('leaftrack_token');
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('field', field);
+
+      const res = await fetch('/api/settings/upload', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        const urlField = `${field}_url` as keyof CompanySettings;
+        setSettings(prev => ({ ...prev, [urlField]: data.url }));
+        toast.success(`${field.replace('_', ' ')} uploaded successfully`);
+      } else {
+        toast.error(data.error || 'Upload failed');
+      }
+    } catch {
+      toast.error('Failed to upload file');
+    } finally {
+      setUploading(null);
+    }
   };
 
   if (isLoading) {
@@ -387,6 +422,100 @@ export default function CompanySettingsPage() {
                   onChange={(e) => handleInputChange('ifsc_code', e.target.value)}
                   placeholder="e.g., UTIB0002083"
                 />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Branding */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <ImageIcon className="h-5 w-5 text-pink-600" />
+              <span>Branding</span>
+            </CardTitle>
+            <CardDescription>
+              Upload logo, authorized signature, and payment QR code for invoices
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 gap-6">
+              {/* Logo */}
+              <div className="space-y-2 text-center">
+                <Label>Company Logo</Label>
+                <div className="border-2 border-dashed rounded-lg p-4 flex flex-col items-center justify-center min-h-[140px]">
+                  {settings.logo_url ? (
+                    <div className="relative">
+                      <Image src={settings.logo_url} alt="Logo" width={120} height={80} className="object-contain" unoptimized />
+                      <button
+                        type="button"
+                        onClick={() => setSettings(prev => ({ ...prev, logo_url: '' }))}
+                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="text-gray-400 text-sm">No logo uploaded</div>
+                  )}
+                </div>
+                <input ref={logoRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileUpload('logo', f); e.target.value = ''; }} />
+                <Button variant="outline" size="sm" disabled={uploading === 'logo'} onClick={() => logoRef.current?.click()}>
+                  <Upload className="h-3 w-3 mr-1" />{uploading === 'logo' ? 'Uploading...' : 'Upload Logo'}
+                </Button>
+              </div>
+
+              {/* Signature */}
+              <div className="space-y-2 text-center">
+                <Label>Authorized Signature</Label>
+                <div className="border-2 border-dashed rounded-lg p-4 flex flex-col items-center justify-center min-h-[140px]">
+                  {settings.signature_url ? (
+                    <div className="relative">
+                      <Image src={settings.signature_url} alt="Signature" width={120} height={60} className="object-contain" unoptimized />
+                      <button
+                        type="button"
+                        onClick={() => setSettings(prev => ({ ...prev, signature_url: '' }))}
+                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="text-gray-400 text-sm">No signature uploaded</div>
+                  )}
+                </div>
+                <input ref={signatureRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileUpload('signature', f); e.target.value = ''; }} />
+                <Button variant="outline" size="sm" disabled={uploading === 'signature'} onClick={() => signatureRef.current?.click()}>
+                  <Upload className="h-3 w-3 mr-1" />{uploading === 'signature' ? 'Uploading...' : 'Upload Signature'}
+                </Button>
+              </div>
+
+              {/* QR Code */}
+              <div className="space-y-2 text-center">
+                <Label>Payment QR Code</Label>
+                <div className="border-2 border-dashed rounded-lg p-4 flex flex-col items-center justify-center min-h-[140px]">
+                  {settings.qr_code_url ? (
+                    <div className="relative">
+                      <Image src={settings.qr_code_url} alt="QR Code" width={100} height={100} className="object-contain" unoptimized />
+                      <button
+                        type="button"
+                        onClick={() => setSettings(prev => ({ ...prev, qr_code_url: '' }))}
+                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="text-gray-400 text-sm">No QR code uploaded</div>
+                  )}
+                </div>
+                <input ref={qrRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileUpload('qr_code', f); e.target.value = ''; }} />
+                <Button variant="outline" size="sm" disabled={uploading === 'qr_code'} onClick={() => qrRef.current?.click()}>
+                  <Upload className="h-3 w-3 mr-1" />{uploading === 'qr_code' ? 'Uploading...' : 'Upload QR Code'}
+                </Button>
               </div>
             </div>
           </CardContent>

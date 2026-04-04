@@ -30,19 +30,38 @@ export async function POST(request: NextRequest) {
     const { data: settings } = await supabaseAdmin.from('company_settings').select('*').limit(1).single();
     if (!settings) return NextResponse.json({ success: false, error: 'Company settings not found' }, { status: 400 });
 
-    // Validate products and calculate totals
-    let subtotal = 0, totalTax = 0, totalCgst = 0, totalSgst = 0;
-    const validatedItems = [];
+    // Validate products and compute gross amounts
+    const rawItems = [];
+    let grossSubtotal = 0;
 
     for (const item of items) {
       const { data: product } = await supabaseAdmin.from('products').select('*').eq('id', item.product_id).single();
       if (!product) return NextResponse.json({ success: false, error: `Product ${item.product_name} not found` }, { status: 400 });
 
-      const taxableAmount = item.taxable_amount || (item.quantity * item.unit_price);
-      const taxAmount = item.tax_amount || ((taxableAmount * item.gst_rate) / 100);
-      const cgstAmount = taxAmount / 2;
-      const sgstAmount = taxAmount / 2;
-      const totalAmount = item.total_amount || (taxableAmount + taxAmount);
+      const grossAmount = item.quantity * item.unit_price;
+      grossSubtotal += grossAmount;
+      rawItems.push({ product, quantity: item.quantity, unit_price: item.unit_price, gst_rate: item.gst_rate, grossAmount });
+    }
+
+    // Calculate total discount and apply BEFORE tax
+    const discountPct = discount_mode === 'percentage' ? Math.min(100, Math.max(0, Number(discount_value) || 0)) : 0;
+    const totalDiscount = discount_mode === 'percentage'
+      ? Math.round((grossSubtotal * discountPct / 100) * 100) / 100
+      : Math.max(0, Number(manual_discount) || 0);
+
+    // Distribute discount proportionally across items, compute tax on discounted amount
+    let subtotal = 0, totalTax = 0, totalCgst = 0, totalSgst = 0;
+    const validatedItems = [];
+
+    for (const raw of rawItems) {
+      const itemDiscount = grossSubtotal > 0
+        ? Math.round((raw.grossAmount / grossSubtotal) * totalDiscount * 100) / 100
+        : 0;
+      const taxableAmount = Math.max(0, raw.grossAmount - itemDiscount);
+      const taxAmount = Math.round((taxableAmount * raw.gst_rate / 100) * 100) / 100;
+      const cgstAmount = Math.round((taxAmount / 2) * 100) / 100;
+      const sgstAmount = Math.round((taxAmount - cgstAmount) * 100) / 100;
+      const totalAmount = Math.round((taxableAmount + taxAmount) * 100) / 100;
 
       subtotal += taxableAmount;
       totalTax += taxAmount;
@@ -50,15 +69,15 @@ export async function POST(request: NextRequest) {
       totalSgst += sgstAmount;
 
       validatedItems.push({
-        product_id: product.id, product_name: product.name, hsn_code: product.hsn_code,
-        quantity: item.quantity, unit_price: item.unit_price, taxable_amount: taxableAmount,
-        gst_rate: item.gst_rate, cgst_amount: cgstAmount, sgst_amount: sgstAmount,
+        product_id: raw.product.id, product_name: raw.product.name, hsn_code: raw.product.hsn_code,
+        quantity: raw.quantity, unit_price: raw.unit_price, taxable_amount: taxableAmount,
+        discount_amount: itemDiscount, discount_percentage: discount_mode === 'percentage' ? discountPct : 0,
+        gst_rate: raw.gst_rate, cgst_amount: cgstAmount, sgst_amount: sgstAmount,
         igst_amount: 0, total_amount: totalAmount,
       });
     }
 
-    const totalDiscount = Math.max(0, Number(manual_discount) || 0);
-    const grandTotal = Math.max(0, subtotal + totalTax - totalDiscount);
+    const grandTotal = Math.max(0, Math.round((subtotal + totalTax) * 100) / 100);
 
     // Generate invoice number
     let invoiceNumber: string;

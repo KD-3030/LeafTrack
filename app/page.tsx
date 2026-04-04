@@ -15,10 +15,10 @@ export default function Home() {
             </div>
           </div>
           <h1 className="text-4xl sm:text-5xl font-semibold text-foreground mb-4 tracking-tight">
-            LeafTrack
+            Sohag Tea
           </h1>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-            Modern tea distribution management. Inventory, orders, invoicing, and reporting — all in one place.
+            Premium tea distribution and wholesale supply. Streamlined inventory, orders, invoicing, and reporting — all in one place.
           </p>
           <div className="mt-8">
             <Link href="/login">
@@ -61,7 +61,7 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="border-t py-6 text-center">
-        <p className="text-xs text-muted-foreground">LeafTrack &middot; Tea Distribution Management</p>
+        <p className="text-xs text-muted-foreground">Sohag Tea &middot; Premium Tea Distribution &amp; Wholesale Supply</p>
       </footer>
     </div>
   );

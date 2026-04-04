@@ -47,7 +47,9 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
-    const updates = await request.json();
+    const body = await request.json();
+    // Strip virtual _id field added by withId() — it doesn't exist in the DB
+    const { _id, id, ...updates } = body;
 
     const { data: existing } = await supabaseAdmin.from('company_settings').select('id').limit(1).single();
 
