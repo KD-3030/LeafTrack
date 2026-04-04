@@ -17,6 +17,7 @@ import {
   Filter,
   Eye,
   Edit,
+  Trash2,
   RefreshCw,
   Building,
   Phone,
@@ -30,6 +31,16 @@ import {
   AlertCircle,
   Download
 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 // import { useAuth } from '@/contexts/AuthContext'; // Removed unused import
 import { toast } from 'sonner';
 // XLSX is dynamically imported in downloadTransactionExcel() for bundle optimization
@@ -163,6 +174,9 @@ export default function DistributorsPage() {
   const [editingDistributor, seteditingDistributor] = useState<Distributor | null>(null);
   const [primaryExecutives, setPrimaryExecutives] = useState<PrimaryExecutive[]>([]);
   
+  const [deleteTarget, setDeleteTarget] = useState<Distributor | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   // Invoice filtering and sorting state
   const [invoiceSearchTerm, setInvoiceSearchTerm] = useState('');
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState('all');
@@ -302,6 +316,33 @@ export default function DistributorsPage() {
     } catch (error) {
       console.error('Error updating Distributor:', error);
       toast.error('Failed to update Distributor');
+    }
+  };
+
+  const deleteDistributor = async (distributor: Distributor) => {
+    try {
+      setIsDeleting(true);
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch(`/api/distributors/${distributor._id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        toast.success(`Distributor "${distributor.name}" removed successfully`);
+        loadDistributors();
+      } else {
+        toast.error(data.error || 'Failed to remove distributor');
+      }
+    } catch (error) {
+      console.error('Error deleting distributor:', error);
+      toast.error('Failed to remove distributor');
+    } finally {
+      setIsDeleting(false);
+      setDeleteTarget(null);
     }
   };
 
@@ -907,6 +948,14 @@ export default function DistributorsPage() {
                             onClick={() => openEditDialog(dist)}
                           >
                             <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => setDeleteTarget(dist)}
+                          >
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
                       </TableCell>
@@ -1575,6 +1624,30 @@ export default function DistributorsPage() {
             )}
           </DialogContent>
         </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Remove Distributor</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to remove <strong>{deleteTarget?.name}</strong>?
+                This will deactivate the distributor. They will no longer appear in active lists,
+                but their transaction history will be preserved.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => deleteTarget && deleteDistributor(deleteTarget)}
+                disabled={isDeleting}
+                className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+              >
+                {isDeleting ? 'Removing...' : 'Remove Distributor'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );
