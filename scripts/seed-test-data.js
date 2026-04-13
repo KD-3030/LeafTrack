@@ -11,6 +11,8 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const bcrypt = require('bcryptjs');
+// Load .env.temp.local first (cloud Supabase seeding), fall back to .env.local
+require('dotenv').config({ path: '.env.temp.local' });
 require('dotenv').config({ path: '.env.local' });
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
