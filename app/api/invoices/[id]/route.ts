@@ -161,8 +161,8 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       }
     }
 
-    // Update allowed invoice fields
-    const allowedUpdates = ['status', 'notes', 'due_date', 'items', 'grand_total', 'subtotal', 'total_discount', 'discount_mode', 'discount_value', 'balance_due', 'total_cgst', 'total_sgst', 'total_tax'];
+    // Update allowed invoice fields (items handled separately via invoice_items table)
+    const allowedUpdates = ['status', 'notes', 'due_date', 'grand_total', 'subtotal', 'total_discount', 'discount_mode', 'discount_value', 'balance_due', 'total_cgst', 'total_sgst', 'total_tax', 'taxable_amount'];
     const filteredUpdates: Record<string, unknown> = {};
 
     allowedUpdates.forEach(field => {
@@ -174,6 +174,53 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     if (Object.keys(filteredUpdates).length > 0) {
       filteredUpdates.updated_at = new Date().toISOString();
       filteredUpdates.updated_by = decoded.userId;
+    }
+
+    // Update invoice_items if items are provided
+    if (updates.items && Array.isArray(updates.items) && updates.items.length > 0) {
+      // Delete existing items
+      await supabaseAdmin.from('invoice_items').delete().eq('invoice_id', params.id);
+
+      // Compute per-item discount and re-insert
+      const totalDiscount = Number(updates.total_discount || 0);
+      const discountMode = updates.discount_mode as string | undefined;
+      const discountValue = Number(updates.discount_value || 0);
+      const grossSubtotal = updates.items.reduce((s: number, it: Record<string, number>) => s + ((it.quantity || 0) * (it.unit_price || 0)), 0);
+
+      const newItems = updates.items.map((item: Record<string, unknown>) => {
+        const qty = Number(item.quantity || 0);
+        const unitPrice = Number(item.unit_price || 0);
+        const grossAmount = qty * unitPrice;
+        const itemDiscount = grossSubtotal > 0 && totalDiscount > 0
+          ? Math.round((grossAmount / grossSubtotal) * totalDiscount * 100) / 100
+          : 0;
+        const taxableAmount = Math.max(0, grossAmount - itemDiscount);
+        const gstRate = Number(item.gst_rate || 0);
+        const taxAmount = Math.round((taxableAmount * gstRate / 100) * 100) / 100;
+        const cgstAmount = Math.round((taxAmount / 2) * 100) / 100;
+        const sgstAmount = Math.round((taxAmount - cgstAmount) * 100) / 100;
+        return {
+          invoice_id: params.id,
+          product_id: item.product_id || null,
+          product_name: item.product_name || '-',
+          hsn_code: item.hsn_code || '',
+          quantity: qty,
+          unit_price: unitPrice,
+          discount_percentage: discountMode === 'percentage' ? discountValue : 0,
+          taxable_amount: taxableAmount,
+          gst_rate: gstRate,
+          cgst_amount: cgstAmount,
+          sgst_amount: sgstAmount,
+          igst_amount: 0,
+          total_amount: Math.round((taxableAmount + taxAmount) * 100) / 100,
+        };
+      });
+
+      const { error: itemsErr } = await supabaseAdmin.from('invoice_items').insert(newItems);
+      if (itemsErr) {
+        console.error('Error updating invoice items:', itemsErr);
+        return NextResponse.json({ error: 'Failed to update invoice items' }, { status: 500 });
+      }
     }
 
     const { data: updatedInvoice, error: updateErr } = await supabaseAdmin

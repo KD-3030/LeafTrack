@@ -787,6 +787,7 @@ export default function InvoicingPage() {
           notes: selectedInvoice.notes,
           items: selectedInvoice.items,
           subtotal: discountedSubtotal,
+          taxable_amount: discountedSubtotal,
           total_discount: totalDiscount,
           discount_mode: editDiscountMode,
           discount_value: Math.max(0, editDiscountValue || 0),

@@ -13,15 +13,15 @@ jobs:
       - name: Connect to Tailscale
         uses: tailscale/github-action@v3
         with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          authkey: ${{ secrets.TEMP_TAILSCALE_AUTHKEY }}
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.TEMP_SERVER_TAILSCALE_IP }}
-          username: ${{ secrets.SSH_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          timeout: 30s
+          username: ${{ secrets.TEMP_SSH_USERNAME }}
+          key: ${{ secrets.TEMP_SSH_PRIVATE_KEY }}
+          timeout: 60s
           command_timeout: 20m
           script: |
             set -e
