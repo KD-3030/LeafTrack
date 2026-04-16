@@ -24,6 +24,10 @@ export interface Product {
   totalStock: number;
   hsn_code: string;
   gst_rate: number;
+  description?: string;
+  image_url?: string;
+  is_featured?: boolean;
+  display_order?: number;
   created_at: string;
   updated_at?: string;
 }

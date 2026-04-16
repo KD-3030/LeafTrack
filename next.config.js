@@ -33,9 +33,12 @@ const nextConfig = {
   reactStrictMode: true,
   productionBrowserSourceMaps: false,
 
-  experimental: {
-    serverComponentsExternalPackages: ['bcryptjs'],
-  },
+  serverExternalPackages: ['bcryptjs'],
+
+  outputFileTracingRoot: require('path').join(__dirname),
+
+  experimental: {},
+
 
   eslint: {
     ignoreDuringBuilds: true,

@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAdminAuth(request);
@@ -17,7 +17,7 @@ export async function PUT(
       return authResult;
     }
 
-    const { id } = params;
+    const { id } = await params;
     const body = await request.json();
     const { name, email, role, password, managerId } = body;
 
@@ -144,7 +144,7 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAdminAuth(request);
@@ -152,7 +152,7 @@ export async function DELETE(
       return authResult;
     }
 
-    const { id } = params;
+    const { id } = await params;
 
     // Prevent self-deletion
     if (authResult.userId === id) {

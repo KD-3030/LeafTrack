@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 // PATCH - Update invoice number
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // Require admin authentication
@@ -17,7 +17,7 @@ export async function PATCH(
       return authResult;
     }
 
-    const { id } = params;
+    const { id } = await params;
     const { new_invoice_number } = await request.json();
 
     if (!new_invoice_number || !new_invoice_number.trim()) {

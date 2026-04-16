@@ -48,13 +48,13 @@ async function recalculateInvoiceBalance(invoiceId: string) {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAuth(request);
     if (authResult instanceof NextResponse) return authResult;
 
-    const { id } = params;
+    const { id } = await params;
 
     const { data: payment, error } = await supabaseAdmin
       .from('payments')
@@ -91,14 +91,14 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAuth(request);
     if (authResult instanceof NextResponse) return authResult;
     const decoded = authResult;
 
-    const { id } = params;
+    const { id } = await params;
 
     // Find the payment first to get invoice_id for recalc
     const { data: payment, error: fetchErr } = await supabaseAdmin
@@ -171,14 +171,14 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAdminAuth(request);
     if (authResult instanceof NextResponse) return authResult;
     const decoded = authResult;
 
-    const { id } = params;
+    const { id } = await params;
 
     const { searchParams } = new URL(request.url);
     const forceDelete = searchParams.get('force') === 'true';

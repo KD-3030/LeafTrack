@@ -47,6 +47,7 @@
     "date-fns": "^3.6.0",
     "dotenv": "^17.2.2",
     "embla-carousel-react": "^8.1.8",
+    "framer-motion": "^12.38.0",
     "input-otp": "^1.2.4",
     "jsonwebtoken": "^9.0.2",
     "jspdf": "^4.2.1",

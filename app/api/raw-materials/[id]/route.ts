@@ -6,13 +6,14 @@ import { withId } from '@/lib/supabase-helpers';
 // GET /api/raw-materials/[id]
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAdminAuth(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { id } = await params;
 
-    const { data, error } = await supabaseAdmin.from('raw_materials').select('*').eq('id', params.id).single();
+    const { data, error } = await supabaseAdmin.from('raw_materials').select('*').eq('id', id).single();
     if (error || !data) return NextResponse.json({ error: 'Raw material not found' }, { status: 404 });
 
     return NextResponse.json({ success: true, material: withId(data) });
@@ -25,11 +26,12 @@ export async function GET(
 // PUT /api/raw-materials/[id]
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAdminAuth(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { id } = await params;
 
     const body = await request.json();
     const updateData: Record<string, unknown> = {};
@@ -43,7 +45,7 @@ export async function PUT(
     if (body.is_active !== undefined) updateData.is_active = body.is_active;
 
     const { data, error } = await supabaseAdmin
-      .from('raw_materials').update(updateData).eq('id', params.id).select().single();
+      .from('raw_materials').update(updateData).eq('id', id).select().single();
     if (error || !data) return NextResponse.json({ error: 'Raw material not found' }, { status: 404 });
 
     return NextResponse.json({ success: true, message: 'Raw material updated successfully', material: withId(data) });
@@ -56,13 +58,14 @@ export async function PUT(
 // DELETE /api/raw-materials/[id]
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAdminAuth(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { id } = await params;
 
-    const { error } = await supabaseAdmin.from('raw_materials').delete().eq('id', params.id);
+    const { error } = await supabaseAdmin.from('raw_materials').delete().eq('id', id);
     if (error) throw error;
 
     return NextResponse.json({ success: true, message: 'Raw material deleted successfully' });

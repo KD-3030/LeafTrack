@@ -6,13 +6,13 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireUserAuth(request);
     if (authResult instanceof NextResponse) return authResult;
 
-    const customerId = params.id;
+    const { id: customerId } = await params;
     if (!customerId) {
       return NextResponse.json({ error: 'Customer ID is required' }, { status: 400 });
     }

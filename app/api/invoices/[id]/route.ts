@@ -22,16 +22,17 @@ async function updateCustomerOutstandingBalance(distributorId: string) {
 }
 
 // GET - Get specific invoice
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const authResult = requireAuth(request);
     if (authResult instanceof NextResponse) return authResult;
     const decoded = authResult;
+    const { id } = await params;
 
     const { data: invoice, error } = await supabaseAdmin
       .from('invoices')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (error || !invoice) {
@@ -68,7 +69,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const { data: payments } = await supabaseAdmin
       .from('payments')
       .select('amount_paid')
-      .eq('invoice_id', params.id)
+      .eq('invoice_id', id)
       .eq('status', 'Confirmed');
 
     const paidAmount = (payments || []).reduce((sum, p) => sum + p.amount_paid, 0);
@@ -84,7 +85,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const { data: invoiceItems } = await supabaseAdmin
       .from('invoice_items')
       .select('*')
-      .eq('invoice_id', params.id);
+      .eq('invoice_id', id);
 
     // Fetch salesman info
     let salesmanInfo = { name: 'Unknown', email: '' };
@@ -117,18 +118,19 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 }
 
 // PUT - Update invoice (status, payment, etc.)
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const authResult = requireAdminAuth(request);
     if (authResult instanceof NextResponse) return authResult;
     const decoded = authResult;
+    const { id } = await params;
 
     const updates = await request.json();
 
     const { data: invoice, error: fetchErr } = await supabaseAdmin
       .from('invoices')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (fetchErr || !invoice) {
@@ -140,7 +142,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       const { data: currentPayments } = await supabaseAdmin
         .from('payments')
         .select('amount_paid')
-        .eq('invoice_id', params.id)
+        .eq('invoice_id', id)
         .eq('status', 'Confirmed');
 
       const currentPaidAmount = (currentPayments || []).reduce((sum, p) => sum + p.amount_paid, 0);
@@ -148,7 +150,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
       if (newPaymentAmount > 0) {
         await supabaseAdmin.from('payments').insert({
-          invoice_id: params.id,
+          invoice_id: id,
           distributor_id: invoice.distributor_id,
           amount_paid: newPaymentAmount,
           payment_method: updates.payment_method,
@@ -179,7 +181,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     const { data: updatedInvoice, error: updateErr } = await supabaseAdmin
       .from('invoices')
       .update(filteredUpdates)
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single();
 
@@ -191,7 +193,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     const { data: allPayments } = await supabaseAdmin
       .from('payments')
       .select('amount_paid')
-      .eq('invoice_id', params.id)
+      .eq('invoice_id', id)
       .eq('status', 'Confirmed');
 
     const totalPaid = (allPayments || []).reduce((sum, p) => sum + p.amount_paid, 0);
@@ -205,7 +207,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
         balance_due: balanceDue,
         payment_status: paymentStatus,
       })
-      .eq('id', params.id);
+      .eq('id', id);
 
     await updateCustomerOutstandingBalance(updatedInvoice.distributor_id);
 
@@ -235,15 +237,16 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 }
 
 // DELETE - Cancel invoice
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const authResult = requireAdminAuth(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { id } = await params;
 
     const { data: invoice, error: fetchErr } = await supabaseAdmin
       .from('invoices')
       .select('id, invoice_number, distributor_id')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (fetchErr || !invoice) {
@@ -257,7 +260,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     const { data: payments } = await supabaseAdmin
       .from('payments')
       .select('id')
-      .eq('invoice_id', params.id)
+      .eq('invoice_id', id)
       .eq('status', 'Confirmed');
 
     const paymentCount = payments?.length || 0;
@@ -272,12 +275,12 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
 
     // If forcing delete with payments, delete the payments first
     if (forceDelete && paymentCount > 0) {
-      await supabaseAdmin.from('payments').delete().eq('invoice_id', params.id);
+      await supabaseAdmin.from('payments').delete().eq('invoice_id', id);
     }
 
     // Delete invoice items and invoice
-    await supabaseAdmin.from('invoice_items').delete().eq('invoice_id', params.id);
-    const { error: delErr } = await supabaseAdmin.from('invoices').delete().eq('id', params.id);
+    await supabaseAdmin.from('invoice_items').delete().eq('invoice_id', id);
+    const { error: delErr } = await supabaseAdmin.from('invoices').delete().eq('id', id);
 
     if (delErr) {
       return NextResponse.json({ error: 'Invoice not found or already deleted' }, { status: 404 });

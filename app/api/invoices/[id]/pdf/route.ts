@@ -151,16 +151,17 @@ async function resolveLaunchConfig(): Promise<LaunchConfig> {
   };
 }
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const authResult = requireAuth(request);
     if (authResult instanceof NextResponse) return authResult;
     const decoded = authResult;
+    const { id } = await params;
 
     const { data: invoice, error: invErr } = await supabaseAdmin
       .from('invoices')
       .select('*, invoice_items(*)')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (invErr || !invoice) {

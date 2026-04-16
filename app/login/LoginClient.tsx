@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Leaf, LogIn, Eye, EyeOff } from 'lucide-react';
+import { Leaf, LogIn, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 import Link from 'next/link';
 
@@ -45,6 +45,17 @@ export default function LoginClient() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-brand-50 via-white to-brand-100 flex items-center justify-center px-4">
       <div className="w-full max-w-md">
+        {/* Back button */}
+        <div className="mb-4">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Home
+          </Link>
+        </div>
+
         {/* Logo */}
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 group">

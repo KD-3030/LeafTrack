@@ -9,16 +9,17 @@ export const dynamic = 'force-dynamic';
 // GET /api/purchase-returns/[id] - Get a single purchase return
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAuth(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { id } = await params;
 
     const { data: purchaseReturn, error } = await supabaseAdmin
       .from('purchase_returns')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (error || !purchaseReturn) {
@@ -41,11 +42,12 @@ export async function GET(
 // PUT /api/purchase-returns/[id] - Update a purchase return
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAuth(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { id } = await params;
 
     const body = await request.json();
 
@@ -53,7 +55,7 @@ export async function PUT(
     const { data: existingReturn, error: fetchError } = await supabaseAdmin
       .from('purchase_returns')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (fetchError || !existingReturn) {
@@ -81,7 +83,7 @@ export async function PUT(
     const { data: updatedReturn, error: updateError } = await supabaseAdmin
       .from('purchase_returns')
       .update(updateFields)
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single();
 
@@ -110,16 +112,17 @@ export async function PUT(
 // DELETE /api/purchase-returns/[id] - Delete a purchase return
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAuth(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { id } = await params;
 
     const { error } = await supabaseAdmin
       .from('purchase_returns')
       .delete()
-      .eq('id', params.id);
+      .eq('id', id);
 
     if (error) {
       return NextResponse.json({ error: 'Purchase return not found or could not be deleted' }, { status: 404 });

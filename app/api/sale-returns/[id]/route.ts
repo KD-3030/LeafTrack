@@ -8,13 +8,13 @@ export const dynamic = 'force-dynamic';
 // DELETE - Delete a sale return
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAdminAuth(request);
     if (authResult instanceof NextResponse) return authResult;
 
-    const { id } = params;
+    const { id } = await params;
 
     // Fetch before delete for response
     const { data: existing } = await supabaseAdmin
@@ -66,13 +66,13 @@ export async function DELETE(
 // GET - Get a single sale return by ID
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAdminAuth(request);
     if (authResult instanceof NextResponse) return authResult;
 
-    const { id } = params;
+    const { id } = await params;
 
     // Fetch sale return with items
     const { data: saleReturn, error } = await supabaseAdmin
@@ -135,13 +135,13 @@ export async function GET(
 // PATCH - Update a sale return
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAdminAuth(request);
     if (authResult instanceof NextResponse) return authResult;
 
-    const { id } = params;
+    const { id } = await params;
     const updates = await request.json();
 
     // Fields that can be updated
