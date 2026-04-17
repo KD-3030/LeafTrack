@@ -171,6 +171,7 @@ export async function PUT(
       if (body.tax_percentage !== undefined) updateData.tax_percentage = body.tax_percentage;
       if (body.tax_amount !== undefined) updateData.tax_amount = body.tax_amount;
       if (body.discount_amount !== undefined) updateData.discount_amount = body.discount_amount;
+      if (body.discount_percentage !== undefined) updateData.discount_percentage = body.discount_percentage;
       if (body.total_amount !== undefined) updateData.total_amount = body.total_amount;
       if (body.admin_notes) updateData.admin_notes = body.admin_notes;
       if (body.delivery_date) updateData.delivery_date = body.delivery_date;
@@ -204,6 +205,7 @@ export async function PUT(
       if (body.tax_percentage !== undefined) updateData.tax_percentage = body.tax_percentage;
       if (body.tax_amount !== undefined) updateData.tax_amount = body.tax_amount;
       if (body.discount_amount !== undefined) updateData.discount_amount = body.discount_amount;
+      if (body.discount_percentage !== undefined) updateData.discount_percentage = body.discount_percentage;
       if (body.total_amount !== undefined) updateData.total_amount = body.total_amount;
       if (body.notes) updateData.notes = body.notes;
     }
@@ -259,6 +261,7 @@ export async function PUT(
         if (body.tax_percentage !== undefined) updateData.tax_percentage = body.tax_percentage;
         if (body.tax_amount !== undefined) updateData.tax_amount = body.tax_amount;
         if (body.discount_amount !== undefined) updateData.discount_amount = body.discount_amount;
+        if (body.discount_percentage !== undefined) updateData.discount_percentage = body.discount_percentage;
         if (body.total_amount !== undefined) updateData.total_amount = body.total_amount;
         if (body.notes) updateData.notes = body.notes;
       }

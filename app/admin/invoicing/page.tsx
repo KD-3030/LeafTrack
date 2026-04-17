@@ -1797,6 +1797,8 @@ export default function InvoicingPage() {
                                 discount_value: Math.max(0, parseFloat(e.target.value) || 0),
                               }))
                             }
+                            onFocus={(e) => { if (parseFloat(e.target.value) === 0) e.target.value = ''; }}
+                            onBlur={(e) => { if (e.target.value === '') setManualInvoiceForm((prev) => ({ ...prev, discount_value: 0 })); }}
                             className="h-8"
                           />
                         </div>
@@ -2168,6 +2170,8 @@ export default function InvoicingPage() {
                                 balance_due: Math.max(0, newGrandTotal - selectedInvoice.paid_amount),
                               });
                             }}
+                            onFocus={(e) => { if (parseFloat(e.target.value) === 0) e.target.value = ''; }}
+                            onBlur={(e) => { if (e.target.value === '') { setEditDiscountValue(0); const { discount, grandTotal: newGrandTotal } = recalcWithDiscount(selectedInvoice.items, editDiscountMode, 0); setSelectedInvoice({ ...selectedInvoice, total_discount: discount, discount_value: 0, grand_total: newGrandTotal, balance_due: Math.max(0, newGrandTotal - selectedInvoice.paid_amount) }); } }}
                             className="h-8"
                           />
                         </div>

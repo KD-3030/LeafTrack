@@ -288,6 +288,7 @@ CREATE TABLE IF NOT EXISTS sohag.orders (
   tax_percentage    NUMERIC(5,2) DEFAULT 0 CHECK (tax_percentage >= 0 AND tax_percentage <= 100),
   tax_amount        NUMERIC(12,2) DEFAULT 0 CHECK (tax_amount >= 0),
   discount_amount   NUMERIC(12,2) DEFAULT 0 CHECK (discount_amount >= 0),
+  discount_percentage NUMERIC(5,2) DEFAULT 0 CHECK (discount_percentage >= 0 AND discount_percentage <= 100),
   total_amount      NUMERIC(12,2) NOT NULL CHECK (total_amount >= 0),
   status            TEXT DEFAULT 'pending' CHECK (status IN ('pending_primary', 'pending', 'approved', 'rejected')),
   submitted_at      TIMESTAMPTZ DEFAULT NOW(),
