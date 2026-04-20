@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAdminAuth(request);
@@ -14,11 +14,13 @@ export async function POST(
       return authResult;
     }
 
+    const { id } = await params;
+
     // Fetch user
     const { data: user, error: fetchError } = await supabaseAdmin
       .from('users')
       .select('id, approval_status')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (fetchError || !user) {
@@ -43,7 +45,7 @@ export async function POST(
         approval_date: new Date().toISOString(),
         rejection_reason: null,
       })
-      .eq('id', params.id);
+      .eq('id', id);
 
     if (updateError) {
       console.error('Approve user update error:', updateError);

@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/table';
 import { toast } from 'sonner';
 import { Package, Search, Boxes, IndianRupee } from 'lucide-react';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface InventoryItem {
   _id: string;
@@ -181,6 +182,8 @@ export default function ExecutiveStockPage() {
                 </div>
               </CardHeader>
               <CardContent className="pt-0">
+                <ScrollArea className="w-full">
+                <div className="min-w-[500px]">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -201,6 +204,8 @@ export default function ExecutiveStockPage() {
                     ))}
                   </TableBody>
                 </Table>
+                </div>
+                </ScrollArea>
               </CardContent>
             </Card>
           ))}

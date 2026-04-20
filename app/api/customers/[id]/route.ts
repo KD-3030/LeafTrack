@@ -7,7 +7,7 @@ import { withId } from '@/lib/supabase-helpers';
 export const dynamic = 'force-dynamic';
 
 interface RouteParams {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 function canAccessCustomer(
@@ -30,12 +30,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const authResult = requireUserAuth(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { id } = await params;
     const roleId = normalizeRoleId(authResult.role);
 
     const { data: customer, error } = await supabaseAdmin
       .from('distributors')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (error || !customer) {
@@ -59,7 +60,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const { data: invoices } = await supabaseAdmin
       .from('invoices')
       .select('balance_due')
-      .eq('distributor_id', params.id)
+      .eq('distributor_id', id)
       .neq('status', 'Cancelled');
 
     const outstandingBalance = (invoices || []).reduce(
@@ -71,7 +72,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       await supabaseAdmin
         .from('distributors')
         .update({ outstanding_balance: outstandingBalance })
-        .eq('id', params.id);
+        .eq('id', id);
     }
 
     return NextResponse.json({
@@ -88,12 +89,13 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const authResult = requireUserAuth(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { id } = await params;
     const roleId = normalizeRoleId(authResult.role);
 
     const { data: existingCustomer, error: fetchError } = await supabaseAdmin
       .from('distributors')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (fetchError || !existingCustomer) {
@@ -143,7 +145,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
     if (updateData.phone && updateData.phone !== existingCustomer.phone) {
       const { data: phoneConflict } = await supabaseAdmin
-        .from('distributors').select('id').eq('phone', updateData.phone).neq('id', params.id).limit(1);
+        .from('distributors').select('id').eq('phone', updateData.phone).neq('id', id).limit(1);
       if (phoneConflict && phoneConflict.length > 0) {
         return NextResponse.json({ error: 'Phone number already exists' }, { status: 409 });
       }
@@ -151,7 +153,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
     if (updateData.email && updateData.email !== existingCustomer.email) {
       const { data: emailConflict } = await supabaseAdmin
-        .from('distributors').select('id').eq('email', updateData.email).neq('id', params.id).limit(1);
+        .from('distributors').select('id').eq('email', updateData.email).neq('id', id).limit(1);
       if (emailConflict && emailConflict.length > 0) {
         return NextResponse.json({ error: 'Customer with this email already exists' }, { status: 400 });
       }
@@ -165,7 +167,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const { data: updated, error: updateError } = await supabaseAdmin
       .from('distributors')
       .update(updateData)
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single();
 
@@ -186,13 +188,14 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const authResult = requireUserAuth(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { id } = await params;
 
     if (normalizeRoleId(authResult.role) !== 'admin') {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
     const { data: customer, error } = await supabaseAdmin
-      .from('distributors').select('id').eq('id', params.id).single();
+      .from('distributors').select('id').eq('id', id).single();
 
     if (error || !customer) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
@@ -201,7 +204,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     await supabaseAdmin
       .from('distributors')
       .update({ status: 'Inactive' })
-      .eq('id', params.id);
+      .eq('id', id);
 
     return NextResponse.json({
       success: true,

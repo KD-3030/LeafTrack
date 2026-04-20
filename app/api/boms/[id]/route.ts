@@ -8,16 +8,17 @@ export const dynamic = 'force-dynamic';
 // GET /api/boms/[id] - Get single BOM
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAdminAuth(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { id } = await params;
 
     const { data: bom, error } = await supabaseAdmin
       .from('boms')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (error || !bom) {
@@ -28,7 +29,7 @@ export async function GET(
     const { data: materials } = await supabaseAdmin
       .from('bom_materials')
       .select('*')
-      .eq('bom_id', params.id);
+      .eq('bom_id', id);
 
     return NextResponse.json({
       success: true,
@@ -46,17 +47,18 @@ export async function GET(
 // PUT /api/boms/[id] - Update BOM
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAdminAuth(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { id } = await params;
 
     // Fetch existing BOM
     const { data: bom, error: fetchError } = await supabaseAdmin
       .from('boms')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (fetchError || !bom) {
@@ -82,7 +84,7 @@ export async function PUT(
         .update({ is_current: false })
         .eq('product_id', bom.product_id)
         .eq('is_current', true)
-        .neq('id', params.id);
+        .neq('id', id);
 
       bomUpdate.is_current = true;
     } else if (body.is_current === false) {
@@ -93,7 +95,7 @@ export async function PUT(
     const { data: updatedBom, error: updateError } = await supabaseAdmin
       .from('boms')
       .update(bomUpdate)
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single();
 
@@ -111,12 +113,12 @@ export async function PUT(
       await supabaseAdmin
         .from('bom_materials')
         .delete()
-        .eq('bom_id', params.id);
+        .eq('bom_id', id);
 
       // Insert new materials
       if (body.materials.length > 0) {
         const materialsToInsert = body.materials.map((m: Record<string, unknown>) => ({
-          bom_id: params.id,
+          bom_id: id,
           material_id: m.material_id,
           material_name: m.material_name,
           quantity: m.quantity,
@@ -145,7 +147,7 @@ export async function PUT(
     const { data: materials } = await supabaseAdmin
       .from('bom_materials')
       .select('*')
-      .eq('bom_id', params.id);
+      .eq('bom_id', id);
 
     return NextResponse.json({
       success: true,
@@ -164,16 +166,17 @@ export async function PUT(
 // DELETE /api/boms/[id] - Delete BOM
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAdminAuth(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { id } = await params;
 
     const { data: bom, error: fetchError } = await supabaseAdmin
       .from('boms')
       .select('id, is_current, status')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (fetchError || !bom) {
@@ -192,7 +195,7 @@ export async function DELETE(
     const { error } = await supabaseAdmin
       .from('boms')
       .delete()
-      .eq('id', params.id);
+      .eq('id', id);
 
     if (error) {
       console.error('BOM delete error:', error);

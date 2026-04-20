@@ -16,7 +16,15 @@ export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
   },
   global: {
     fetch: (url, options = {}) => {
-      return fetch(url, { ...options, cache: 'no-store' as RequestCache });
+      // Increase timeout for cloud Supabase (handles cold starts)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 seconds
+      
+      return fetch(url, { 
+        ...options, 
+        cache: 'no-store' as RequestCache,
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timeoutId));
     },
   },
 });

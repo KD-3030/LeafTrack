@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(process.cwd(), 'uploads');
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
 const MAX_SIZE = 2 * 1024 * 1024; // 2MB
-const ALLOWED_FIELDS = ['logo', 'signature', 'qr_code'];
+const ALLOWED_FIELDS = ['logo', 'signature', 'qr_code', 'landing', 'product'];
 
 export async function POST(request: NextRequest) {
   try {

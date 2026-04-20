@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
@@ -68,6 +69,7 @@ interface Order {
   tax_percentage: number;
   tax_amount: number;
   discount_amount: number;
+  discount_percentage?: number;
   total_amount: number;
   status: 'pending_primary' | 'pending' | 'approved' | 'dispatched' | 'rejected';
   submitted_at: string;
@@ -116,6 +118,7 @@ export default function AdminOrdersPage() {
   const [paymentTerms, setPaymentTerms] = useState('');
   const [modifiedTaxPercentage, setModifiedTaxPercentage] = useState('');
   const [modifiedDiscount, setModifiedDiscount] = useState('');
+  const [discountMode, setDiscountMode] = useState<'amount' | 'percentage'>('amount');
 
   useEffect(() => {
     fetchOrders();
@@ -191,7 +194,13 @@ export default function AdminOrdersPage() {
     setDeliveryDate('');
     setPaymentTerms('');
     setModifiedTaxPercentage(order.tax_percentage.toString());
-    setModifiedDiscount(order.discount_amount.toString());
+    if (order.discount_percentage && order.discount_percentage > 0) {
+      setDiscountMode('percentage');
+      setModifiedDiscount(order.discount_percentage.toString());
+    } else {
+      setDiscountMode('amount');
+      setModifiedDiscount(order.discount_amount.toString());
+    }
     setIsApprovalDialogOpen(true);
   };
 
@@ -212,7 +221,8 @@ export default function AdminOrdersPage() {
   const calculateModifiedTotals = () => {
     const subtotal = modifiedItems.reduce((sum, item) => sum + item.total_price, 0);
     const tax = (subtotal * parseFloat(modifiedTaxPercentage || '0')) / 100;
-    const discount = parseFloat(modifiedDiscount || '0');
+    const discountValue = parseFloat(modifiedDiscount || '0');
+    const discount = discountMode === 'percentage' ? (subtotal * discountValue) / 100 : discountValue;
     const total = subtotal + tax - discount;
 
     return { subtotal, tax, discount, total };
@@ -224,7 +234,8 @@ export default function AdminOrdersPage() {
     const { subtotal, tax, total } = calculateModifiedTotals();
     const hasModifications = JSON.stringify(modifiedItems) !== JSON.stringify(selectedOrder.items) ||
                            parseFloat(modifiedTaxPercentage) !== selectedOrder.tax_percentage ||
-                           parseFloat(modifiedDiscount) !== selectedOrder.discount_amount;
+                           parseFloat(modifiedDiscount) !== selectedOrder.discount_amount ||
+                           discountMode === 'percentage';
 
     const payload: Record<string, unknown> = {
       status: 'approved',
@@ -238,7 +249,10 @@ export default function AdminOrdersPage() {
       payload.subtotal = subtotal;
       payload.tax_percentage = parseFloat(modifiedTaxPercentage);
       payload.tax_amount = tax;
-      payload.discount_amount = parseFloat(modifiedDiscount);
+      payload.discount_amount = discountMode === 'percentage'
+        ? (subtotal * parseFloat(modifiedDiscount)) / 100
+        : parseFloat(modifiedDiscount);
+      payload.discount_percentage = discountMode === 'percentage' ? parseFloat(modifiedDiscount) : 0;
       payload.total_amount = total;
     }
 
@@ -664,8 +678,10 @@ export default function AdminOrdersPage() {
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Order Details</DialogTitle>
-            <DialogDescription>
-              {selectedOrder?.order_number} - {getStatusBadge(selectedOrder?.status || 'pending')}
+            <DialogDescription asChild>
+              <div className="text-sm text-muted-foreground">
+                {selectedOrder?.order_number} - {getStatusBadge(selectedOrder?.status || 'pending')}
+              </div>
             </DialogDescription>
           </DialogHeader>
 
@@ -856,7 +872,7 @@ export default function AdminOrdersPage() {
               </div>
 
               {/* Pricing Adjustments */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div>
                   <Label htmlFor="tax_percentage">Tax Percentage (%)</Label>
                   <Input
@@ -865,16 +881,36 @@ export default function AdminOrdersPage() {
                     step="0.01"
                     value={modifiedTaxPercentage}
                     onChange={(e) => setModifiedTaxPercentage(e.target.value)}
+                    onFocus={(e) => { if (e.target.value === '0') e.target.value = ''; }}
+                    onBlur={(e) => { if (e.target.value === '') setModifiedTaxPercentage('0'); }}
                   />
                 </div>
                 <div>
-                  <Label htmlFor="discount_amount">Discount Amount (₹)</Label>
+                  <Label htmlFor="discount_mode">Discount Type</Label>
+                  <Select value={discountMode} onValueChange={(v: 'amount' | 'percentage') => { setDiscountMode(v); setModifiedDiscount(''); }}>
+                    <SelectTrigger id="discount_mode">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="amount">Amount (₹)</SelectItem>
+                      <SelectItem value="percentage">Percentage (%)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="discount_value">
+                    {discountMode === 'percentage' ? 'Discount (%)' : 'Discount (₹)'}
+                  </Label>
                   <Input
-                    id="discount_amount"
+                    id="discount_value"
                     type="number"
                     step="0.01"
+                    min="0"
+                    max={discountMode === 'percentage' ? '100' : undefined}
                     value={modifiedDiscount}
                     onChange={(e) => setModifiedDiscount(e.target.value)}
+                    onFocus={(e) => { if (e.target.value === '0') e.target.value = ''; }}
+                    onBlur={(e) => { if (e.target.value === '') setModifiedDiscount('0'); }}
                   />
                 </div>
               </div>
@@ -890,7 +926,7 @@ export default function AdminOrdersPage() {
                   <span className="font-medium">₹{modTax.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span>Discount:</span>
+                  <span>Discount{discountMode === 'percentage' ? ` (${modifiedDiscount}%)` : ''}:</span>
                   <span className="font-medium">-₹{modDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                 </div>
                 <div className="flex justify-between text-lg font-bold pt-2 border-t">

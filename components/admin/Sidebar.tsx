@@ -105,6 +105,7 @@ const navGroups: NavGroup[] = [
     colorClass: 'blue',
     items: [
       { name: 'Users', href: '/admin/salesmen', icon: Users },
+      { name: 'Landing Page', href: '/admin/settings/landing', icon: Leaf },
       { name: 'Settings', href: '/admin/settings', icon: Settings },
     ],
   },

@@ -11,6 +11,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Plus, Search, Eye, Edit, Trash2, Clock, CheckCircle, XCircle,
   IndianRupee, Package, Calendar, Download, Send,
@@ -296,6 +297,8 @@ export default function ExecutiveOrdersPage() {
             <CardDescription>Review and forward approved orders to admin</CardDescription>
           </CardHeader>
           <CardContent>
+            <ScrollArea className="w-full">
+              <div className="min-w-[900px]">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -332,6 +335,8 @@ export default function ExecutiveOrdersPage() {
                 ))}
               </TableBody>
             </Table>
+              </div>
+            </ScrollArea>
           </CardContent>
         </Card>
       )}
@@ -357,6 +362,8 @@ export default function ExecutiveOrdersPage() {
               )}
             </div>
           ) : (
+            <ScrollArea className="w-full">
+              <div className="min-w-[900px]">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -417,6 +424,8 @@ export default function ExecutiveOrdersPage() {
                 ))}
               </TableBody>
             </Table>
+              </div>
+            </ScrollArea>
           )}
         </CardContent>
       </Card>

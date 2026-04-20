@@ -7,9 +7,9 @@ import { withId } from '@/lib/supabase-helpers';
 export const dynamic = 'force-dynamic';
 
 interface RouteParams {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 }
 
 // DELETE /api/assignments/[id] - Delete an assignment and return stock to product
@@ -21,7 +21,7 @@ export async function DELETE(
     const authResult = requireAdminAuth(request);
     if (authResult instanceof NextResponse) return authResult;
 
-    const { id } = params;
+    const { id } = await params;
 
     // Find the assignment to get the product_id and quantity
     const { data: assignment, error: fetchErr } = await supabaseAdmin

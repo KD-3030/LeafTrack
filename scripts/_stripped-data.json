@@ -1,0 +1,20 @@
+{
+  "company_settings": [
+    {
+      "id": "ac324fa4-b55b-468a-bbcb-dd9988dba3af",
+      "qr_code_url": "/api/settings/uploads/qr_code_1775343509167.png"
+    }
+  ],
+  "orders": [
+    {
+      "id": "0d510396-2226-4a7c-aad4-2d62b9cf3325",
+      "location_lat": 22.6003,
+      "location_lng": 88.3639
+    },
+    {
+      "id": "2fd4803d-c358-4347-b256-a0a8afcf3563",
+      "location_lat": 22.6003,
+      "location_lng": 88.3639
+    }
+  ]
+}

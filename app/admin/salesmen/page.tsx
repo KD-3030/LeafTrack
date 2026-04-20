@@ -98,7 +98,7 @@ export default function ExecutiveManagementPage() {
 
   const [loading, setLoading] = useState(true);
   const [inviteLoading, setInviteLoading] = useState(false);
-  const [inviteRole, setInviteRole] = useState<'PrimaryExecutive' | 'SecondaryExecutive'>('PrimaryExecutive');
+  const [inviteRole, setInviteRole] = useState<'Admin' | 'PrimaryExecutive' | 'SecondaryExecutive'>('PrimaryExecutive');
   const [inviteEmail, setInviteEmail] = useState('');
   const [generatedInviteLink, setGeneratedInviteLink] = useState('');
 
@@ -631,12 +631,13 @@ export default function ExecutiveManagementPage() {
                   <Label>Role</Label>
                   <Select
                     value={inviteRole}
-                    onValueChange={(v: 'PrimaryExecutive' | 'SecondaryExecutive') => setInviteRole(v)}
+                    onValueChange={(v: 'Admin' | 'PrimaryExecutive' | 'SecondaryExecutive') => setInviteRole(v)}
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="Admin">Admin</SelectItem>
                       <SelectItem value="PrimaryExecutive">Primary Executive</SelectItem>
                       <SelectItem value="SecondaryExecutive">Secondary Executive</SelectItem>
                     </SelectContent>

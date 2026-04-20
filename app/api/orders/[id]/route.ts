@@ -22,17 +22,18 @@ async function canPrimaryAccessOrder(primaryId: string, salesmanId: string): Pro
 // GET /api/orders/[id] - Get a single order
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAuth(request);
     if (authResult instanceof NextResponse) return authResult;
     const decoded = authResult;
+    const { id } = await params;
 
     const { data: order, error } = await supabaseAdmin
       .from('orders')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (error || !order) {
@@ -54,7 +55,7 @@ export async function GET(
     const { data: orderItems } = await supabaseAdmin
       .from('order_items')
       .select('*')
-      .eq('order_id', params.id);
+      .eq('order_id', id);
 
     return NextResponse.json({
       success: true,
@@ -75,17 +76,18 @@ export async function GET(
 // PUT /api/orders/[id] - Update order (Admin: approve/reject/modify, Salesman: edit pending orders)
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAuth(request);
     if (authResult instanceof NextResponse) return authResult;
     const decoded = authResult;
+    const { id } = await params;
 
     const { data: order, error: fetchErr } = await supabaseAdmin
       .from('orders')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (fetchErr || !order) {
@@ -121,7 +123,7 @@ export async function PUT(
         const distId = order.distributor_id || order.customer_id;
         if (body.status === 'dispatched' && distId) {
           const { data: orderItems } = await supabaseAdmin
-            .from('order_items').select('product_id, quantity').eq('order_id', params.id);
+                .from('order_items').select('product_id, quantity').eq('order_id', id);
           if (orderItems && orderItems.length > 0) {
             for (const item of orderItems) {
               if (!item.product_id) continue;
@@ -169,6 +171,7 @@ export async function PUT(
       if (body.tax_percentage !== undefined) updateData.tax_percentage = body.tax_percentage;
       if (body.tax_amount !== undefined) updateData.tax_amount = body.tax_amount;
       if (body.discount_amount !== undefined) updateData.discount_amount = body.discount_amount;
+      if (body.discount_percentage !== undefined) updateData.discount_percentage = body.discount_percentage;
       if (body.total_amount !== undefined) updateData.total_amount = body.total_amount;
       if (body.admin_notes) updateData.admin_notes = body.admin_notes;
       if (body.delivery_date) updateData.delivery_date = body.delivery_date;
@@ -202,6 +205,7 @@ export async function PUT(
       if (body.tax_percentage !== undefined) updateData.tax_percentage = body.tax_percentage;
       if (body.tax_amount !== undefined) updateData.tax_amount = body.tax_amount;
       if (body.discount_amount !== undefined) updateData.discount_amount = body.discount_amount;
+      if (body.discount_percentage !== undefined) updateData.discount_percentage = body.discount_percentage;
       if (body.total_amount !== undefined) updateData.total_amount = body.total_amount;
       if (body.notes) updateData.notes = body.notes;
     }
@@ -257,6 +261,7 @@ export async function PUT(
         if (body.tax_percentage !== undefined) updateData.tax_percentage = body.tax_percentage;
         if (body.tax_amount !== undefined) updateData.tax_amount = body.tax_amount;
         if (body.discount_amount !== undefined) updateData.discount_amount = body.discount_amount;
+        if (body.discount_percentage !== undefined) updateData.discount_percentage = body.discount_percentage;
         if (body.total_amount !== undefined) updateData.total_amount = body.total_amount;
         if (body.notes) updateData.notes = body.notes;
       }
@@ -269,7 +274,7 @@ export async function PUT(
     const { data: updatedOrder, error: updateErr } = await supabaseAdmin
       .from('orders')
       .update(updateData)
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single();
 
@@ -299,17 +304,18 @@ export async function PUT(
 // DELETE /api/orders/[id] - Delete order (Salesman: only pending orders, Admin: any order)
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAuth(request);
     if (authResult instanceof NextResponse) return authResult;
     const decoded = authResult;
+    const { id } = await params;
 
     const { data: order, error: fetchErr } = await supabaseAdmin
       .from('orders')
       .select('id, salesman_id, status')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (fetchErr || !order) {
@@ -352,8 +358,8 @@ export async function DELETE(
     }
 
     // Delete order items first, then order
-    await supabaseAdmin.from('order_items').delete().eq('order_id', params.id);
-    await supabaseAdmin.from('orders').delete().eq('id', params.id);
+    await supabaseAdmin.from('order_items').delete().eq('order_id', id);
+    await supabaseAdmin.from('orders').delete().eq('id', id);
 
     return NextResponse.json({
       success: true,

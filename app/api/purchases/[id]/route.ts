@@ -8,16 +8,17 @@ export const dynamic = 'force-dynamic';
 // GET /api/purchases/[id] - Get a single purchase
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAuth(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { id } = await params;
 
     const { data: purchase, error } = await supabaseAdmin
       .from('purchases')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (error || !purchase) {
@@ -28,7 +29,7 @@ export async function GET(
     const { data: items } = await supabaseAdmin
       .from('purchase_items')
       .select('*')
-      .eq('purchase_id', params.id);
+      .eq('purchase_id', id);
 
     return NextResponse.json({
       success: true,
@@ -46,11 +47,12 @@ export async function GET(
 // PUT /api/purchases/[id] - Update a purchase
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAuth(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { id } = await params;
 
     const body = await request.json();
 
@@ -58,7 +60,7 @@ export async function PUT(
     const { data: existingPurchase, error: fetchError } = await supabaseAdmin
       .from('purchases')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (fetchError || !existingPurchase) {
@@ -86,7 +88,7 @@ export async function PUT(
     const { data: updatedPurchase, error: updateError } = await supabaseAdmin
       .from('purchases')
       .update(updateFields)
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single();
 
@@ -115,22 +117,23 @@ export async function PUT(
 // DELETE /api/purchases/[id] - Delete a purchase
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = requireAuth(request);
     if (authResult instanceof NextResponse) return authResult;
+    const { id } = await params;
 
     // Delete purchase items first (cascade should handle this, but be explicit)
     await supabaseAdmin
       .from('purchase_items')
       .delete()
-      .eq('purchase_id', params.id);
+      .eq('purchase_id', id);
 
     const { error } = await supabaseAdmin
       .from('purchases')
       .delete()
-      .eq('id', params.id);
+      .eq('id', id);
 
     if (error) {
       return NextResponse.json({ error: 'Purchase not found or could not be deleted' }, { status: 404 });

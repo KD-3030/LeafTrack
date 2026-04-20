@@ -17,10 +17,10 @@ const MIME_TYPES: Record<string, string> = {
 
 export async function GET(
   _request: NextRequest,
-  { params }: { params: { filename: string } }
+  { params }: { params: Promise<{ filename: string }> }
 ) {
   try {
-    const filename = params.filename;
+    const { filename } = await params;
 
     // Security: reject path traversal attempts
     if (!filename || filename.includes('..') || filename.includes('/') || filename.includes('\\')) {

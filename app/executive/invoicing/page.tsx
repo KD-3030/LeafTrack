@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { Search, FileText, IndianRupee, Clock, CheckCircle2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface InvoiceItem {
   product_name: string;
@@ -210,6 +211,8 @@ export default function ExecutiveInvoicingPage() {
               </p>
             </div>
           ) : (
+            <ScrollArea className="w-full">
+              <div className="min-w-[900px]">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -243,6 +246,8 @@ export default function ExecutiveInvoicingPage() {
                 ))}
               </TableBody>
             </Table>
+              </div>
+            </ScrollArea>
           )}
         </CardContent>
       </Card>

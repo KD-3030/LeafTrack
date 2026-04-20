@@ -151,16 +151,17 @@ async function resolveLaunchConfig(): Promise<LaunchConfig> {
   };
 }
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const authResult = requireAuth(request);
     if (authResult instanceof NextResponse) return authResult;
     const decoded = authResult;
+    const { id } = await params;
 
     const { data: invoice, error: invErr } = await supabaseAdmin
       .from('invoices')
       .select('*, invoice_items(*)')
-      .eq('id', params.id)
+      .eq('id', id)
       .single();
 
     if (invErr || !invoice) {
@@ -519,7 +520,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
           <div class="calc-label">Taxable Amount:</div><div class="calc-value">₹ ${formatCurrency(items.reduce((s, it) => s + it.taxableAmount, 0))}</div>
           <div class="calc-label">CGST:</div><div class="calc-value">₹ ${formatCurrency(items.reduce((s, it) => s + it.cgstAmount, 0))}</div>
           <div class="calc-label">SGST:</div><div class="calc-value">₹ ${formatCurrency(items.reduce((s, it) => s + it.sgstAmount, 0))}</div>
-          ${showDiscount ? `<div class="calc-label">Discount:</div><div class="calc-value">- ₹ ${formatCurrency(totalDiscount)}</div>` : ''}
+          ${showDiscount ? `<div class="calc-label">Discount${invoiceDiscountMode === 'percentage' && invoiceDiscountPct > 0 ? ` (${invoiceDiscountPct}%)` : ''}:</div><div class="calc-value">- ₹ ${formatCurrency(totalDiscount)}</div>` : ''}
           <div class="calc-label">Round Off:</div><div class="calc-value">${roundOff >= 0 ? '' : '- '}₹ ${formatCurrency(Math.abs(roundOff))}</div>
           <div class="calc-label grand-total">Total Invoice Amount:</div><div class="calc-value grand-total">₹ ${formatCurrency(rounded)}</div>
           <div class="calc-label">Received:</div><div class="calc-value">₹ ${formatCurrency(paidAmount)}</div>
