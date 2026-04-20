@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { Plus, Search, UserCheck, MapPin, Phone, Mail, Building2, IndianRupee } from 'lucide-react';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface Distributor {
   _id: string;
@@ -151,7 +152,7 @@ export default function ExecutiveDistributorsPage() {
               <DialogDescription>Add a distributor to your territory</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 pt-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div><Label>Name *</Label><Input value={newDistributor.name} onChange={(e) => setNewDistributor({...newDistributor, name: e.target.value})} placeholder="Distributor name" /></div>
                 <div><Label>Phone *</Label><Input value={newDistributor.phone} onChange={(e) => setNewDistributor({...newDistributor, phone: e.target.value})} placeholder="+91 98765 43210" /></div>
               </div>
@@ -160,7 +161,7 @@ export default function ExecutiveDistributorsPage() {
                 <div><Label>Business Name</Label><Input value={newDistributor.business_name} onChange={(e) => setNewDistributor({...newDistributor, business_name: e.target.value})} placeholder="Business name" /></div>
               </div>
               <div><Label>Address</Label><Textarea value={newDistributor.address} onChange={(e) => setNewDistributor({...newDistributor, address: e.target.value})} placeholder="Full address" rows={2} /></div>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div><Label>City</Label><Input value={newDistributor.city} onChange={(e) => setNewDistributor({...newDistributor, city: e.target.value})} placeholder="City" /></div>
                 <div><Label>State</Label><Input value={newDistributor.state} onChange={(e) => setNewDistributor({...newDistributor, state: e.target.value})} placeholder="State" /></div>
                 <div><Label>Pincode</Label><Input value={newDistributor.pincode} onChange={(e) => setNewDistributor({...newDistributor, pincode: e.target.value})} placeholder="000000" /></div>
@@ -212,6 +213,8 @@ export default function ExecutiveDistributorsPage() {
               <p className="text-sm text-muted-foreground mt-1">{searchTerm ? 'Try a different search' : 'Add your first distributor to get started'}</p>
             </div>
           ) : (
+            <ScrollArea className="w-full">
+              <div className="min-w-[800px]">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -253,8 +256,8 @@ export default function ExecutiveDistributorsPage() {
                   </TableRow>
                 ))}
               </TableBody>
-            </Table>
-          )}
+            </Table>              </div>
+            </ScrollArea>          )}
         </CardContent>
       </Card>
     </div>

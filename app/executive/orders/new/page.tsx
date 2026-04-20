@@ -16,6 +16,7 @@ import {
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { ArrowLeft, Plus, Trash2, User, Package, IndianRupee, Save, MapPin } from 'lucide-react';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface OrderItem {
   product_id?: string;
@@ -311,7 +312,7 @@ export default function ExecutiveNewOrderPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <Label>Customer Name *</Label>
                 <Input value={customerName} onChange={(e) => setCustomerName(e.target.value)} required placeholder="Customer name" />
@@ -325,7 +326,7 @@ export default function ExecutiveNewOrderPage() {
               <Label>Address</Label>
               <Textarea value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} placeholder="Full address..." rows={2} />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <Label>GSTIN</Label>
                 <Input value={customerGstin} onChange={(e) => setCustomerGstin(e.target.value)} placeholder="22AAAAA0000A1Z5" />
@@ -351,6 +352,8 @@ export default function ExecutiveNewOrderPage() {
             </div>
           </CardHeader>
           <CardContent>
+            <ScrollArea className="w-full">
+              <div className="min-w-[900px]">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -411,6 +414,8 @@ export default function ExecutiveNewOrderPage() {
                 ))}
               </TableBody>
             </Table>
+              </div>
+            </ScrollArea>
           </CardContent>
         </Card>
 
@@ -422,7 +427,7 @@ export default function ExecutiveNewOrderPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <Label>Tax Percentage (%)</Label>
                 <Input type="number" step="0.01" value={taxPercentage} onChange={(e) => setTaxPercentage(e.target.value)} />

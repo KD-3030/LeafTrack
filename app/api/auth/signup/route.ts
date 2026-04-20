@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     }
 
     const invitedRole = normalizeRoleId(invitation.role);
-    if (!invitedRole || invitedRole === 'admin' || invitedRole === 'customer') {
+    if (!invitedRole || invitedRole === 'customer') {
       return NextResponse.json({ error: 'Invitation role is invalid' }, { status: 400 });
     }
 

@@ -808,6 +808,25 @@ CREATE TRIGGER trg_invoices_auto_number
   BEFORE INSERT ON sohag.invoices
   FOR EACH ROW EXECUTE FUNCTION sohag.generate_invoice_number();
 
+-- ===================== INVITATIONS =====================
+CREATE TABLE IF NOT EXISTS sohag.invitations (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email       TEXT NOT NULL,
+  role        TEXT NOT NULL CHECK (role IN ('Admin', 'PrimaryExecutive', 'SecondaryExecutive')),
+  manager_id  UUID REFERENCES sohag.users(id) ON DELETE SET NULL,
+  token       TEXT NOT NULL UNIQUE,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  used        BOOLEAN NOT NULL DEFAULT FALSE,
+  used_at     TIMESTAMPTZ,
+  user_id     UUID REFERENCES sohag.users(id) ON DELETE SET NULL,
+  created_by  UUID REFERENCES sohag.users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_invitations_token ON sohag.invitations(token);
+CREATE INDEX IF NOT EXISTS idx_invitations_email ON sohag.invitations(email);
+CREATE INDEX IF NOT EXISTS idx_invitations_used ON sohag.invitations(used);
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- STEP 6: Grants on all created objects
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -841,6 +860,7 @@ ALTER TABLE sohag.purchases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sohag.purchase_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sohag.purchase_returns ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sohag.assignments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sohag.invitations ENABLE ROW LEVEL SECURITY;
 
 -- Service role bypasses RLS, so server-side API calls work out of the box.
 -- We'll add granular RLS policies later when implementing Better Auth.

@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { AlertCircle, BarChart3, CheckCircle, Clock, Plus, TrendingUp, Users } from 'lucide-react';
+import { AlertCircle, BarChart3, CheckCircle, Clock, Plus, TrendingUp, Users, History } from 'lucide-react';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
 
 interface OrderSummary {
@@ -265,6 +266,76 @@ export default function ExecutiveDashboard() {
                 </div>
               ))}
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Sales Activity Logs */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <History className="h-5 w-5 text-brand-600" />
+                Recent Sales Logs
+              </CardTitle>
+              <CardDescription>Detailed sales activity with timestamps</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {teamSales.length === 0 ? (
+            <p className="text-muted-foreground text-sm py-4 text-center">No sales logs available.</p>
+          ) : (
+            <ScrollArea className="w-full">
+              <div className="min-w-[700px]">
+                <div className="space-y-3">
+                  {teamSales.slice(0, 15).map((sale) => {
+                    const saleDate = new Date(sale.sale_date);
+                    const dateStr = saleDate.toLocaleDateString('en-IN', { 
+                      day: '2-digit', 
+                      month: 'short', 
+                      year: 'numeric' 
+                    });
+                    const timeStr = saleDate.toLocaleTimeString('en-IN', { 
+                      hour: '2-digit', 
+                      minute: '2-digit',
+                      hour12: true 
+                    });
+                    
+                    return (
+                      <div 
+                        key={sale._id} 
+                        className="grid grid-cols-[180px_1fr_150px_120px] gap-4 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors items-center"
+                      >
+                        <div>
+                          <p className="font-medium text-sm text-foreground">{sale.salesman_id?.name || 'Unknown Executive'}</p>
+                          <p className="text-xs text-muted-foreground">{sale.salesman_id?.email || 'No email'}</p>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{sale.product_id?.name || 'Unknown Product'}</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            Customer: {sale.customer_id?.name || 'Walk-in'} &middot; Qty: {sale.quantity_sold}
+                          </p>
+                        </div>
+                        <div className="text-sm">
+                          <p className="font-medium text-foreground">{dateStr}</p>
+                          <p className="text-xs text-muted-foreground">{timeStr}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-semibold text-sm text-brand-700">
+                            ₹{(sale.total_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          </p>
+                          <Badge variant="outline" className="text-[10px] mt-1">
+                            {sale.quantity_sold} units
+                          </Badge>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </ScrollArea>
           )}
         </CardContent>
       </Card>
