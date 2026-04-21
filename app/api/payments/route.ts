@@ -1,7 +1,7 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase-server';
 import { requireUserAuth } from '@/lib/authMiddleware';
-import { withId, withIds } from '@/lib/supabase-helpers';
+import { withId } from '@/lib/supabase-helpers';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,20 +75,20 @@ export async function GET(request: NextRequest) {
     const total = count || 0;
     const totalPages = Math.ceil(total / limit);
 
-    // Enrich with invoice and customer data
+    // Enrich with invoice and distributor data
     const invIds = [...new Set(payments.map(p => p.invoice_id).filter(Boolean))];
-    const custIds = [...new Set(payments.map(p => p.distributor_id).filter(Boolean))];
-    const [invRes, custRes] = await Promise.all([
+    const distIds = [...new Set(payments.map(p => p.distributor_id).filter(Boolean))];
+    const [invRes, distRes] = await Promise.all([
       invIds.length ? supabaseAdmin.from('invoices').select('id, invoice_number, grand_total, due_date').in('id', invIds) : { data: [] },
-      custIds.length ? supabaseAdmin.from('distributors').select('id, name, email, phone').in('id', custIds) : { data: [] },
+      distIds.length ? supabaseAdmin.from('distributors').select('id, name, email, phone').in('id', distIds) : { data: [] },
     ]);
     const invMap = new Map((invRes.data || []).map(i => [i.id, i]));
-    const custMap = new Map((custRes.data || []).map(c => [c.id, c]));
+    const distMap = new Map((distRes.data || []).map(d => [d.id, d]));
 
     const enriched = payments.map(p => ({
       ...withId(p),
       invoice_id: p.invoice_id && invMap.has(p.invoice_id) ? { _id: p.invoice_id, ...invMap.get(p.invoice_id) } : p.invoice_id,
-      customer_id: p.distributor_id && custMap.has(p.distributor_id) ? { _id: p.distributor_id, ...custMap.get(p.distributor_id) } : p.distributor_id,
+      customer_id: p.distributor_id && distMap.has(p.distributor_id) ? { _id: p.distributor_id, ...distMap.get(p.distributor_id) } : p.distributor_id,
     }));
 
     // Summary statistics - fetch all matching payments for summary
@@ -130,7 +130,7 @@ export async function POST(request: NextRequest) {
     if (authResult instanceof NextResponse) return authResult;
 
     const body = await request.json();
-    const { invoice_id, customer_id, amount_paid, payment_method, payment_date, transaction_id, bank_reference, cheque_number, cheque_date, bank_name, notes } = body;
+    const { invoice_id, customer_id, distributor_id, amount_paid, payment_method, payment_date, transaction_id, bank_reference, cheque_number, cheque_date, bank_name, notes } = body;
 
     if (!invoice_id || !amount_paid || !payment_method) {
       return NextResponse.json({ error: 'Missing required fields: invoice_id, amount_paid, payment_method' }, { status: 400 });
@@ -150,12 +150,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Payment amount exceeds remaining balance (${remainingBalance})` }, { status: 400 });
     }
 
-    const finalCustomerId = customer_id || invoice.distributor_id;
-    if (!finalCustomerId) return NextResponse.json({ error: 'Customer ID is required' }, { status: 400 });
+    const finalDistributorId = distributor_id || customer_id || invoice.distributor_id;
+    if (!finalDistributorId) return NextResponse.json({ error: 'Distributor ID is required' }, { status: 400 });
 
     const paymentData: Record<string, unknown> = {
       invoice_id,
-      distributor_id: finalCustomerId,
+      distributor_id: finalDistributorId,
       amount_paid: parseFloat(amount_paid),
       payment_method,
       payment_date: payment_date ? new Date(payment_date).toISOString() : new Date().toISOString(),
@@ -178,7 +178,7 @@ export async function POST(request: NextRequest) {
 
     // Enrich response
     const invInfo = { _id: invoice_id, grand_total: invoice.grand_total };
-    const { data: custInfo } = await supabaseAdmin.from('distributors').select('id, name, email, phone').eq('id', finalCustomerId).single();
+    const { data: distInfo } = await supabaseAdmin.from('distributors').select('id, name, email, phone').eq('id', finalDistributorId).single();
 
     return NextResponse.json({
       success: true,
@@ -186,7 +186,7 @@ export async function POST(request: NextRequest) {
       payment: {
         ...withId(payment),
         invoice_id: invInfo,
-        customer_id: custInfo ? { _id: custInfo.id, ...custInfo } : finalCustomerId,
+        customer_id: distInfo ? { _id: distInfo.id, ...distInfo } : finalDistributorId,
       },
     }, { status: 201 });
   } catch (error) {

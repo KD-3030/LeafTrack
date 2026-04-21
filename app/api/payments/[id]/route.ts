@@ -115,11 +115,10 @@ export async function PUT(
     const {
       amount_paid, payment_method, payment_date, status,
       reconciled, transaction_id, bank_reference,
-      cheque_number, cheque_date, bank_name, notes, reconciliation_notes
+      cheque_number, cheque_date, bank_name, notes
     } = body;
 
     const updateData: Record<string, unknown> = {
-      updated_by: decoded.userId,
       updated_at: new Date().toISOString(),
     };
 
@@ -140,7 +139,6 @@ export async function PUT(
     if (cheque_date !== undefined) updateData.cheque_date = cheque_date ? new Date(cheque_date).toISOString() : null;
     if (bank_name !== undefined) updateData.bank_name = bank_name;
     if (notes !== undefined) updateData.notes = notes;
-    if (reconciliation_notes !== undefined) updateData.reconciliation_notes = reconciliation_notes;
 
     const { data: updatedPayment, error: updateErr } = await supabaseAdmin
       .from('payments')
@@ -217,9 +215,7 @@ export async function DELETE(
       .update({
         status: 'Cancelled',
         reconciled: false,
-        cancelled_by: decoded.userId,
-        cancelled_at: new Date().toISOString(),
-        cancellation_reason: 'Deleted by administrator',
+        notes: 'Deleted by administrator',
       })
       .eq('id', id)
       .select()

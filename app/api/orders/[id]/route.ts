@@ -164,7 +164,7 @@ export async function PUT(
           updateData.original_total = order.total_amount;
         }
         updateData.admin_modified = true;
-        updateData.items = body.items;
+        // Items will be updated separately in order_items table
       }
 
       if (body.subtotal !== undefined) updateData.subtotal = body.subtotal;
@@ -200,7 +200,7 @@ export async function PUT(
       if (body.customer_address) updateData.customer_address = body.customer_address;
       if (body.customer_gstin) updateData.customer_gstin = body.customer_gstin;
       if (body.customer_email) updateData.customer_email = body.customer_email;
-      if (body.items) updateData.items = body.items;
+        // Items will be updated separately in order_items table
       if (body.subtotal !== undefined) updateData.subtotal = body.subtotal;
       if (body.tax_percentage !== undefined) updateData.tax_percentage = body.tax_percentage;
       if (body.tax_amount !== undefined) updateData.tax_amount = body.tax_amount;
@@ -256,7 +256,7 @@ export async function PUT(
         if (body.customer_address) updateData.customer_address = body.customer_address;
         if (body.customer_gstin) updateData.customer_gstin = body.customer_gstin;
         if (body.customer_email) updateData.customer_email = body.customer_email;
-        if (body.items) updateData.items = body.items;
+        // Items will be updated separately in order_items table
         if (body.subtotal !== undefined) updateData.subtotal = body.subtotal;
         if (body.tax_percentage !== undefined) updateData.tax_percentage = body.tax_percentage;
         if (body.tax_amount !== undefined) updateData.tax_amount = body.tax_amount;
