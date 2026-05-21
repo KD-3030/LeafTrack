@@ -120,8 +120,61 @@ export default function AdminOrdersPage() {
   const [modifiedDiscount, setModifiedDiscount] = useState('');
   const [discountMode, setDiscountMode] = useState<'amount' | 'percentage'>('amount');
 
+  // New products, customers, company settings states
+  const [products, setProducts] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [companyState, setCompanyState] = useState('West Bengal');
+
+  const fetchCompanySettings = async () => {
+    try {
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch('/api/settings/company', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (data.success && data.settings?.state) {
+        setCompanyState(data.settings.state);
+      }
+    } catch (error) {
+      console.error('Error fetching company settings:', error);
+    }
+  };
+
+  const fetchCustomers = async () => {
+    try {
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch('/api/customers', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (data.success && data.customers) {
+        setCustomers(data.customers);
+      }
+    } catch (error) {
+      console.error('Error fetching customers:', error);
+    }
+  };
+
+  const fetchProducts = async () => {
+    try {
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch('/api/products?limit=100', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (data.success && data.products) {
+        setProducts(data.products);
+      }
+    } catch (error) {
+      console.error('Error fetching products:', error);
+    }
+  };
+
   useEffect(() => {
     fetchOrders();
+    fetchProducts();
+    fetchCustomers();
+    fetchCompanySettings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter]);
 
@@ -186,74 +239,249 @@ export default function AdminOrdersPage() {
     }
   };
 
-  const handleOpenApproval = (order: Order) => {
-    setSelectedOrder(order);
-    setModifiedItems([...order.items]);
-    setAdminNotes('');
-    setRejectionReason('');
-    setDeliveryDate('');
-    setPaymentTerms('');
-    setModifiedTaxPercentage(order.tax_percentage.toString());
-    if (order.discount_percentage && order.discount_percentage > 0) {
-      setDiscountMode('percentage');
-      setModifiedDiscount(order.discount_percentage.toString());
-    } else {
-      setDiscountMode('amount');
-      setModifiedDiscount(order.discount_amount.toString());
-    }
-    setIsApprovalDialogOpen(true);
+  const recalculateAllTotals = (
+    itemsList: any[],
+    custState: string,
+    compState: string,
+    orderDiscountMode: 'amount' | 'percentage',
+    orderDiscountValueStr: string
+  ) => {
+    let totalGrossSubtotal = 0;
+    
+    // Calculate raw gross amounts first
+    const itemsWithGross = itemsList.map(item => {
+      const qty = Number(item.quantity) || 0;
+      const price = Number(item.price_per_unit) || 0;
+      const grossAmount = qty * price;
+      
+      const itemDiscPct = Number(item.discount_percentage || 0);
+      const itemDiscountAmount = (grossAmount * itemDiscPct) / 100;
+      
+      totalGrossSubtotal += grossAmount;
+      return {
+        ...item,
+        grossAmount,
+        itemDiscountAmount,
+      };
+    });
+
+    const orderDiscountInput = parseFloat(orderDiscountValueStr) || 0;
+    const orderDiscount = orderDiscountMode === 'percentage'
+      ? (totalGrossSubtotal * orderDiscountInput) / 100
+      : orderDiscountInput;
+
+    let subtotal = 0;
+    let totalCgst = 0;
+    let totalSgst = 0;
+    let totalIgst = 0;
+    let totalTax = 0;
+
+    const isSameState = custState.trim().toLowerCase() === compState.trim().toLowerCase();
+
+    const updatedItems = itemsWithGross.map(item => {
+      // Proportional distribution of overall order discount
+      const orderDiscShare = totalGrossSubtotal > 0
+        ? (item.grossAmount / totalGrossSubtotal) * orderDiscount
+        : 0;
+
+      const totalItemDiscount = Math.round((item.itemDiscountAmount + orderDiscShare) * 100) / 100;
+      const taxableAmount = Math.max(0, Math.round((item.grossAmount - totalItemDiscount) * 100) / 100);
+      
+      const gstRate = item.gst_rate || 18;
+      const taxAmount = Math.round(((taxableAmount * gstRate) / 100) * 100) / 100;
+      
+      let cgst = 0;
+      let sgst = 0;
+      let igst = 0;
+
+      if (isSameState) {
+        cgst = Math.round((taxAmount / 2) * 100) / 100;
+        sgst = Math.round((taxAmount - cgst) * 100) / 100;
+      } else {
+        igst = taxAmount;
+      }
+
+      const totalItemPrice = Math.round((taxableAmount + taxAmount) * 100) / 100;
+
+      subtotal += taxableAmount;
+      totalCgst += cgst;
+      totalSgst += sgst;
+      totalIgst += igst;
+      totalTax += taxAmount;
+
+      return {
+        ...item,
+        taxable_amount: taxableAmount,
+        tax_amount: taxAmount,
+        cgst_amount: cgst,
+        sgst_amount: sgst,
+        igst_amount: igst,
+        total_price: totalItemPrice,
+      };
+    });
+
+    const grandTotal = Math.round((subtotal + totalTax) * 100) / 100;
+
+    return {
+      updatedItems,
+      subtotal,
+      totalCgst,
+      totalSgst,
+      totalIgst,
+      totalTax,
+      totalDiscount: orderDiscount,
+      grandTotal,
+    };
   };
 
-  const handleItemChange = (index: number, field: keyof OrderItem, value: string | number) => {
-    const newItems = [...modifiedItems];
-    newItems[index] = { ...newItems[index], [field]: value };
+  const updateItemsAndRecalculate = (newItems: any[], discountVal = modifiedDiscount, mode = discountMode) => {
+    const customer = customers.find(c => c._id === selectedOrder?.customer_id || c._id === selectedOrder?.distributor_id);
+    const custState = customer?.state || 'West Bengal';
+    const calc = recalculateAllTotals(newItems, custState, companyState, mode, discountVal);
+    setModifiedItems(calc.updatedItems);
+  };
+
+  const handleOpenApproval = (order: Order) => {
+    setSelectedOrder(order);
     
-    // Recalculate total price
-    if (field === 'quantity' || field === 'price_per_unit') {
-      const qty = field === 'quantity' ? parseFloat(value as string) : newItems[index].quantity;
-      const price = field === 'price_per_unit' ? parseFloat(value as string) : newItems[index].price_per_unit;
-      newItems[index].total_price = qty * price;
+    // Enrich items with products details if available
+    const enriched = order.items.map(item => {
+      const product = products.find(p => p._id === item.product_id);
+      return {
+        ...item,
+        gst_rate: (item as any).gst_rate ?? product?.gst_rate ?? 18,
+        discount_percentage: (item as any).discount_percentage ?? 0,
+        hsn_code: (item as any).hsn_code ?? product?.hsn_code ?? '0000',
+        taxable_amount: (item as any).taxable_amount ?? (item.quantity * item.price_per_unit),
+        tax_amount: (item as any).tax_amount ?? 0,
+        cgst_amount: (item as any).cgst_amount ?? 0,
+        sgst_amount: (item as any).sgst_amount ?? 0,
+        igst_amount: (item as any).igst_amount ?? 0,
+      };
+    });
+
+    const customer = customers.find(c => c._id === order.customer_id || c._id === order.distributor_id);
+    const custState = customer?.state || 'West Bengal';
+
+    setModifiedItems(enriched);
+    setAdminNotes('');
+    setRejectionReason('');
+    setDeliveryDate(order.delivery_date ? new Date(order.delivery_date).toISOString().split('T')[0] : '');
+    setPaymentTerms(order.payment_terms || '');
+    setModifiedTaxPercentage(order.tax_percentage.toString());
+    
+    let initialMode: 'amount' | 'percentage' = 'amount';
+    let initialDiscount = '0';
+    if (order.discount_percentage && order.discount_percentage > 0) {
+      initialMode = 'percentage';
+      initialDiscount = order.discount_percentage.toString();
+    } else if (order.discount_amount && order.discount_amount > 0) {
+      initialMode = 'amount';
+      initialDiscount = order.discount_amount.toString();
     }
     
-    setModifiedItems(newItems);
+    setDiscountMode(initialMode);
+    setModifiedDiscount(initialDiscount);
+    setIsApprovalDialogOpen(true);
+    
+    // Run initial recalculation to populate splits
+    setTimeout(() => {
+      const calc = recalculateAllTotals(enriched, custState, companyState, initialMode, initialDiscount);
+      setModifiedItems(calc.updatedItems);
+    }, 50);
+  };
+
+  const handleProductSelect = (index: number, productId: string) => {
+    const product = products.find(p => p._id === productId);
+    if (product) {
+      const basePrice = product.manufacturingCost * 1.3;
+      const newItems = [...modifiedItems];
+      newItems[index] = {
+        ...newItems[index],
+        product_id: productId,
+        product_name: product.name,
+        unit: 'kg',
+        price_per_unit: basePrice,
+        hsn_code: product.hsn_code || '0000',
+        gst_rate: product.gst_rate || 18,
+        discount_percentage: 0,
+      };
+      updateItemsAndRecalculate(newItems);
+    }
+  };
+
+  const handleItemChange = (index: number, field: string, value: any) => {
+    const newItems = [...modifiedItems];
+    if (field === 'quantity' || field === 'price_per_unit' || field === 'gst_rate' || field === 'discount_percentage') {
+      newItems[index] = { ...newItems[index], [field]: Number(value) || 0 };
+    } else {
+      newItems[index] = { ...newItems[index], [field]: value };
+    }
+    updateItemsAndRecalculate(newItems);
+  };
+
+  const addModifiedItem = () => {
+    const newItem: any = {
+      product_name: '',
+      quantity: 1,
+      unit: 'kg',
+      price_per_unit: 0,
+      gst_rate: 18,
+      discount_percentage: 0,
+      total_price: 0,
+    };
+    updateItemsAndRecalculate([...modifiedItems, newItem]);
+  };
+
+  const removeModifiedItem = (index: number) => {
+    if (modifiedItems.length === 1) {
+      toast.error('Order must have at least one item');
+      return;
+    }
+    const filtered = modifiedItems.filter((_, i) => i !== index);
+    updateItemsAndRecalculate(filtered);
   };
 
   const calculateModifiedTotals = () => {
-    const subtotal = modifiedItems.reduce((sum, item) => sum + item.total_price, 0);
-    const tax = (subtotal * parseFloat(modifiedTaxPercentage || '0')) / 100;
-    const discountValue = parseFloat(modifiedDiscount || '0');
-    const discount = discountMode === 'percentage' ? (subtotal * discountValue) / 100 : discountValue;
-    const total = subtotal + tax - discount;
-
-    return { subtotal, tax, discount, total };
+    const customer = customers.find(c => c._id === selectedOrder?.customer_id || c._id === selectedOrder?.distributor_id);
+    const custState = customer?.state || 'West Bengal';
+    const calc = recalculateAllTotals(modifiedItems, custState, companyState, discountMode, modifiedDiscount);
+    return {
+      subtotal: calc.subtotal,
+      tax: calc.totalTax,
+      discount: calc.totalDiscount,
+      total: calc.grandTotal,
+      cgst: calc.totalCgst,
+      sgst: calc.totalSgst,
+      igst: calc.totalIgst,
+    };
   };
 
   const handleApprove = async () => {
     if (!selectedOrder) return;
 
-    const { subtotal, tax, total } = calculateModifiedTotals();
-    const hasModifications = JSON.stringify(modifiedItems) !== JSON.stringify(selectedOrder.items) ||
-                           parseFloat(modifiedTaxPercentage) !== selectedOrder.tax_percentage ||
-                           parseFloat(modifiedDiscount) !== selectedOrder.discount_amount ||
-                           discountMode === 'percentage';
+    const calc = calculateModifiedTotals();
+    const customer = customers.find(c => c._id === selectedOrder.customer_id || c._id === selectedOrder.distributor_id);
+    const custState = customer?.state || 'West Bengal';
+    const fullCalcResult = recalculateAllTotals(modifiedItems, custState, companyState, discountMode, modifiedDiscount);
 
     const payload: Record<string, unknown> = {
       status: 'approved',
       admin_notes: adminNotes,
       delivery_date: deliveryDate || undefined,
       payment_terms: paymentTerms || undefined,
+      items: fullCalcResult.updatedItems,
+      subtotal: calc.subtotal,
+      tax_percentage: fullCalcResult.updatedItems.length > 0 ? fullCalcResult.updatedItems[0].gst_rate : 18,
+      tax_amount: calc.tax,
+      discount_amount: calc.discount,
+      discount_percentage: discountMode === 'percentage' ? parseFloat(modifiedDiscount) : 0,
+      total_amount: calc.total,
+      admin_modified: true,
     };
 
-    if (hasModifications) {
-      payload.items = modifiedItems;
-      payload.subtotal = subtotal;
-      payload.tax_percentage = parseFloat(modifiedTaxPercentage);
-      payload.tax_amount = tax;
-      payload.discount_amount = discountMode === 'percentage'
-        ? (subtotal * parseFloat(modifiedDiscount)) / 100
-        : parseFloat(modifiedDiscount);
-      payload.discount_percentage = discountMode === 'percentage' ? parseFloat(modifiedDiscount) : 0;
-      payload.total_amount = total;
+    if (!selectedOrder.admin_modified) {
+      payload.original_total = selectedOrder.total_amount;
     }
 
     try {
@@ -271,7 +499,7 @@ export default function AdminOrdersPage() {
 
       if (data.success) {
         console.log('Order approved successfully:', data);
-        toast.success(hasModifications ? 'Order approved with modifications' : 'Order approved successfully');
+        toast.success('Order approved with modifications successfully');
         setIsApprovalDialogOpen(false);
         setSelectedOrder(null);
         await fetchOrders(); // Wait for refresh to complete
@@ -412,7 +640,15 @@ export default function AdminOrdersPage() {
       order.customer_contact.includes(searchTerm);
   });
 
-  const { subtotal: modSubtotal, tax: modTax, discount: modDiscount, total: modTotal } = calculateModifiedTotals();
+  const {
+    subtotal: modSubtotal,
+    tax: modTax,
+    discount: modDiscount,
+    total: modTotal,
+    cgst: modCgst,
+    sgst: modSgst,
+    igst: modIgst,
+  } = calculateModifiedTotals();
 
   if (loading) {
     return (
@@ -830,65 +1066,160 @@ export default function AdminOrdersPage() {
             <div className="space-y-6">
               {/* Order Items - Editable */}
               <div>
-                <h3 className="font-semibold mb-2">Order Items (Editable)</h3>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Product</TableHead>
-                      <TableHead className="w-[120px]">Quantity</TableHead>
-                      <TableHead className="w-[100px]">Unit</TableHead>
-                      <TableHead className="w-[150px]">Price/Unit (₹)</TableHead>
-                      <TableHead>Total (₹)</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {modifiedItems.map((item, index) => (
-                      <TableRow key={index}>
-                        <TableCell>{item.product_name}</TableCell>
-                        <TableCell>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={item.quantity}
-                            onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
-                          />
-                        </TableCell>
-                        <TableCell>{item.unit}</TableCell>
-                        <TableCell>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={item.price_per_unit}
-                            onChange={(e) => handleItemChange(index, 'price_per_unit', e.target.value)}
-                          />
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          ₹{item.total_price.toFixed(2)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                <div className="flex justify-between items-center mb-2">
+                  <h3 className="font-semibold text-lg text-gray-800">Order Items (Editable)</h3>
+                  <Button type="button" variant="outline" size="sm" onClick={addModifiedItem} className="text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700">
+                    <Package className="mr-2 h-4 w-4" />
+                    Add Product
+                  </Button>
+                </div>
+                <div className="border rounded-lg overflow-hidden bg-white shadow-sm">
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader className="bg-gray-50/70">
+                        <TableRow>
+                          <TableHead className="min-w-[220px]">Product</TableHead>
+                          <TableHead className="w-[100px]">Qty</TableHead>
+                          <TableHead className="w-[90px]">Unit</TableHead>
+                          <TableHead className="w-[110px]">Price (₹)</TableHead>
+                          <TableHead className="w-[90px]">Disc (%)</TableHead>
+                          <TableHead className="w-[95px]">GST (%)</TableHead>
+                          <TableHead className="text-right w-[100px]">Taxable (₹)</TableHead>
+                          <TableHead className="text-right w-[110px]">Tax (₹)</TableHead>
+                          <TableHead className="text-right w-[110px]">Total (₹)</TableHead>
+                          <TableHead className="w-[50px]"></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {modifiedItems.map((item, index) => (
+                          <TableRow key={index} className="hover:bg-orange-50/10">
+                            <TableCell>
+                              <Select value={item.product_id || ''} onValueChange={(v) => handleProductSelect(index, v)}>
+                                <SelectTrigger className="w-full focus:ring-orange-500">
+                                  <SelectValue placeholder="Select product..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {products.map((p) => (
+                                    <SelectItem key={p._id} value={p._id}>
+                                      {p.name} {p.totalStock > 0 ? `(Stock: ${p.totalStock})` : '(No stock)'}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {!item.product_id && (
+                                <Input
+                                  className="mt-2 focus-visible:ring-orange-500"
+                                  value={item.product_name}
+                                  onChange={(e) => handleItemChange(index, 'product_name', e.target.value)}
+                                  placeholder="Or enter manually"
+                                />
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={item.quantity}
+                                onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
+                                placeholder="0"
+                                className="focus-visible:ring-orange-500"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Select value={item.unit} onValueChange={(v) => handleItemChange(index, 'unit', v)}>
+                                <SelectTrigger className="focus:ring-orange-500">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="kg">KG</SelectItem>
+                                  <SelectItem value="box">Box</SelectItem>
+                                  <SelectItem value="bag">Bag</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={item.price_per_unit}
+                                onChange={(e) => handleItemChange(index, 'price_per_unit', e.target.value)}
+                                placeholder="0.00"
+                                className="focus-visible:ring-orange-500"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                type="number"
+                                step="0.1"
+                                min="0"
+                                max="100"
+                                value={item.discount_percentage || 0}
+                                onChange={(e) => handleItemChange(index, 'discount_percentage', e.target.value)}
+                                placeholder="0"
+                                className="focus-visible:ring-orange-500"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Select
+                                value={(item.gst_rate ?? 18).toString()}
+                                onValueChange={(v) => handleItemChange(index, 'gst_rate', v)}
+                              >
+                                <SelectTrigger className="focus:ring-orange-500">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="0">0%</SelectItem>
+                                  <SelectItem value="5">5%</SelectItem>
+                                  <SelectItem value="12">12%</SelectItem>
+                                  <SelectItem value="18">18%</SelectItem>
+                                  <SelectItem value="28">28%</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+                            <TableCell className="text-right font-medium text-sm">
+                              ₹{(item.taxable_amount ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </TableCell>
+                            <TableCell className="text-right text-gray-500 text-sm">
+                              ₹{(item.tax_amount ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              <div className="text-[10px] text-gray-400">
+                                {customers.find(c => c._id === selectedOrder.customer_id || c._id === selectedOrder.distributor_id)?.state?.trim()?.toLowerCase() === companyState.trim().toLowerCase() ? (
+                                  <span>C:{((item.cgst_amount ?? 0)).toFixed(1)} S:{((item.sgst_amount ?? 0)).toFixed(1)}</span>
+                                ) : (
+                                  <span>I:{((item.igst_amount ?? 0)).toFixed(1)}</span>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right font-bold text-gray-900">
+                              ₹{(item.total_price ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => removeModifiedItem(index)}
+                                disabled={modifiedItems.length === 1}
+                                className="hover:bg-red-50 hover:text-red-500 text-gray-400"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
               </div>
 
               {/* Pricing Adjustments */}
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <Label htmlFor="tax_percentage">Tax Percentage (%)</Label>
-                  <Input
-                    id="tax_percentage"
-                    type="number"
-                    step="0.01"
-                    value={modifiedTaxPercentage}
-                    onChange={(e) => setModifiedTaxPercentage(e.target.value)}
-                    onFocus={(e) => { if (e.target.value === '0') e.target.value = ''; }}
-                    onBlur={(e) => { if (e.target.value === '') setModifiedTaxPercentage('0'); }}
-                  />
-                </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="discount_mode">Discount Type</Label>
                   <Select value={discountMode} onValueChange={(v: 'amount' | 'percentage') => { setDiscountMode(v); setModifiedDiscount(''); }}>
-                    <SelectTrigger id="discount_mode">
+                    <SelectTrigger id="discount_mode" className="focus:ring-orange-500">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -899,7 +1230,7 @@ export default function AdminOrdersPage() {
                 </div>
                 <div>
                   <Label htmlFor="discount_value">
-                    {discountMode === 'percentage' ? 'Discount (%)' : 'Discount (₹)'}
+                    {discountMode === 'percentage' ? 'Order-level Discount (%)' : 'Order-level Discount (₹)'}
                   </Label>
                   <Input
                     id="discount_value"
@@ -911,34 +1242,68 @@ export default function AdminOrdersPage() {
                     onChange={(e) => setModifiedDiscount(e.target.value)}
                     onFocus={(e) => { if (e.target.value === '0') e.target.value = ''; }}
                     onBlur={(e) => { if (e.target.value === '') setModifiedDiscount('0'); }}
+                    className="focus-visible:ring-orange-500"
                   />
                 </div>
               </div>
 
               {/* Modified Summary */}
-              <div className="bg-orange-50 p-4 rounded-lg space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span>Subtotal:</span>
-                  <span className="font-medium">₹{modSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>Tax ({modifiedTaxPercentage}%):</span>
-                  <span className="font-medium">₹{modTax.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>Discount{discountMode === 'percentage' ? ` (${modifiedDiscount}%)` : ''}:</span>
-                  <span className="font-medium">-₹{modDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                </div>
-                <div className="flex justify-between text-lg font-bold pt-2 border-t">
-                  <span>Total Amount:</span>
-                  <span className="text-orange-600">₹{modTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                </div>
-                {modTotal !== selectedOrder.total_amount && (
-                  <div className="flex justify-between text-sm text-blue-600">
-                    <span>Original Amount:</span>
-                    <span>₹{selectedOrder.total_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+              <div className="bg-orange-50/50 border border-orange-100 p-4 rounded-xl space-y-3">
+                <h4 className="font-semibold text-sm text-orange-800 uppercase tracking-wider">Pricing Summary</h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm text-gray-600">
+                    <span>Gross Subtotal:</span>
+                    <span className="font-medium text-gray-900">₹{(modSubtotal + modDiscount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                   </div>
-                )}
+                  {modDiscount > 0 && (
+                    <div className="flex justify-between text-sm text-gray-600">
+                      <span>Discount{discountMode === 'percentage' ? ` (${modifiedDiscount}%)` : ''}:</span>
+                      <span className="font-medium text-green-600">-₹{modDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-sm text-gray-600 pt-1 border-t border-dashed border-orange-200">
+                    <span>Taxable Amount (Pre-Tax Subtotal):</span>
+                    <span className="font-semibold text-gray-900">₹{modSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  
+                  {/* Tax Splits details */}
+                  <div className="pl-4 border-l-2 border-orange-200 space-y-1">
+                    {customers.find(c => c._id === selectedOrder.customer_id || c._id === selectedOrder.distributor_id)?.state?.trim()?.toLowerCase() === companyState.trim().toLowerCase() ? (
+                      <>
+                        <div className="flex justify-between text-xs text-gray-500">
+                          <span>Central GST (CGST):</span>
+                          <span>₹{modCgst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-gray-500">
+                          <span>State GST (SGST):</span>
+                          <span>₹{modSgst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex justify-between text-xs text-gray-500">
+                        <span>Integrated GST (IGST):</span>
+                        <span>₹{modIgst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-between text-sm text-gray-600 pt-1 border-t border-dashed border-orange-200">
+                    <span>Total GST Tax:</span>
+                    <span className="font-medium text-gray-900">₹{modTax.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                  </div>
+
+                  <div className="flex justify-between text-lg font-bold pt-3 border-t border-orange-200 text-gray-900">
+                    <span>Grand Total:</span>
+                    <span className="text-orange-600">₹{modTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  
+                  {modTotal !== selectedOrder.total_amount && (
+                    <div className="flex justify-between text-xs text-blue-600 pt-1">
+                      <span>Original Order Amount:</span>
+                      <span>₹{selectedOrder.total_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Additional Fields */}

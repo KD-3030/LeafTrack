@@ -40,24 +40,41 @@ export async function GET(request: NextRequest) {
     const { data, error } = await query.order('distributor_id');
     if (error) throw error;
 
-    // Enrich with names
+    // Enrich with names and PE details
     const items = data || [];
     const distIds = [...new Set(items.map(i => i.distributor_id))];
     const productIds = [...new Set(items.map(i => i.product_id))];
 
     const [{ data: distributors }, { data: products }] = await Promise.all([
-      distIds.length ? supabaseAdmin.from('distributors').select('id, name').in('id', distIds) : { data: [] },
-      productIds.length ? supabaseAdmin.from('products').select('id, name').in('id', productIds) : { data: [] },
+      distIds.length ? supabaseAdmin.from('distributors').select('id, name, pe_id').in('id', distIds) : { data: [] },
+      productIds.length ? supabaseAdmin.from('products').select('id, name, hsn_code').in('id', productIds) : { data: [] },
     ]);
 
-    const distMap = Object.fromEntries((distributors || []).map(d => [d.id, d.name]));
-    const prodMap = Object.fromEntries((products || []).map(p => [p.id, p.name]));
+    const peIds = [...new Set((distributors || []).map(d => d.pe_id).filter(Boolean))];
+    const { data: users } = peIds.length
+      ? await supabaseAdmin.from('users').select('id, name, email, phone').in('id', peIds)
+      : { data: [] };
 
-    const enriched = items.map(i => ({
-      ...withId(i),
-      distributor_name: distMap[i.distributor_id] || null,
-      product_name: prodMap[i.product_id] || null,
-    }));
+    const distMap = Object.fromEntries((distributors || []).map(d => [d.id, d]));
+    const prodMap = Object.fromEntries((products || []).map(p => [p.id, p]));
+    const userMap = Object.fromEntries((users || []).map(u => [u.id, u]));
+
+    const enriched = items.map(i => {
+      const dist = distMap[i.distributor_id];
+      const prod = prodMap[i.product_id];
+      const pe = dist?.pe_id ? userMap[dist.pe_id] : null;
+
+      return {
+        ...withId(i),
+        distributor_name: dist?.name || null,
+        pe_id: dist?.pe_id || null,
+        pe_name: pe?.name || null,
+        pe_email: pe?.email || null,
+        pe_phone: pe?.phone || null,
+        product_name: prod?.name || null,
+        product_hsn: prod?.hsn_code || null,
+      };
+    });
 
     return NextResponse.json({ success: true, inventory: enriched });
   } catch (error) {

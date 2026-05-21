@@ -163,8 +163,44 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       }
     }
 
+    // Fetch state details for tax calculations
+    let customerState = invoice.customer_state || 'West Bengal';
+    if (!invoice.customer_state && invoice.distributor_id) {
+      const { data: customer } = await supabaseAdmin
+        .from('distributors')
+        .select('state')
+        .eq('id', invoice.distributor_id)
+        .single();
+      if (customer?.state) {
+        customerState = customer.state;
+      }
+    }
+
+    const { data: settings } = await supabaseAdmin
+      .from('company_settings')
+      .select('state')
+      .limit(1)
+      .single();
+    const companyState = settings?.state || 'West Bengal';
+    const isSameState = customerState.trim().toLowerCase() === companyState.trim().toLowerCase();
+
     // Update allowed invoice fields (items handled separately via invoice_items table)
-    const allowedUpdates = ['status', 'notes', 'due_date', 'grand_total', 'subtotal', 'total_discount', 'discount_mode', 'discount_value', 'balance_due', 'total_cgst', 'total_sgst', 'total_tax', 'taxable_amount'];
+    const allowedUpdates = [
+      'status',
+      'notes',
+      'due_date',
+      'grand_total',
+      'subtotal',
+      'total_discount',
+      'discount_mode',
+      'discount_value',
+      'balance_due',
+      'total_cgst',
+      'total_sgst',
+      'total_igst',
+      'total_tax',
+      'taxable_amount'
+    ];
     const filteredUpdates: Record<string, unknown> = {};
 
     allowedUpdates.forEach(field => {
@@ -181,7 +217,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     // Update invoice_items if items are provided
     if (updates.items && Array.isArray(updates.items) && updates.items.length > 0) {
       // Delete existing items
-      await supabaseAdmin.from('invoice_items').delete().eq('invoice_id', params.id);
+      await supabaseAdmin.from('invoice_items').delete().eq('invoice_id', id);
 
       // Compute per-item discount and re-insert
       const totalDiscount = Number(updates.total_discount || 0);
@@ -193,27 +229,46 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         const qty = Number(item.quantity || 0);
         const unitPrice = Number(item.unit_price || 0);
         const grossAmount = qty * unitPrice;
-        const itemDiscount = grossSubtotal > 0 && totalDiscount > 0
-          ? Math.round((grossAmount / grossSubtotal) * totalDiscount * 100) / 100
+        
+        // Item-level discount percentage
+        const itemDiscPct = Number(item.discount_percentage || 0);
+        const itemDiscountAmount = (grossAmount * itemDiscPct) / 100;
+        
+        // Proportional order discount share
+        const orderDiscShare = grossSubtotal > 0 && totalDiscount > 0
+          ? (grossAmount / grossSubtotal) * totalDiscount
           : 0;
-        const taxableAmount = Math.max(0, grossAmount - itemDiscount);
-        const gstRate = Number(item.gst_rate || 0);
-        const taxAmount = Math.round((taxableAmount * gstRate / 100) * 100) / 100;
-        const cgstAmount = Math.round((taxAmount / 2) * 100) / 100;
-        const sgstAmount = Math.round((taxAmount - cgstAmount) * 100) / 100;
+
+        const totalItemDiscount = Math.round((itemDiscountAmount + orderDiscShare) * 100) / 100;
+        const taxableAmount = Math.max(0, Math.round((grossAmount - totalItemDiscount) * 100) / 100);
+        
+        const gstRate = Number(item.gst_rate ?? 18);
+        const taxAmount = Math.round(((taxableAmount * gstRate) / 100) * 100) / 100;
+        
+        let cgstAmount = 0;
+        let sgstAmount = 0;
+        let igstAmount = 0;
+
+        if (isSameState) {
+          cgstAmount = Math.round((taxAmount / 2) * 100) / 100;
+          sgstAmount = Math.round((taxAmount - cgstAmount) * 100) / 100;
+        } else {
+          igstAmount = taxAmount;
+        }
+
         return {
-          invoice_id: params.id,
+          invoice_id: id,
           product_id: item.product_id || null,
           product_name: item.product_name || '-',
           hsn_code: item.hsn_code || '',
           quantity: qty,
           unit_price: unitPrice,
-          discount_percentage: discountMode === 'percentage' ? discountValue : 0,
+          discount_percentage: itemDiscPct,
           taxable_amount: taxableAmount,
           gst_rate: gstRate,
           cgst_amount: cgstAmount,
           sgst_amount: sgstAmount,
-          igst_amount: 0,
+          igst_amount: igstAmount,
           total_amount: Math.round((taxableAmount + taxAmount) * 100) / 100,
         };
       });

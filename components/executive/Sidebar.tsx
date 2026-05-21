@@ -14,15 +14,17 @@ import {
   X, 
   ChevronLeft,
   ChevronRight,
-  Leaf
+  Leaf,
+  MapPin
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 const navigation = [
   { name: 'Dashboard', href: '/executive/dashboard', icon: LayoutDashboard },
   { name: 'Orders', href: '/executive/orders', icon: ClipboardCheck },
+  { name: 'Field Sales', href: '/executive/field-sales', icon: MapPin },
   { name: 'Team', href: '/executive/team', icon: Users },
-  { name: 'Distributor Stock', href: '/executive/stock', icon: Package },
+  { name: 'Products & Inventory', href: '/executive/stock', icon: Package },
   { name: 'Distributors', href: '/executive/distributors', icon: UserCheck },
   { name: 'Invoicing', href: '/executive/invoicing', icon: FileText },
 ];

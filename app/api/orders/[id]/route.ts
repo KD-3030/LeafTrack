@@ -285,6 +285,43 @@ export async function PUT(
       );
     }
 
+    if (body.items && Array.isArray(body.items)) {
+      // Delete existing order items
+      const { error: deleteErr } = await supabaseAdmin
+        .from('order_items')
+        .delete()
+        .eq('order_id', id);
+        
+      if (deleteErr) {
+        return NextResponse.json(
+          { error: 'Failed to clear old order items', details: deleteErr.message },
+          { status: 500 }
+        );
+      }
+
+      // Insert new order items
+      const itemRows = body.items.map((item: any) => ({
+        order_id: id,
+        product_id: item.product_id || null,
+        product_name: item.product_name,
+        quantity: item.quantity,
+        unit: item.unit || 'kg',
+        price_per_unit: item.price_per_unit,
+        total_price: item.total_price,
+      }));
+
+      const { error: insertErr } = await supabaseAdmin
+        .from('order_items')
+        .insert(itemRows);
+
+      if (insertErr) {
+        return NextResponse.json(
+          { error: 'Failed to insert new order items', details: insertErr.message },
+          { status: 500 }
+        );
+      }
+    }
+
     return NextResponse.json({
       success: true,
       message: roleId === 'admin'

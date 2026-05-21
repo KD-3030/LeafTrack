@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase-server';
 import { requireAuth } from '@/lib/authMiddleware';
 import { withId, withIds } from '@/lib/supabase-helpers';
@@ -173,41 +173,93 @@ export async function POST(request: NextRequest) {
       // Get company settings
       const { data: settings } = await supabaseAdmin.from('company_settings').select('*').limit(1).single();
 
-      // Build invoice items from order_items
-      let subtotal = 0, totalTax = 0, totalCgst = 0, totalSgst = 0;
-      const invoiceItems = [];
+      // Build invoice items from order_items with proper pre-tax discounts and GST splits
+      const customerState = customer?.state || 'West Bengal';
+      const companyState = settings?.state || 'West Bengal';
+      const isSameState = customerState.trim().toLowerCase() === companyState.trim().toLowerCase();
+
+      let totalGrossSubtotal = 0;
+      const enrichedOrderItems = [];
 
       for (const item of (order.order_items || [])) {
         const { data: product } = await supabaseAdmin.from('products').select('*').eq('id', item.product_id).single();
         const unitPrice = item.price_per_unit || product?.manufacturing_cost || 0;
         const qty = item.quantity || 1;
-        const taxableAmount = unitPrice * qty;
+        const grossAmount = qty * unitPrice;
+        // In the modified workflow, we can get GST rate and HSN code from product, or default them.
         const gstRate = product?.gst_rate || 18;
-        const gstAmount = (taxableAmount * gstRate) / 100;
-        const itemTotal = taxableAmount + gstAmount;
+        const hsnCode = product?.hsn_code || '0000';
+        
+        totalGrossSubtotal += grossAmount;
 
-        subtotal += taxableAmount;
-        totalTax += gstAmount;
-        totalCgst += gstAmount / 2;
-        totalSgst += gstAmount / 2;
+        enrichedOrderItems.push({
+          item,
+          product,
+          unitPrice,
+          qty,
+          grossAmount,
+          gstRate,
+          hsnCode,
+        });
+      }
+
+      const orderDiscount = order.discount_amount || 0;
+      let finalTaxableSubtotal = 0;
+      let finalTotalTax = 0;
+      let finalCgst = 0;
+      let finalSgst = 0;
+      let finalIgst = 0;
+
+      const invoiceItems = [];
+
+      for (const enriched of enrichedOrderItems) {
+        const orderDiscShare = totalGrossSubtotal > 0
+          ? (enriched.grossAmount / totalGrossSubtotal) * orderDiscount
+          : 0;
+
+        const totalItemDiscount = Math.round(orderDiscShare * 100) / 100;
+        const taxableAmount = Math.max(0, Math.round((enriched.grossAmount - totalItemDiscount) * 100) / 100);
+        
+        const taxAmount = Math.round(((taxableAmount * enriched.gstRate) / 100) * 100) / 100;
+        
+        let cgst = 0;
+        let sgst = 0;
+        let igst = 0;
+
+        if (isSameState) {
+          cgst = Math.round((taxAmount / 2) * 100) / 100;
+          sgst = Math.round((taxAmount - cgst) * 100) / 100;
+        } else {
+          igst = taxAmount;
+        }
+
+        const itemTotal = Math.round((taxableAmount + taxAmount) * 100) / 100;
+
+        finalTaxableSubtotal += taxableAmount;
+        finalTotalTax += taxAmount;
+        finalCgst += cgst;
+        finalSgst += sgst;
+        finalIgst += igst;
+
+        const itemDiscPct = enriched.grossAmount > 0 ? (totalItemDiscount / enriched.grossAmount) * 100 : 0;
 
         invoiceItems.push({
-          product_id: product?.id || item.product_id,
-          product_name: item.product_name || product?.name || 'Unknown',
-          hsn_code: product?.hsn_code || '0000',
-          quantity: qty,
-          unit_price: unitPrice,
-          discount_percentage: 0,
+          product_id: enriched.product?.id || enriched.item.product_id,
+          product_name: enriched.item.product_name || enriched.product?.name || 'Unknown',
+          hsn_code: enriched.hsnCode,
+          quantity: enriched.qty,
+          unit_price: enriched.unitPrice,
+          discount_percentage: Math.round(itemDiscPct * 100) / 100,
           taxable_amount: taxableAmount,
-          gst_rate: gstRate,
-          cgst_amount: gstAmount / 2,
-          sgst_amount: gstAmount / 2,
-          igst_amount: 0,
+          gst_rate: enriched.gstRate,
+          cgst_amount: cgst,
+          sgst_amount: sgst,
+          igst_amount: igst,
           total_amount: itemTotal,
         });
       }
 
-      const grandTotal = subtotal + totalTax;
+      const grandTotal = Math.round((finalTaxableSubtotal + finalTotalTax) * 100) / 100;
 
       // Generate invoice number — find max trailing number across ALL invoice numbers
       const { data: allInvoices } = await supabaseAdmin.from('invoices').select('invoice_number');
@@ -242,12 +294,12 @@ export async function POST(request: NextRequest) {
         company_gstin: companyGstin,
         company_phone: companyPhone,
         company_email: companyEmail,
-        subtotal,
-        taxable_amount: subtotal,
-        total_cgst: totalCgst,
-        total_sgst: totalSgst,
-        total_igst: 0,
-        total_tax: totalTax,
+        subtotal: finalTaxableSubtotal,
+        taxable_amount: finalTaxableSubtotal,
+        total_cgst: finalCgst,
+        total_sgst: finalSgst,
+        total_igst: finalIgst,
+        total_tax: finalTotalTax,
         grand_total: grandTotal,
         balance_due: grandTotal,
         terms_and_conditions: 'Payment terms: Net 30 days',

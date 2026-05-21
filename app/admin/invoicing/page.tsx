@@ -39,6 +39,7 @@ interface Invoice {
   payment_status: 'Pending' | 'Partial' | 'Paid';
   payment_date?: string;
   notes?: string;
+  customer_state?: string;
   createdAt: string;
   updatedAt: string;
   items: { 
@@ -172,12 +173,210 @@ export default function InvoicingPage() {
   const [itemQuantity, setItemQuantity] = useState<string>('1');
   const [itemUnitPrice, setItemUnitPrice] = useState<string>('');
   const [gstApplicationMode, setGstApplicationMode] = useState<'applied' | 'not_applied' | 'inclusive'>('applied');
+  const [companyState, setCompanyState] = useState<string>('West Bengal');
+
+  const fetchCompanySettings = async () => {
+    try {
+      const token = localStorage.getItem('leaftrack_token');
+      const response = await fetch('/api/settings/company', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (data.success && data.settings?.state) {
+        setCompanyState(data.settings.state);
+      }
+    } catch (error) {
+      console.error('Error fetching company settings:', error);
+    }
+  };
+
+  const recalculateInvoiceTotals = (
+    itemsList: any[],
+    custState: string,
+    compState: string,
+    orderDiscountMode: 'amount' | 'percentage',
+    orderDiscountValue: number
+  ) => {
+    let totalGrossSubtotal = 0;
+    
+    // Calculate raw gross amounts first
+    const itemsWithGross = itemsList.map(item => {
+      const qty = Number(item.quantity) || 0;
+      const price = Number(item.unit_price) || 0;
+      const grossAmount = qty * price;
+      
+      const itemDiscPct = Number(item.discount_percentage || 0);
+      const itemDiscountAmount = (grossAmount * itemDiscPct) / 100;
+      
+      totalGrossSubtotal += grossAmount;
+      return {
+        ...item,
+        grossAmount,
+        itemDiscountAmount,
+      };
+    });
+
+    const orderDiscount = orderDiscountMode === 'percentage'
+      ? (totalGrossSubtotal * orderDiscountValue) / 100
+      : orderDiscountValue;
+
+    let subtotal = 0;
+    let totalCgst = 0;
+    let totalSgst = 0;
+    let totalIgst = 0;
+    let totalTax = 0;
+
+    const isSameState = custState.trim().toLowerCase() === compState.trim().toLowerCase();
+
+    const updatedItems = itemsWithGross.map(item => {
+      // Proportional distribution of overall order discount
+      const orderDiscShare = totalGrossSubtotal > 0
+        ? (item.grossAmount / totalGrossSubtotal) * orderDiscount
+        : 0;
+
+      const totalItemDiscount = Math.round((item.itemDiscountAmount + orderDiscShare) * 100) / 100;
+      const taxableAmount = Math.max(0, Math.round((item.grossAmount - totalItemDiscount) * 100) / 100);
+      
+      const gstRate = item.gst_rate ?? 18;
+      const taxAmount = Math.round(((taxableAmount * gstRate) / 100) * 100) / 100;
+      
+      let cgst = 0;
+      let sgst = 0;
+      let igst = 0;
+
+      if (isSameState) {
+        cgst = Math.round((taxAmount / 2) * 100) / 100;
+        sgst = Math.round((taxAmount - cgst) * 100) / 100;
+      } else {
+        igst = taxAmount;
+      }
+
+      const totalItemPrice = Math.round((taxableAmount + taxAmount) * 100) / 100;
+
+      subtotal += taxableAmount;
+      totalCgst += cgst;
+      totalSgst += sgst;
+      totalIgst += igst;
+      totalTax += taxAmount;
+
+      return {
+        ...item,
+        taxable_amount: taxableAmount,
+        tax_amount: taxAmount,
+        cgst_amount: cgst,
+        sgst_amount: sgst,
+        igst_amount: igst,
+        total_amount: totalItemPrice,
+      };
+    });
+
+    const grandTotal = Math.round((subtotal + totalTax) * 100) / 100;
+
+    return {
+      updatedItems,
+      subtotal,
+      totalCgst,
+      totalSgst,
+      totalIgst,
+      totalTax,
+      totalDiscount: orderDiscount,
+      grandTotal,
+    };
+  };
+
+  const updateInvoiceItemsAndRecalculate = (
+    newItems: any[], 
+    discountVal = editDiscountValue, 
+    mode = editDiscountMode, 
+    inv = selectedInvoice
+  ) => {
+    if (!inv) return;
+    const custState = inv.customer_state || 'West Bengal';
+    const calc = recalculateInvoiceTotals(newItems, custState, companyState, mode, discountVal);
+    setSelectedInvoice({
+      ...inv,
+      items: calc.updatedItems,
+      subtotal: calc.subtotal,
+      taxable_amount: calc.subtotal,
+      total_cgst: calc.totalCgst,
+      total_sgst: calc.totalSgst,
+      total_igst: calc.totalIgst,
+      total_tax: calc.totalTax,
+      total_discount: calc.totalDiscount,
+      discount_value: discountVal,
+      discount_mode: mode,
+      grand_total: calc.grandTotal,
+      balance_due: Math.max(0, calc.grandTotal - inv.paid_amount),
+    });
+  };
+
+  const handleInvoiceItemChange = (index: number, field: string, value: any) => {
+    if (!selectedInvoice) return;
+    const newItems = [...selectedInvoice.items];
+    if (field === 'quantity' || field === 'unit_price' || field === 'gst_rate' || field === 'discount_percentage') {
+      newItems[index] = { ...newItems[index], [field]: Number(value) || 0 };
+    } else {
+      newItems[index] = { ...newItems[index], [field]: value };
+    }
+    updateInvoiceItemsAndRecalculate(newItems);
+  };
+
+  const addInvoiceItem = () => {
+    if (!selectedInvoice) return;
+    const newItem: any = {
+      product_id: '',
+      product_name: '',
+      unit: 'kg',
+      quantity: 1,
+      unit_price: 0,
+      gst_rate: 18,
+      discount_percentage: 0,
+      hsn_code: '0000',
+      taxable_amount: 0,
+      total_amount: 0,
+    };
+    updateInvoiceItemsAndRecalculate([...selectedInvoice.items, newItem]);
+  };
+
+  const removeInvoiceItem = (index: number) => {
+    if (!selectedInvoice) return;
+    if (selectedInvoice.items.length === 1) {
+      toast({
+        title: "Error",
+        description: "Invoice must have at least one item",
+        variant: "destructive",
+      });
+      return;
+    }
+    const filtered = selectedInvoice.items.filter((_, i) => i !== index);
+    updateInvoiceItemsAndRecalculate(filtered);
+  };
+
+  const handleInvoiceProductSelect = (index: number, productId: string) => {
+    if (!selectedInvoice) return;
+    const product = products.find(p => p._id === productId);
+    if (product) {
+      const newItems = [...selectedInvoice.items];
+      newItems[index] = {
+        ...newItems[index],
+        product_id: productId,
+        product_name: product.name,
+        unit: 'kg',
+        unit_price: product.price || 0,
+        hsn_code: product.hsn_code || '0000',
+        gst_rate: product.gst_rate || 18,
+        discount_percentage: 0,
+      };
+      updateInvoiceItemsAndRecalculate(newItems);
+    }
+  };
 
   useEffect(() => {
     loadInvoices(currentPage, itemsPerPage);
     loadApprovedOrders();
     loadCustomers();
     loadProducts();
+    fetchCompanySettings();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, itemsPerPage]);
 
@@ -298,7 +497,7 @@ export default function InvoicingPage() {
   const loadProducts = async () => {
     try {
       const token = localStorage.getItem('leaftrack_token');
-      const response = await fetch('/api/products', {
+      const response = await fetch('/api/products?limit=1000', {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -728,21 +927,37 @@ export default function InvoicingPage() {
           ),
         );
 
-        // Ensure all items have taxable_amount calculated
+        const custState = data.invoice.customer_state || customers.find(c => c._id === data.invoice.customer_id || c._id === data.invoice.distributor_id)?.address || 'West Bengal';
+
+        // Ensure all items are properly initialized and enriched
+        const initialItems = data.invoice.items.map((item: any) => {
+          const product = products.find(p => p._id === item.product_id);
+          return {
+            ...item,
+            discount_percentage: item.discount_percentage ?? 0,
+            hsn_code: item.hsn_code || product?.hsn_code || '0000',
+            unit_price: item.unit_price || item.price || product?.price || 0,
+          };
+        });
+
         const invoiceWithCalculatedItems = {
           ...data.invoice,
+          customer_state: custState,
           discount_mode: mode,
           discount_value: value,
           total_discount: data.invoice.total_discount || 0,
-          items: data.invoice.items.map((item: Invoice['items'][0]) => ({
-            ...item,
-            taxable_amount: item.taxable_amount || (item.quantity * item.unit_price) || 0,
-          }))
+          items: initialItems
         };
+
         setEditDiscountMode(mode);
         setEditDiscountValue(value);
         setSelectedInvoice(invoiceWithCalculatedItems);
         setIsEditDialogOpen(true);
+
+        // Run initial calculation to update and sync all split taxes
+        setTimeout(() => {
+          updateInvoiceItemsAndRecalculate(initialItems, value, mode, invoiceWithCalculatedItems);
+        }, 50);
       } else {
         toast({
           title: "Error",
@@ -766,15 +981,6 @@ export default function InvoicingPage() {
     try {
       const token = localStorage.getItem('leaftrack_token');
       
-      const { subtotal, totalTax } = calculateItemTotals(selectedInvoice.items);
-      const totalDiscount = calculateDiscountAmount(subtotal, editDiscountMode, editDiscountValue);
-      const discountedSubtotal = Math.max(0, subtotal - totalDiscount);
-      const adjustedTax = subtotal > 0 ? Math.round((totalTax * (discountedSubtotal / subtotal)) * 100) / 100 : 0;
-      const totalCgst = Math.round((adjustedTax / 2) * 100) / 100;
-      const totalSgst = Math.round((adjustedTax - totalCgst) * 100) / 100;
-      const grandTotal = Math.round((discountedSubtotal + adjustedTax) * 100) / 100;
-      const balanceDue = Math.max(0, grandTotal - selectedInvoice.paid_amount);
-      
       const response = await fetch(`/api/invoices/${selectedInvoice._id}`, {
         method: 'PUT',
         headers: {
@@ -786,16 +992,17 @@ export default function InvoicingPage() {
           due_date: selectedInvoice.due_date,
           notes: selectedInvoice.notes,
           items: selectedInvoice.items,
-          subtotal: discountedSubtotal,
-          taxable_amount: discountedSubtotal,
-          total_discount: totalDiscount,
-          discount_mode: editDiscountMode,
-          discount_value: Math.max(0, editDiscountValue || 0),
-          grand_total: grandTotal,
-          balance_due: balanceDue,
-          total_cgst: totalCgst,
-          total_sgst: totalSgst,
-          total_tax: adjustedTax,
+          subtotal: selectedInvoice.subtotal,
+          taxable_amount: selectedInvoice.subtotal,
+          total_discount: selectedInvoice.total_discount,
+          discount_mode: selectedInvoice.discount_mode,
+          discount_value: selectedInvoice.discount_value,
+          grand_total: selectedInvoice.grand_total,
+          balance_due: selectedInvoice.balance_due,
+          total_cgst: selectedInvoice.total_cgst,
+          total_sgst: selectedInvoice.total_sgst,
+          total_igst: selectedInvoice.total_igst,
+          total_tax: selectedInvoice.total_tax,
         }),
       });
 
@@ -1382,8 +1589,14 @@ export default function InvoicingPage() {
                     <div className="space-y-1">
                       <p><strong>Date:</strong> {new Date(selectedInvoice.invoice_date).toLocaleDateString()}</p>
                       <p><strong>Due Date:</strong> {new Date(selectedInvoice.due_date).toLocaleDateString()}</p>
-                      <p><strong>Status:</strong> {getStatusBadge(selectedInvoice.status)}</p>
-                      <p><strong>Payment:</strong> {getPaymentStatusBadge(selectedInvoice.payment_status)}</p>
+                      <div className="flex items-center gap-2 text-sm text-gray-700">
+                        <strong>Status:</strong>
+                        {getStatusBadge(selectedInvoice.status)}
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-gray-700">
+                        <strong>Payment:</strong>
+                        {getPaymentStatusBadge(selectedInvoice.payment_status)}
+                      </div>
                       {selectedInvoice.payment_date && (
                         <p><strong>Payment Date:</strong> {new Date(selectedInvoice.payment_date).toLocaleDateString()}</p>
                       )}
@@ -1985,268 +2198,336 @@ export default function InvoicingPage() {
                 </Card>
 
                 {/* Invoice Items */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm">Invoice Items</CardTitle>
+                <Card className="border border-gray-200 shadow-sm overflow-hidden">
+                  <CardHeader className="bg-slate-50 border-b border-gray-200 py-3">
+                    <CardTitle className="text-sm font-semibold text-slate-800">Invoice Items</CardTitle>
                   </CardHeader>
-                  <CardContent>
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Product</TableHead>
-                          <TableHead>HSN</TableHead>
-                          <TableHead>Qty</TableHead>
-                          <TableHead>Unit Price</TableHead>
-                          <TableHead>GST %</TableHead>
-                          <TableHead className="text-right">Total</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {selectedInvoice.items.map((item, index) => (
-                          <TableRow key={index}>
-                            <TableCell>
-                              <Input
-                                value={item.product_name || ''}
-                                onChange={(e) => {
-                                  const updatedItems = [...selectedInvoice.items];
-                                  updatedItems[index].product_name = e.target.value;
-                                  setSelectedInvoice({ ...selectedInvoice, items: updatedItems });
-                                }}
-                                placeholder="Product name"
-                                className="w-40"
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Input
-                                value={item.hsn_code || ''}
-                                onChange={(e) => {
-                                  const updatedItems = [...selectedInvoice.items];
-                                  updatedItems[index].hsn_code = e.target.value;
-                                  setSelectedInvoice({ ...selectedInvoice, items: updatedItems });
-                                }}
-                                placeholder="HSN code"
-                                className="w-24"
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Input
-                                type="number"
-                                value={item.quantity ?? ''}
-                                onChange={(e) => {
-                                  const updatedItems = [...selectedInvoice.items];
-                                  const qty = parseFloat(e.target.value) || 0;
-                                  updatedItems[index].quantity = qty;
-                                  const taxableAmount = qty * item.unit_price;
-                                  const taxAmount = (taxableAmount * item.gst_rate) / 100;
-                                  updatedItems[index].taxable_amount = taxableAmount;
-                                  updatedItems[index].total_amount = taxableAmount + taxAmount;
-                                  
-                                  // Recalculate grand total (discount before tax)
-                                  const { discount, grandTotal: newGrandTotal } = recalcWithDiscount(updatedItems, editDiscountMode, editDiscountValue);
-                                  setSelectedInvoice({ 
-                                    ...selectedInvoice, 
-                                    items: updatedItems,
-                                    total_discount: discount,
-                                    grand_total: newGrandTotal,
-                                    balance_due: newGrandTotal - selectedInvoice.paid_amount
-                                  });
-                                }}
-                                placeholder="Enter quantity"
-                                className="w-20"
-                                min="0"
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Input
-                                type="number"
-                                value={item.unit_price ?? ''}
-                                onChange={(e) => {
-                                  const updatedItems = [...selectedInvoice.items];
-                                  const price = parseFloat(e.target.value) || 0;
-                                  updatedItems[index].unit_price = price;
-                                  const taxableAmount = item.quantity * price;
-                                  const taxAmount = (taxableAmount * item.gst_rate) / 100;
-                                  updatedItems[index].taxable_amount = taxableAmount;
-                                  updatedItems[index].total_amount = taxableAmount + taxAmount;
-                                  
-                                  // Recalculate grand total (discount before tax)
-                                  const { discount, grandTotal: newGrandTotal } = recalcWithDiscount(updatedItems, editDiscountMode, editDiscountValue);
-                                  setSelectedInvoice({ 
-                                    ...selectedInvoice, 
-                                    items: updatedItems,
-                                    total_discount: discount,
-                                    grand_total: newGrandTotal,
-                                    balance_due: newGrandTotal - selectedInvoice.paid_amount
-                                  });
-                                }}
-                                placeholder="Enter price"
-                                className="w-24"
-                                min="0"
-                                step="0.01"
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Input
-                                type="number"
-                                value={item.gst_rate ?? ''}
-                                onChange={(e) => {
-                                  const updatedItems = [...selectedInvoice.items];
-                                  const gstRate = parseFloat(e.target.value) || 0;
-                                  updatedItems[index].gst_rate = gstRate;
-                                  const taxableAmount = item.quantity * item.unit_price;
-                                  const taxAmount = (taxableAmount * gstRate) / 100;
-                                  updatedItems[index].taxable_amount = taxableAmount;
-                                  updatedItems[index].total_amount = taxableAmount + taxAmount;
-                                  
-                                  // Recalculate grand total (discount before tax)
-                                  const { discount, grandTotal: newGrandTotal } = recalcWithDiscount(updatedItems, editDiscountMode, editDiscountValue);
-                                  setSelectedInvoice({ 
-                                    ...selectedInvoice, 
-                                    items: updatedItems,
-                                    total_discount: discount,
-                                    grand_total: newGrandTotal,
-                                    balance_due: newGrandTotal - selectedInvoice.paid_amount
-                                  });
-                                }}
-                                placeholder="Enter GST rate"
-                                className="w-20"
-                                min="0"
-                                max="100"
-                              />
-                            </TableCell>
-                            <TableCell className="text-right font-medium">
-                              ₹{item.total_amount.toFixed(2)}
-                            </TableCell>
+                  <CardContent className="p-0">
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-slate-50/50">
+                            <TableHead className="font-semibold text-slate-700">Product</TableHead>
+                            <TableHead className="font-semibold text-slate-700">HSN</TableHead>
+                            <TableHead className="font-semibold text-slate-700">Unit</TableHead>
+                            <TableHead className="font-semibold text-slate-700 w-20">Qty</TableHead>
+                            <TableHead className="font-semibold text-slate-700 w-24">Unit Price</TableHead>
+                            <TableHead className="font-semibold text-slate-700 w-20">Item Disc (%)</TableHead>
+                            <TableHead className="font-semibold text-slate-700 w-20">GST %</TableHead>
+                            <TableHead className="text-right font-semibold text-slate-700">Total</TableHead>
+                            <TableHead className="w-10 text-center font-semibold text-slate-700"></TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                    <div className="mt-4 flex justify-end">
-                      <div className="w-64 space-y-2">
-                        <div className="space-y-1">
-                          <Label className="text-xs text-gray-600">Discount Type</Label>
-                          <Select
-                            value={editDiscountMode}
-                            onValueChange={(value: 'amount' | 'percentage') => {
-                              const nextMode = value;
-                              setEditDiscountMode(nextMode);
-                              const { discount, grandTotal: newGrandTotal } = recalcWithDiscount(selectedInvoice.items, nextMode, editDiscountValue);
-                              setSelectedInvoice({
-                                ...selectedInvoice,
-                                total_discount: discount,
-                                discount_mode: nextMode,
-                                grand_total: newGrandTotal,
-                                balance_due: Math.max(0, newGrandTotal - selectedInvoice.paid_amount),
-                              });
-                            }}
-                          >
-                            <SelectTrigger className="h-8">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="amount">Amount (₹)</SelectItem>
-                              <SelectItem value="percentage">Percentage (%)</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-1">
-                          <Label htmlFor="edit_discount" className="text-xs text-gray-600">
-                            Discount Value ({editDiscountMode === 'percentage' ? '%' : '₹'})
-                          </Label>
-                          <Input
-                            id="edit_discount"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={editDiscountValue}
-                            onChange={(e) => {
-                              const nextValue = Math.max(0, parseFloat(e.target.value) || 0);
-                              setEditDiscountValue(nextValue);
-                              const { discount, grandTotal: newGrandTotal } = recalcWithDiscount(selectedInvoice.items, editDiscountMode, nextValue);
-                              setSelectedInvoice({
-                                ...selectedInvoice,
-                                total_discount: discount,
-                                discount_value: nextValue,
-                                grand_total: newGrandTotal,
-                                balance_due: Math.max(0, newGrandTotal - selectedInvoice.paid_amount),
-                              });
-                            }}
-                            onFocus={(e) => { if (parseFloat(e.target.value) === 0) e.target.value = ''; }}
-                            onBlur={(e) => { if (e.target.value === '') { setEditDiscountValue(0); const { discount, grandTotal: newGrandTotal } = recalcWithDiscount(selectedInvoice.items, editDiscountMode, 0); setSelectedInvoice({ ...selectedInvoice, total_discount: discount, discount_value: 0, grand_total: newGrandTotal, balance_due: Math.max(0, newGrandTotal - selectedInvoice.paid_amount) }); } }}
-                            className="h-8"
-                          />
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span>Subtotal:</span>
-                          <span>₹{calculateItemTotals(selectedInvoice.items).subtotal.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span>Total Tax:</span>
-                          <span>₹{calculateItemTotals(selectedInvoice.items).totalTax.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between text-sm text-red-600">
-                          <span>Discount:</span>
-                          <span>-₹{(selectedInvoice.total_discount || 0).toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between font-bold text-lg border-t pt-2">
-                          <span>Grand Total:</span>
-                          <span>₹{selectedInvoice.grand_total.toLocaleString()}</span>
-                        </div>
-                        <div className="flex justify-between text-sm text-red-600">
-                          <span>Balance Due:</span>
-                          <span>₹{selectedInvoice.balance_due.toLocaleString()}</span>
-                        </div>
-                      </div>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedInvoice.items.map((item, index) => (
+                            <TableRow key={index} className="hover:bg-slate-50/40 transition-colors">
+                              <TableCell className="align-middle">
+                                <Select
+                                  value={item.product_id || ''}
+                                  onValueChange={(value) => handleInvoiceProductSelect(index, value)}
+                                >
+                                  <SelectTrigger className="w-[180px] h-9">
+                                    <SelectValue placeholder="Select product" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {products.map((p) => (
+                                      <SelectItem key={p._id} value={p._id}>
+                                        {p.name}
+                                      </SelectItem>
+                                    ))}
+                                    {item.product_id && !products.some(p => p._id === item.product_id) && (
+                                      <SelectItem key={item.product_id} value={item.product_id}>
+                                        {item.product_name || 'Selected Product'}
+                                      </SelectItem>
+                                    )}
+                                  </SelectContent>
+                                </Select>
+                              </TableCell>
+                              <TableCell className="align-middle">
+                                <Input
+                                  value={item.hsn_code || ''}
+                                  onChange={(e) => handleInvoiceItemChange(index, 'hsn_code', e.target.value)}
+                                  placeholder="HSN code"
+                                  className="w-20 h-9"
+                                />
+                              </TableCell>
+                              <TableCell className="align-middle">
+                                <Select
+                                  value={item.unit || 'kg'}
+                                  onValueChange={(value) => handleInvoiceItemChange(index, 'unit', value)}
+                                >
+                                  <SelectTrigger className="w-16 h-9">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="kg">KG</SelectItem>
+                                    <SelectItem value="box">Box</SelectItem>
+                                    <SelectItem value="bag">Bag</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </TableCell>
+                              <TableCell className="align-middle">
+                                <Input
+                                  type="number"
+                                  value={item.quantity ?? ''}
+                                  onChange={(e) => handleInvoiceItemChange(index, 'quantity', e.target.value)}
+                                  placeholder="0"
+                                  className="w-20 h-9"
+                                  min="0"
+                                />
+                              </TableCell>
+                              <TableCell className="align-middle">
+                                <div className="relative">
+                                  <span className="absolute left-2 top-2.5 text-xs text-gray-500">₹</span>
+                                  <Input
+                                    type="number"
+                                    value={item.unit_price ?? ''}
+                                    onChange={(e) => handleInvoiceItemChange(index, 'unit_price', e.target.value)}
+                                    placeholder="0.00"
+                                    className="pl-5 w-24 h-9"
+                                    min="0"
+                                    step="0.01"
+                                  />
+                                </div>
+                              </TableCell>
+                              <TableCell className="align-middle">
+                                <Input
+                                  type="number"
+                                  value={item.discount_percentage ?? ''}
+                                  onChange={(e) => handleInvoiceItemChange(index, 'discount_percentage', e.target.value)}
+                                  placeholder="0"
+                                  className="w-16 h-9"
+                                  min="0"
+                                  max="100"
+                                />
+                              </TableCell>
+                              <TableCell className="align-middle">
+                                <Select
+                                  value={String(item.gst_rate ?? 18)}
+                                  onValueChange={(value) => handleInvoiceItemChange(index, 'gst_rate', Number(value))}
+                                >
+                                  <SelectTrigger className="w-16 h-9">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="0">0%</SelectItem>
+                                    <SelectItem value="5">5%</SelectItem>
+                                    <SelectItem value="12">12%</SelectItem>
+                                    <SelectItem value="18">18%</SelectItem>
+                                    <SelectItem value="28">28%</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </TableCell>
+                              <TableCell className="text-right font-medium align-middle">
+                                ₹{(item.total_amount || 0).toFixed(2)}
+                              </TableCell>
+                              <TableCell className="text-center align-middle">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => removeInvoiceItem(index)}
+                                  className="h-8 w-8 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                    <div className="p-3 bg-slate-50 border-t border-gray-200">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="flex items-center gap-1 text-blue-600 border-blue-200 hover:bg-blue-50 font-medium"
+                        onClick={addInvoiceItem}
+                      >
+                        <Plus className="h-4 w-4" /> Add Item
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
 
-                {/* Other Editable Fields */}
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="edit_status">Invoice Status</Label>
-                    <Select
-                      value={selectedInvoice.status}
-                      onValueChange={(value) => 
-                        setSelectedInvoice({ ...selectedInvoice, status: value as Invoice['status'] })
-                      }
-                    >
-                      <SelectTrigger id="edit_status">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Draft">Draft</SelectItem>
-                        <SelectItem value="Sent">Sent</SelectItem>
-                        <SelectItem value="Paid">Paid</SelectItem>
-                        <SelectItem value="Overdue">Overdue</SelectItem>
-                        <SelectItem value="Cancelled">Cancelled</SelectItem>
-                      </SelectContent>
-                    </Select>
+                {/* Pricing Summary and Settings Layout */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Settings column */}
+                  <div className="space-y-4">
+                    <Card className="border border-gray-200 shadow-sm">
+                      <CardHeader className="py-3 bg-slate-50 border-b border-gray-200">
+                        <CardTitle className="text-sm font-semibold text-slate-800">Order Discount & Settings</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4 pt-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <Label className="text-xs font-semibold text-gray-600">Discount Type</Label>
+                            <Select
+                              value={editDiscountMode}
+                              onValueChange={(value: 'amount' | 'percentage') => {
+                                setEditDiscountMode(value);
+                                updateInvoiceItemsAndRecalculate(selectedInvoice.items, editDiscountValue, value);
+                              }}
+                            >
+                              <SelectTrigger className="h-9">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="amount">Amount (₹)</SelectItem>
+                                <SelectItem value="percentage">Percentage (%)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor="edit_discount" className="text-xs font-semibold text-gray-600">
+                              Discount Value ({editDiscountMode === 'percentage' ? '%' : '₹'})
+                            </Label>
+                            <Input
+                              id="edit_discount"
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={editDiscountValue}
+                              onChange={(e) => {
+                                const nextValue = Math.max(0, parseFloat(e.target.value) || 0);
+                                setEditDiscountValue(nextValue);
+                                updateInvoiceItemsAndRecalculate(selectedInvoice.items, nextValue, editDiscountMode);
+                              }}
+                              onFocus={(e) => { if (parseFloat(e.target.value) === 0) e.target.value = ''; }}
+                              onBlur={(e) => {
+                                if (e.target.value === '') {
+                                  setEditDiscountValue(0);
+                                  updateInvoiceItemsAndRecalculate(selectedInvoice.items, 0, editDiscountMode);
+                                }
+                              }}
+                              className="h-9"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <Label htmlFor="edit_status" className="text-xs font-semibold text-gray-600">Invoice Status</Label>
+                            <Select
+                              value={selectedInvoice.status}
+                              onValueChange={(value) => 
+                                setSelectedInvoice({ ...selectedInvoice, status: value as Invoice['status'] })
+                              }
+                            >
+                              <SelectTrigger id="edit_status" className="h-9">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Draft">Draft</SelectItem>
+                                <SelectItem value="Sent">Sent</SelectItem>
+                                <SelectItem value="Paid">Paid</SelectItem>
+                                <SelectItem value="Overdue">Overdue</SelectItem>
+                                <SelectItem value="Cancelled">Cancelled</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-1">
+                            <Label htmlFor="edit_due_date" className="text-xs font-semibold text-gray-600">Due Date</Label>
+                            <Input
+                              id="edit_due_date"
+                              type="date"
+                              value={new Date(selectedInvoice.due_date).toISOString().split('T')[0]}
+                              onChange={(e) =>
+                                setSelectedInvoice({ ...selectedInvoice, due_date: e.target.value })
+                              }
+                              className="h-9"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <Label htmlFor="edit_notes" className="text-xs font-semibold text-gray-600">Notes</Label>
+                          <Textarea
+                            id="edit_notes"
+                            placeholder="Add notes about this invoice..."
+                            value={selectedInvoice.notes || ''}
+                            onChange={(e) =>
+                              setSelectedInvoice({ ...selectedInvoice, notes: e.target.value })
+                            }
+                            rows={3}
+                            className="resize-none"
+                          />
+                        </div>
+                      </CardContent>
+                    </Card>
                   </div>
 
+                  {/* Summary Box Column */}
                   <div>
-                    <Label htmlFor="edit_due_date">Due Date</Label>
-                    <Input
-                      id="edit_due_date"
-                      type="date"
-                      value={new Date(selectedInvoice.due_date).toISOString().split('T')[0]}
-                      onChange={(e) =>
-                        setSelectedInvoice({ ...selectedInvoice, due_date: e.target.value })
-                      }
-                    />
-                  </div>
+                    <Card className="border border-slate-200 bg-slate-50 shadow-sm overflow-hidden h-full">
+                      <CardHeader className="py-3 bg-slate-100 border-b border-slate-200">
+                        <CardTitle className="text-sm font-semibold text-slate-800">Pricing Summary</CardTitle>
+                      </CardHeader>
+                      <CardContent className="p-4 space-y-2">
+                        {(() => {
+                          const isSameState = (selectedInvoice.customer_state || 'West Bengal').trim().toLowerCase() === companyState.trim().toLowerCase();
+                          const grossSubtotal = selectedInvoice.items.reduce((sum, item) => sum + ((item.quantity || 0) * (item.unit_price || 0)), 0);
+                          
+                          return (
+                            <div className="space-y-3">
+                              <div className="flex justify-between items-center text-sm py-1 border-b border-slate-200/60">
+                                <span className="text-slate-600">Gross Subtotal:</span>
+                                <span className="font-medium text-slate-900">₹{grossSubtotal.toFixed(2)}</span>
+                              </div>
 
-                  <div>
-                    <Label htmlFor="edit_notes">Notes</Label>
-                    <Textarea
-                      id="edit_notes"
-                      placeholder="Add notes about this invoice..."
-                      value={selectedInvoice.notes || ''}
-                      onChange={(e) =>
-                        setSelectedInvoice({ ...selectedInvoice, notes: e.target.value })
-                      }
-                      rows={4}
-                    />
+                              <div className="flex justify-between items-center text-sm py-1 border-b border-slate-200/60 text-red-600">
+                                <span>Pre-tax Order Discount:</span>
+                                <span>-₹{(selectedInvoice.total_discount || 0).toFixed(2)}</span>
+                              </div>
+
+                              <div className="flex justify-between items-center text-sm py-1 border-b border-slate-200/60">
+                                <span className="text-slate-600">Taxable Subtotal:</span>
+                                <span className="font-semibold text-slate-900">₹{(selectedInvoice.subtotal || 0).toFixed(2)}</span>
+                              </div>
+
+                              {isSameState ? (
+                                <>
+                                  <div className="flex justify-between items-center text-sm py-1 border-b border-slate-200/60 text-slate-600">
+                                    <span>CGST Amount:</span>
+                                    <span className="font-medium text-slate-900">₹{(selectedInvoice.total_cgst || 0).toFixed(2)}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center text-sm py-1 border-b border-slate-200/60 text-slate-600">
+                                    <span>SGST Amount:</span>
+                                    <span className="font-medium text-slate-900">₹{(selectedInvoice.total_sgst || 0).toFixed(2)}</span>
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="flex justify-between items-center text-sm py-1 border-b border-slate-200/60 text-slate-600">
+                                  <span>IGST Amount:</span>
+                                  <span className="font-medium text-slate-900">₹{(selectedInvoice.total_igst || 0).toFixed(2)}</span>
+                                </div>
+                              )}
+
+                              <div className="flex justify-between items-center text-sm py-1 border-b border-slate-200/60">
+                                <span className="text-slate-600">Total Tax:</span>
+                                <span className="font-medium text-slate-900">₹{(selectedInvoice.total_tax || 0).toFixed(2)}</span>
+                              </div>
+
+                              <div className="flex justify-between items-center text-base font-bold py-2 border-b border-slate-300">
+                                <span className="text-slate-800">Grand Total:</span>
+                                <span className="text-blue-700">₹{(selectedInvoice.grand_total || 0).toFixed(2)}</span>
+                              </div>
+
+                              <div className="flex justify-between items-center text-sm py-1 border-b border-slate-200/60 text-slate-600">
+                                <span>Paid Amount:</span>
+                                <span className="font-medium text-green-700">₹{(selectedInvoice.paid_amount || 0).toFixed(2)}</span>
+                              </div>
+
+                              <div className="flex justify-between items-center text-base font-bold py-2 bg-red-50 px-3 rounded-lg border border-red-200 text-red-700 mt-2">
+                                <span>Balance Due:</span>
+                                <span>₹{(selectedInvoice.balance_due || 0).toFixed(2)}</span>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </CardContent>
+                    </Card>
                   </div>
                 </div>
 
